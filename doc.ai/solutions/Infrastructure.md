@@ -1812,4 +1812,301 @@ _cronService = new CronService(cronStorePath, async job =>
 
 ---
 
+## 资源文件处理
+
+### 概述
+
+NanoBot.Net 需要处理两类资源文件：
+1. **Workspace 资源文件**：`src/workspace/` 目录下的模板文件（AGENTS.md, SOUL.md, TOOLS.md, USER.md, HEARTBEAT.md, memory/MEMORY.md）
+2. **Skills 资源文件**：`src/skills/` 目录下的内置 Skills（github, weather, summarize, tmux, skill-creator, memory, cron）
+
+这些资源文件需要：
+- 在编译时嵌入程序集（作为嵌入式资源）
+- 在运行时提取到用户的 workspace 目录
+- 支持用户自定义覆盖
+
+### 资源文件嵌入策略
+
+#### 1. 项目文件配置
+
+在 `NanoBot.Infrastructure.csproj` 中配置嵌入式资源：
+
+```xml
+<ItemGroup>
+  <!-- Workspace 资源文件 -->
+  <EmbeddedResource Include="..\workspace\**\*.md">
+    <LogicalName>workspace/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+  </EmbeddedResource>
+  
+  <!-- Skills 资源文件 -->
+  <EmbeddedResource Include="..\skills\**\*.*">
+    <LogicalName>skills/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+  </EmbeddedResource>
+</ItemGroup>
+```
+
+#### 2. 资源加载服务
+
+```csharp
+namespace NanoBot.Infrastructure.Resources;
+
+/// <summary>
+/// 嵌入式资源加载器
+/// </summary>
+public interface IEmbeddedResourceLoader
+{
+    /// <summary>获取所有嵌入的 workspace 资源名称</summary>
+    IReadOnlyList<string> GetWorkspaceResourceNames();
+    
+    /// <summary>获取所有嵌入的 skills 资源名称</summary>
+    IReadOnlyList<string> GetSkillsResourceNames();
+    
+    /// <summary>读取嵌入的资源内容</summary>
+    Task<string?> ReadResourceAsync(string resourceName, CancellationToken cancellationToken = default);
+    
+    /// <summary>提取所有资源到目标目录</summary>
+    Task ExtractAllResourcesAsync(string targetDirectory, CancellationToken cancellationToken = default);
+}
+
+public class EmbeddedResourceLoader : IEmbeddedResourceLoader
+{
+    private readonly Assembly _assembly;
+    private readonly string[] _resourceNames;
+    
+    public EmbeddedResourceLoader()
+    {
+        _assembly = typeof(EmbeddedResourceLoader).Assembly;
+        _resourceNames = _assembly.GetManifestResourceNames();
+    }
+    
+    public IReadOnlyList<string> GetWorkspaceResourceNames()
+    {
+        return _resourceNames
+            .Where(n => n.StartsWith("workspace/"))
+            .ToList()
+            .AsReadOnly();
+    }
+    
+    public IReadOnlyList<string> GetSkillsResourceNames()
+    {
+        return _resourceNames
+            .Where(n => n.StartsWith("skills/"))
+            .ToList()
+            .AsReadOnly();
+    }
+    
+    public async Task<string?> ReadResourceAsync(string resourceName, CancellationToken cancellationToken = default)
+    {
+        var fullName = _resourceNames.FirstOrDefault(n => n.EndsWith(resourceName));
+        if (fullName == null) return null;
+        
+        using var stream = _assembly.GetManifestResourceStream(fullName);
+        if (stream == null) return null;
+        
+        using var reader = new StreamReader(stream);
+        return await reader.ReadToEndAsync(cancellationToken);
+    }
+    
+    public async Task ExtractAllResourcesAsync(string targetDirectory, CancellationToken cancellationToken = default)
+    {
+        foreach (var resourceName in _resourceNames.Where(n => n.StartsWith("workspace/") || n.StartsWith("skills/")))
+        {
+            await ExtractResourceAsync(resourceName, targetDirectory, cancellationToken);
+        }
+    }
+    
+    private async Task ExtractResourceAsync(string resourceName, string targetDirectory, CancellationToken cancellationToken)
+    {
+        var relativePath = resourceName
+            .Replace("workspace/", "workspace/")
+            .Replace("skills/", "skills/");
+        
+        var targetPath = Path.Combine(targetDirectory, relativePath);
+        
+        // 不覆盖已存在的文件（用户自定义优先）
+        if (File.Exists(targetPath)) return;
+        
+        var directory = Path.GetDirectoryName(targetPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+        
+        using var stream = _assembly.GetManifestResourceStream(resourceName);
+        if (stream == null) return;
+        
+        using var fileStream = File.Create(targetPath);
+        await stream.CopyToAsync(fileStream, cancellationToken);
+    }
+}
+```
+
+### Workspace 初始化流程
+
+WorkspaceManager 初始化时需要：
+
+1. **检查 workspace 目录是否存在**
+2. **从嵌入式资源提取默认文件**（如果目标文件不存在）
+3. **保留用户自定义文件**（如果已存在）
+
+```csharp
+public class WorkspaceManager : IWorkspaceManager
+{
+    private readonly IEmbeddedResourceLoader _resourceLoader;
+    
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        if (_initialized) return;
+        
+        var workspacePath = GetWorkspacePath();
+        
+        // 创建目录结构
+        EnsureDirectory(workspacePath);
+        EnsureDirectory(GetMemoryPath());
+        EnsureDirectory(GetSkillsPath());
+        EnsureDirectory(GetSessionsPath());
+        
+        // 从嵌入式资源提取默认文件
+        await ExtractDefaultFilesAsync(cancellationToken);
+        
+        _initialized = true;
+    }
+    
+    private async Task ExtractDefaultFilesAsync(CancellationToken cancellationToken)
+    {
+        // 提取 workspace 资源文件
+        foreach (var resourceName in _resourceLoader.GetWorkspaceResourceNames())
+        {
+            var relativePath = resourceName.Replace("workspace/", "");
+            var targetPath = Path.Combine(GetWorkspacePath(), relativePath);
+            
+            if (!File.Exists(targetPath))
+            {
+                var content = await _resourceLoader.ReadResourceAsync(resourceName, cancellationToken);
+                if (content != null)
+                {
+                    var directory = Path.GetDirectoryName(targetPath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+                    await File.WriteAllTextAsync(targetPath, content, cancellationToken);
+                }
+            }
+        }
+        
+        // 提取内置 Skills
+        foreach (var resourceName in _resourceLoader.GetSkillsResourceNames())
+        {
+            var relativePath = resourceName.Replace("skills/", "");
+            var targetPath = Path.Combine(GetSkillsPath(), relativePath);
+            
+            if (!File.Exists(targetPath))
+            {
+                var content = await _resourceLoader.ReadResourceAsync(resourceName, cancellationToken);
+                if (content != null)
+                {
+                    var directory = Path.GetDirectoryName(targetPath);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+                    await File.WriteAllTextAsync(targetPath, content, cancellationToken);
+                }
+            }
+        }
+    }
+}
+```
+
+### Skills 加载优先级
+
+SkillsLoader 需要支持多源加载，优先级如下：
+
+1. **用户自定义 Skills**：`{workspace}/skills/{skill-name}/SKILL.md`（最高优先级）
+2. **内置 Skills（嵌入式）**：从程序集资源加载
+3. **内置 Skills（文件系统）**：`src/skills/{skill-name}/SKILL.md`（开发模式）
+
+```csharp
+public class SkillsLoader : ISkillsLoader
+{
+    private readonly IWorkspaceManager _workspaceManager;
+    private readonly IEmbeddedResourceLoader _resourceLoader;
+    
+    public async Task<Skill?> LoadSkillAsync(string name, CancellationToken cancellationToken = default)
+    {
+        // 1. 检查用户自定义 Skill
+        var userSkillPath = Path.Combine(_workspaceManager.GetSkillsPath(), name, "SKILL.md");
+        if (File.Exists(userSkillPath))
+        {
+            return await LoadSkillFromFileAsync(userSkillPath, "user");
+        }
+        
+        // 2. 从嵌入式资源加载
+        var embeddedSkill = await LoadSkillFromEmbeddedAsync(name, cancellationToken);
+        if (embeddedSkill != null)
+        {
+            return embeddedSkill;
+        }
+        
+        return null;
+    }
+    
+    private async Task<Skill?> LoadSkillFromEmbeddedAsync(string name, CancellationToken cancellationToken)
+    {
+        var resourceName = $"skills/{name}/SKILL.md";
+        var content = await _resourceLoader.ReadResourceAsync(resourceName, cancellationToken);
+        
+        if (content == null) return null;
+        
+        var metadata = ParseSkillMetadata(content);
+        return new Skill
+        {
+            Name = metadata?.Name ?? name,
+            Description = metadata?.Description ?? name,
+            Content = StripFrontmatter(content),
+            FilePath = $"embedded:{resourceName}",
+            Source = "builtin",
+            LoadedAt = DateTimeOffset.Now
+        };
+    }
+}
+```
+
+### 资源文件清单
+
+#### Workspace 资源文件
+
+| 文件 | 用途 | 必需 |
+|------|------|------|
+| `AGENTS.md` | Agent 指令和说明 | 是 |
+| `SOUL.md` | Agent 个性、价值观和沟通风格 | 是 |
+| `TOOLS.md` | 工具文档和使用说明 | 是 |
+| `USER.md` | 用户配置文件（偏好、上下文等） | 否 |
+| `HEARTBEAT.md` | 心跳任务列表 | 否 |
+| `memory/MEMORY.md` | 长期记忆 | 否 |
+
+#### 内置 Skills
+
+| Skill | 描述 | 依赖 |
+|-------|------|------|
+| `github` | 使用 gh CLI 与 GitHub 交互 | `gh` CLI |
+| `weather` | 获取天气信息（wttr.in, Open-Meteo） | `curl` |
+| `summarize` | 总结 URL、文件、YouTube 视频 | - |
+| `tmux` | 远程控制 tmux 会话 | `tmux` |
+| `skill-creator` | 创建新 Skills | - |
+| `memory` | 记忆系统说明（always=true） | - |
+| `cron` | 定时提醒管理 | - |
+
+### 实现检查清单
+
+- [ ] 在 `NanoBot.Infrastructure.csproj` 中配置嵌入式资源
+- [ ] 实现 `IEmbeddedResourceLoader` 接口
+- [ ] 更新 `WorkspaceManager` 支持从嵌入式资源提取文件
+- [ ] 更新 `SkillsLoader` 支持从嵌入式资源加载 Skills
+- [ ] 确保用户自定义文件优先级高于内置文件
+- [ ] 添加单元测试验证资源加载逻辑
+
+---
+
 *返回 [概览文档](./NanoBot.Net-Overview.md)*

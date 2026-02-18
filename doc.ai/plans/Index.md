@@ -18,50 +18,6 @@ NanoBot.Net 是一个基于 .NET 的 AI Agent 框架，从 Python 版本的 nano
 | [Agent-Core.md](../solutions/Agent-Core.md) | Agent 核心层设计 |
 | [CLI.md](../solutions/CLI.md) | CLI 命令层设计 |
 | [Testing.md](../solutions/Testing.md) | 测试方案设计 |
-| [Overview.md](../solutions/Overview.md) | 解决方案概览与目录结构 |
-
-## 项目目录结构概览
-
-项目采用标准的 .NET 解决方案结构，详细目录结构设计请参考 [Overview.md](../solutions/Overview.md#项目目录结构)。
-
-### 核心项目
-
-| 项目 | 职责 | 命名空间 |
-|------|------|----------|
-| NanoBot.Core | 核心接口和抽象 | `NanoBot.Core.*` |
-| NanoBot.Infrastructure | 基础设施实现 | `NanoBot.Infrastructure.*` |
-| NanoBot.Providers | LLM 提供商实现 | `NanoBot.Providers.*` |
-| NanoBot.Tools | 工具实现 | `NanoBot.Tools.*` |
-| NanoBot.Channels | 通道实现 | `NanoBot.Channels.*` |
-| NanoBot.Agent | Agent 核心实现 | `NanoBot.Agent.*` |
-| NanoBot.Cli | CLI 命令行 | `NanoBot.Cli` |
-
-### 目录层级
-
-```
-NanoBot.Net/
-├── src/                    # 源代码
-│   ├── NanoBot.Core/       # 核心抽象层
-│   ├── NanoBot.Infrastructure/  # 基础设施
-│   ├── NanoBot.Providers/  # LLM 提供商
-│   ├── NanoBot.Tools/      # 工具实现
-│   ├── NanoBot.Channels/   # 通道实现
-│   ├── NanoBot.Agent/      # Agent 核心
-│   └── NanoBot.Cli/        # CLI 入口
-├── tests/                  # 测试项目
-├── doc.ai/                 # AI 辅助文档
-│   ├── solutions/          # 方案设计
-│   └── plans/              # 实现计划
-├── docs/                   # 用户文档
-└── samples/                # 示例项目
-```
-
-### 命名规范
-
-- **文件夹**: PascalCase（如 `Agents/`、`Channels/`）
-- **命名空间**: `NanoBot.{项目}.{模块}`（如 `NanoBot.Core.Agents`）
-- **测试项目**: `{项目名}.Tests`（如 `NanoBot.Core.Tests`）
-- **测试文件**: `{类名}Tests.cs`（如 `AgentTests.cs`）
 
 ## 实施阶段
 

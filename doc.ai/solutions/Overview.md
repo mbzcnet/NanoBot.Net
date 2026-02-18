@@ -323,8 +323,38 @@ NanoBot.Net/
 │   │   │   └── SkillsLoader.cs
 │   │   ├── Subagents/                # Subagent 管理实现
 │   │   │   └── SubagentManager.cs
+│   │   ├── Resources/                # 资源加载实现
+│   │   │   ├── IEmbeddedResourceLoader.cs
+│   │   │   └── EmbeddedResourceLoader.cs
 │   │   └── Extensions/               # 扩展方法
 │   │       └── ServiceCollectionExtensions.cs
+│   │
+│   ├── workspace/                    # Workspace 资源文件（嵌入式）
+│   │   ├── AGENTS.md                 # Agent 指令模板
+│   │   ├── SOUL.md                   # Agent 个性模板
+│   │   ├── TOOLS.md                  # 工具文档模板
+│   │   ├── USER.md                   # 用户配置模板
+│   │   ├── HEARTBEAT.md              # 心跳任务模板
+│   │   └── memory/
+│   │       └── MEMORY.md             # 记忆模板
+│   │
+│   ├── skills/                       # 内置 Skills（嵌入式）
+│   │   ├── README.md                 # Skills 说明
+│   │   ├── github/
+│   │   │   └── SKILL.md              # GitHub Skill
+│   │   ├── weather/
+│   │   │   └── SKILL.md              # 天气 Skill
+│   │   ├── summarize/
+│   │   │   └── SKILL.md              # 总结 Skill
+│   │   ├── tmux/
+│   │   │   ├── SKILL.md              # Tmux Skill
+│   │   │   └── scripts/              # Tmux 脚本
+│   │   ├── skill-creator/
+│   │   │   └── SKILL.md              # Skill 创建器
+│   │   ├── memory/
+│   │   │   └── SKILL.md              # 记忆 Skill (always=true)
+│   │   └── cron/
+│   │       └── SKILL.md              # 定时任务 Skill
 │   │
 │   ├── NanoBot.Providers/            # LLM 提供商实现
 │   │   ├── Registry/                 # 提供商注册表

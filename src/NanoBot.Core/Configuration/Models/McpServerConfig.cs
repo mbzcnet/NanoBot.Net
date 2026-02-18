@@ -1,0 +1,12 @@
+namespace NanoBot.Core.Configuration;
+
+public class McpServerConfig
+{
+    public string Command { get; set; } = string.Empty;
+
+    public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
+
+    public Dictionary<string, string> Env { get; set; } = new();
+
+    public string? Cwd { get; set; }
+}
