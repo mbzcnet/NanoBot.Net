@@ -2,7 +2,7 @@
 
 本文档定义 NanoBot.Net 的 Agent 核心实现。
 
-**核心原则**：直接使用 `ChatClientAgent` 和 `AIAgentBuilder`，**不重新实现 Agent 循环**。
+**核心原则**：直接使用 `ChatClientAgent` 和 `AIContextProvider`，**不重新实现 Agent 循环**。
 
 ---
 
@@ -12,30 +12,48 @@
 
 Microsoft.Agents.AI 框架已经提供了完整的 Agent 实现：
 
-1. **`ChatClientAgent`**：基于 `IChatClient` 的 Agent 实现
-2. **`AIAgentBuilder`**：用于构建 Agent 管道
-3. **`AgentSession`**：会话状态管理
-4. **`AIContextProvider`**：上下文注入机制
+1. **`ChatClientAgent`**：基于 `IChatClient` 的 Agent 实现，自动处理工具调用循环
+2. **`AIAgentBuilder`**：用于构建 Agent 管道，添加中间件
+3. **`AgentSession`**：会话状态管理，支持序列化/反序列化
+4. **`AIContextProvider`**：上下文注入机制，调用前后均可介入
+5. **`ChatHistoryProvider`**：历史消息管理，专门处理对话历史
 
 NanoBot.Net 只需：
 - 使用 `ChatClientAgent` 作为 Agent 基础
-- 通过 `AIContextProvider` 注入 nanobot 特有上下文
-- 使用 `AIAgentBuilder` 添加中间件
+- 通过 `AIContextProvider` 注入 nanobot 特有上下文（AGENTS.md、SOUL.md、MEMORY.md、Skills）
+- 通过 `ChatHistoryProvider` 管理 HISTORY.md
+- 使用 `AsAIFunction()` 实现子 Agent 协作
 
 ---
 
 ## 框架提供的 Agent 类型
 
-### ChatClientAgent
+### ChatClientAgent（核心实现）
 
 ```csharp
 using Microsoft.Agents.AI;
 
-// 从 IChatClient 创建 Agent
-ChatClientAgent agent = chatClient.AsAIAgent(
-    name: "NanoBot",
+// 方式一：简化构造
+var agent = new ChatClientAgent(
+    chatClient,
     instructions: "You are a helpful assistant.",
+    name: "NanoBot",
     tools: myTools);
+
+// 方式二：完整配置
+var agent = new ChatClientAgent(
+    chatClient,
+    new ChatClientAgentOptions
+    {
+        Name = "NanoBot",
+        ChatOptions = new ChatOptions
+        {
+            Instructions = "You are a helpful assistant.",
+            Tools = myTools
+        },
+        AIContextProviders = contextProviders,
+        ChatHistoryProvider = historyProvider
+    });
 
 // 运行 Agent
 var response = await agent.RunAsync("Hello!");
@@ -47,110 +65,104 @@ await foreach (var update in agent.RunStreamingAsync("Tell me a story"))
 }
 ```
 
-### AIAgentBuilder
+### AIAgentBuilder（中间件管道）
 
 ```csharp
 // 使用 Builder 模式添加中间件
-var agent = chatClient.AsAIAgent(tools: tools)
+var agent = new ChatClientAgent(chatClient, options)
     .AsBuilder()
-    .UseLogging(logger)
-    .UseRateLimiting(rateLimiter)
-    .UseFunctionInvocation()  // 自动处理工具调用
+    .Use((inner, _) => new LoggingAgent(inner, logger))
+    .Use((messages, session, options, next, ct) =>
+    {
+        // 前置处理
+        Console.WriteLine("Before invocation");
+        
+        // 调用内部 Agent
+        return next(messages, session, options, ct);
+    })
     .Build();
 ```
 
 ---
 
+## Provider 职责划分
+
+### ChatHistoryProvider vs AIContextProvider
+
+| Provider 类型 | 职责 | 管理文件 | 框架调用时机 |
+|--------------|------|----------|-------------|
+| `ChatHistoryProvider` | 对话历史管理 | HISTORY.md | 调用前提供历史，调用后存储新消息 |
+| `AIContextProvider` | 额外上下文注入 | AGENTS.md, SOUL.md, MEMORY.md, Skills | 调用前提供上下文，调用后更新状态 |
+
+**关键区别**：
+- `ChatHistoryProvider` 专门管理 `ChatMessage` 列表
+- `AIContextProvider` 提供 `Instructions`、`Messages`、`Tools`
+
+---
+
 ## NanoBot Agent 实现
 
-### 使用 ChatClientAgent
+### 使用 ChatClientAgent（无需封装）
 
 ```csharp
 namespace NanoBot.Agent;
 
-public class NanoBotAgent
+public static class NanoBotAgentFactory
 {
-    private readonly ChatClientAgent _innerAgent;
-    private readonly IWorkspaceManager _workspace;
-    private readonly ISkillsLoader _skillsLoader;
-    private readonly IMcpClient _mcpClient;
-    
-    public NanoBotAgent(
+    public static ChatClientAgent Create(
         IChatClient chatClient,
         IWorkspaceManager workspace,
         ISkillsLoader skillsLoader,
-        IMcpClient mcpClient,
-        IEnumerable<AIContextProvider> contextProviders,
-        IReadOnlyList<AITool> tools)
+        IReadOnlyList<AITool> tools,
+        ILoggerFactory loggerFactory)
     {
-        _workspace = workspace;
-        _skillsLoader = skillsLoader;
-        _mcpClient = mcpClient;
-        
-        var allTools = tools.ToList();
-        
-        _innerAgent = chatClient
-            .AsAIAgent(
-                name: "NanoBot",
-                instructions: BuildInstructionsAsync,
-                tools: allTools,
-                contextProviders: contextProviders.ToList())
-            .AsBuilder()
-            .UseFunctionInvocation()
-            .Build();
-    }
-    
-    public async Task<AgentRunResponse> RunAsync(
-        string input,
-        AgentThread? thread = null,
-        CancellationToken cancellationToken = default)
-    {
-        return await _innerAgent.RunAsync(input, thread, cancellationToken);
-    }
-    
-    public async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
-        string input,
-        AgentThread? thread = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var update in _innerAgent.RunStreamingAsync(input, thread, cancellationToken))
+        var contextProviders = new List<AIContextProvider>
         {
-            yield return update;
-        }
+            new BootstrapContextProvider(workspace),
+            new MemoryContextProvider(workspace),
+            new SkillsContextProvider(skillsLoader)
+        };
+
+        var historyProvider = new FileBackedChatHistoryProvider(workspace);
+
+        var instructions = BuildInstructions(workspace);
+
+        return new ChatClientAgent(
+            chatClient,
+            new ChatClientAgentOptions
+            {
+                Name = "NanoBot",
+                Description = "A personal AI assistant",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = instructions,
+                    Tools = tools
+                },
+                AIContextProviders = contextProviders,
+                ChatHistoryProvider = historyProvider
+            },
+            loggerFactory);
     }
-    
-    private async Task<string> BuildInstructionsAsync()
+
+    private static string BuildInstructions(IWorkspaceManager workspace)
     {
         var sb = new StringBuilder();
+        sb.AppendLine("You are NanoBot, a personal AI assistant.");
+        sb.AppendLine();
         
-        // 加载 AGENTS.md
-        var agentsPath = _workspace.GetFilePath("AGENTS.md");
+        var agentsPath = workspace.GetFilePath("AGENTS.md");
         if (File.Exists(agentsPath))
         {
             sb.AppendLine("## Agent Configuration");
-            sb.AppendLine(await File.ReadAllTextAsync(agentsPath));
+            sb.AppendLine(File.ReadAllText(agentsPath));
             sb.AppendLine();
         }
         
-        // 加载 SOUL.md
-        var soulPath = _workspace.GetFilePath("SOUL.md");
+        var soulPath = workspace.GetFilePath("SOUL.md");
         if (File.Exists(soulPath))
         {
             sb.AppendLine("## Personality");
-            sb.AppendLine(await File.ReadAllTextAsync(soulPath));
-            sb.AppendLine();
-        }
-        
-        // 加载 Skills
-        var skills = await _skillsLoader.LoadSkillsAsync();
-        if (skills.Any())
-        {
-            sb.AppendLine("## Available Skills");
-            foreach (var skill in skills)
-            {
-                sb.AppendLine($"- {skill.Name}: {skill.Description}");
-            }
-            sb.AppendLine();
+            sb.AppendLine(File.ReadAllText(soulPath));
         }
         
         return sb.ToString();
@@ -160,11 +172,86 @@ public class NanoBotAgent
 
 ---
 
-## 上下文提供者
+## ChatHistoryProvider 实现
 
-### 实现 AIContextProvider
+### FileBackedChatHistoryProvider
 
-框架的 `AIContextProvider` 用于动态注入上下文：
+管理 HISTORY.md 文件，框架自动调用：
+
+```csharp
+namespace NanoBot.Agent.Context;
+
+public class FileBackedChatHistoryProvider : ChatHistoryProvider
+{
+    private readonly IWorkspaceManager _workspace;
+    private readonly int _maxHistoryEntries;
+
+    public FileBackedChatHistoryProvider(
+        IWorkspaceManager workspace,
+        int maxHistoryEntries = 100)
+    {
+        _workspace = workspace;
+        _maxHistoryEntries = maxHistoryEntries;
+    }
+
+    protected override async ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
+        InvokingContext context,
+        CancellationToken cancellationToken)
+    {
+        var historyPath = _workspace.GetFilePath("HISTORY.md");
+        if (!File.Exists(historyPath))
+            return [];
+
+        var lines = await File.ReadAllLinesAsync(historyPath, cancellationToken);
+        var recentLines = lines.TakeLast(_maxHistoryEntries).ToList();
+        
+        return ParseHistoryToMessages(recentLines);
+    }
+
+    protected override async ValueTask StoreChatHistoryAsync(
+        InvokedContext context,
+        CancellationToken cancellationToken)
+    {
+        var historyPath = _workspace.GetFilePath("HISTORY.md");
+        
+        var sb = new StringBuilder();
+        foreach (var message in context.RequestMessages)
+        {
+            sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {message.Text}");
+        }
+        foreach (var message in context.ResponseMessages)
+        {
+            sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {message.Text}");
+        }
+        sb.AppendLine();
+        
+        await File.AppendAllTextAsync(historyPath, sb.ToString(), cancellationToken);
+    }
+
+    private IEnumerable<ChatMessage> ParseHistoryToMessages(List<string> lines)
+    {
+        foreach (var line in lines)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            
+            if (line.Contains("User:"))
+            {
+                yield return new ChatMessage(ChatRole.User, line.Split("User:")[1].Trim());
+            }
+            else if (line.Contains("Assistant:"))
+            {
+                yield return new ChatMessage(ChatRole.Assistant, line.Split("Assistant:")[1].Trim());
+            }
+        }
+    }
+}
+```
+
+---
+
+## AIContextProvider 实现
+
+### 正确的 API 签名
 
 ```csharp
 namespace NanoBot.Agent.Context;
@@ -172,127 +259,129 @@ namespace NanoBot.Agent.Context;
 public class BootstrapContextProvider : AIContextProvider
 {
     private readonly IWorkspaceManager _workspace;
-    
+
     public BootstrapContextProvider(IWorkspaceManager workspace)
     {
         _workspace = workspace;
     }
-    
-    protected override async Task<AIContext> GetContextAsync(
+
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
-        var aiContext = new AIContext();
-        
-        // 加载 bootstrap 文件
-        var bootstrapFiles = new[] { "AGENTS.md", "SOUL.md", "MEMORY.md" };
-        
-        foreach (var file in bootstrapFiles)
+        var instructions = new StringBuilder();
+
+        var agentsPath = _workspace.GetFilePath("AGENTS.md");
+        if (File.Exists(agentsPath))
         {
-            var path = _workspace.GetFilePath(file);
-            if (File.Exists(path))
-            {
-                var content = await File.ReadAllTextAsync(path, cancellationToken);
-                aiContext.AdditionalData[$"bootstrap_{file.ToLower()}"] = content;
-            }
+            instructions.AppendLine("## Agent Configuration");
+            instructions.AppendLine(await File.ReadAllTextAsync(agentsPath, cancellationToken));
+            instructions.AppendLine();
         }
-        
-        return aiContext;
+
+        var soulPath = _workspace.GetFilePath("SOUL.md");
+        if (File.Exists(soulPath))
+        {
+            instructions.AppendLine("## Personality");
+            instructions.AppendLine(await File.ReadAllTextAsync(soulPath, cancellationToken));
+        }
+
+        return new AIContext
+        {
+            Instructions = instructions.Length > 0 ? instructions.ToString() : null
+        };
     }
 }
+```
+
+### MemoryContextProvider（带调用后更新）
+
+```csharp
+namespace NanoBot.Agent.Context;
 
 public class MemoryContextProvider : AIContextProvider
 {
     private readonly IWorkspaceManager _workspace;
-    
-    public MemoryContextProvider(IWorkspaceManager workspace)
-    {
-        _workspace = workspace;
-    }
-    
-    protected override async Task<AIContext> GetContextAsync(
-        InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        var memoryPath = _workspace.GetFilePath("MEMORY.md");
-        if (!File.Exists(memoryPath))
-            return new AIContext();
-        
-        var content = await File.ReadAllTextAsync(memoryPath, cancellationToken);
-        
-        return new AIContext
-        {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["memory"] = content
-            }
-        };
-    }
-}
+    private readonly IMemoryStore _memoryStore;
 
-public class HistoryContextProvider : AIContextProvider
-{
-    private readonly IWorkspaceManager _workspace;
-    private readonly int _maxHistoryEntries;
-    
-    public HistoryContextProvider(IWorkspaceManager workspace, int maxHistoryEntries = 100)
+    public MemoryContextProvider(
+        IWorkspaceManager workspace,
+        IMemoryStore memoryStore)
     {
         _workspace = workspace;
-        _maxHistoryEntries = maxHistoryEntries;
+        _memoryStore = memoryStore;
     }
-    
-    protected override async Task<AIContext> GetContextAsync(
+
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
-        var historyPath = _workspace.GetFilePath("HISTORY.md");
-        if (!File.Exists(historyPath))
+        var memory = await _memoryStore.LoadAsync(cancellationToken);
+        
+        if (string.IsNullOrEmpty(memory))
             return new AIContext();
-        
-        var lines = await File.ReadAllLinesAsync(historyPath, cancellationToken);
-        var recentLines = lines.TakeLast(_maxHistoryEntries);
-        
+
         return new AIContext
         {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["history"] = string.Join("\n", recentLines)
-            }
+            Instructions = $"## Memory\n{memory}"
         };
     }
+
+    protected override async ValueTask StoreAIContextAsync(
+        InvokedContext context,
+        CancellationToken cancellationToken)
+    {
+        await _memoryStore.UpdateAsync(
+            context.RequestMessages,
+            context.ResponseMessages,
+            cancellationToken);
+    }
 }
+```
+
+### SkillsContextProvider
+
+```csharp
+namespace NanoBot.Agent.Context;
 
 public class SkillsContextProvider : AIContextProvider
 {
     private readonly ISkillsLoader _skillsLoader;
-    
+
     public SkillsContextProvider(ISkillsLoader skillsLoader)
     {
         _skillsLoader = skillsLoader;
     }
-    
-    protected override async Task<AIContext> GetContextAsync(
+
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
         var skills = await _skillsLoader.LoadSkillsAsync(cancellationToken);
         
+        if (!skills.Any())
+            return new AIContext();
+
         var sb = new StringBuilder();
         sb.AppendLine("## Available Skills");
-        
+
         foreach (var skill in skills)
         {
             sb.AppendLine($"### {skill.Name}");
-            sb.AppendLine(skill.Content);
+            if (skill.AlwaysLoad)
+            {
+                sb.AppendLine(skill.Content);
+            }
+            else
+            {
+                sb.AppendLine($"Description: {skill.Description}");
+            }
             sb.AppendLine();
         }
-        
+
         return new AIContext
         {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["skills"] = sb.ToString()
-            }
+            Instructions = sb.ToString()
         };
     }
 }
@@ -302,58 +391,52 @@ public class SkillsContextProvider : AIContextProvider
 
 ## 会话管理
 
-### 使用 AgentSession
-
-框架提供 `AgentSession` 管理会话状态：
+### 使用框架内置能力
 
 ```csharp
-// 框架自动管理会话
-var response = await agent.RunAsync(
-    "Hello!",
-    thread: null,  // 框架自动创建新会话
-    cancellationToken: ct);
+// 创建新会话
+var session = await agent.CreateSessionAsync();
 
-// 使用现有会话
-var thread = new InMemoryAgentThread();
-await agent.RunAsync("First message", thread, ct);
-await agent.RunAsync("Second message", thread, ct);  // 保持上下文
+// 运行 Agent
+var response = await agent.RunAsync("Hello!", session);
+
+// 持久化会话
+var serialized = await agent.SerializeSessionAsync(session);
+await File.WriteAllTextAsync("session.json", serialized.GetRawText());
+
+// 恢复会话
+var json = await File.ReadAllTextAsync("session.json");
+var restored = await agent.DeserializeSessionAsync(JsonDocument.Parse(json).RootElement);
+
+// 继续对话
+var response2 = await agent.RunAsync("Continue...", restored);
 ```
 
-### 自定义会话存储
+### 使用 AgentSession.StateBag 存储自定义状态
 
 ```csharp
-public class FileBackedAgentThread : AgentThread
+public class MyContextProvider : AIContextProvider
 {
-    private readonly string _filePath;
-    private readonly List<ChatMessage> _messages = new();
-    
-    public FileBackedAgentThread(string filePath)
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
+        InvokingContext context,
+        CancellationToken cancellationToken)
     {
-        _filePath = filePath;
-        LoadMessages();
-    }
-    
-    public override IReadOnlyList<ChatMessage> Messages => _messages;
-    
-    public override async Task AddMessageAsync(ChatMessage message, CancellationToken ct = default)
-    {
-        _messages.Add(message);
-        await SaveMessagesAsync(ct);
-    }
-    
-    private void LoadMessages()
-    {
-        if (File.Exists(_filePath))
+        // 从 StateBag 读取状态
+        if (context.Session?.StateBag.TryGetValue("custom_data", out string? data) == true)
         {
-            var json = File.ReadAllText(_filePath);
-            _messages.AddRange(JsonSerializer.Deserialize<List<ChatMessage>>(json) ?? []);
+            // 使用存储的状态
         }
+        
+        return new AIContext();
     }
-    
-    private async Task SaveMessagesAsync(CancellationToken ct)
+
+    protected override ValueTask StoreAIContextAsync(
+        InvokedContext context,
+        CancellationToken cancellationToken)
     {
-        var json = JsonSerializer.Serialize(_messages);
-        await File.WriteAllTextAsync(_filePath, json, ct);
+        // 存储状态到 StateBag
+        context.Session?.StateBag.SetValue("custom_data", "some value");
+        return default;
     }
 }
 ```
@@ -362,90 +445,98 @@ public class FileBackedAgentThread : AgentThread
 
 ## 中间件
 
-### 使用 AIAgentBuilder 添加中间件
+### 使用 AIAgentBuilder
 
 ```csharp
-public static class AgentMiddlewareExtensions
-{
-    public static AIAgentBuilder UseLogging(this AIAgentBuilder builder, ILogger logger)
+var agent = new ChatClientAgent(chatClient, options, loggerFactory)
+    .AsBuilder()
+    .Use((inner, services) => new LoggingAgent(inner, logger))
+    .Use(async (messages, session, options, next, ct) =>
     {
-        return builder.Use(async (agent, context, next, ct) =>
-        {
-            logger.LogInformation("Agent run started: {Input}", context.Input);
-            
-            var response = await next(context, ct);
-            
-            logger.LogInformation("Agent run completed: {Response}", response.Text?[..Math.Min(100, response.Text.Length)]);
-            
-            return response;
-        });
-    }
-    
-    public static AIAgentBuilder UseRateLimiting(this AIAgentBuilder builder, RateLimiter limiter)
-    {
-        return builder.Use(async (agent, context, next, ct) =>
-        {
-            using var lease = await limiter.AcquireAsync(ct);
-            if (!lease.IsAcquired)
-                throw new RateLimitExceededException();
-            
-            return await next(context, ct);
-        });
-    }
-    
-    public static AIAgentBuilder UseMemoryUpdate(this AIAgentBuilder builder, IWorkspaceManager workspace)
-    {
-        return builder.Use(async (agent, context, next, ct) =>
-        {
-            var response = await next(context, ct);
-            
-            // 更新 HISTORY.md
-            var historyPath = workspace.GetFilePath("HISTORY.md");
-            var entry = $"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] User: {context.Input}\nAssistant: {response.Text}\n\n";
-            await File.AppendAllTextAsync(historyPath, entry, ct);
-            
-            return response;
-        });
-    }
-}
+        Console.WriteLine($"[Before] Messages count: {messages.Count()}");
+        
+        var response = await next(messages, session, options, ct);
+        
+        Console.WriteLine($"[After] Response: {response.Text?[..Math.Min(50, response.Text.Length)]}...");
+        
+        return response;
+    })
+    .Build();
+```
+
+### 内置中间件
+
+框架提供：
+- `LoggingAgent`：日志记录
+- `OpenTelemetryAgent`：遥测
+
+```csharp
+var agent = new ChatClientAgent(chatClient, options, loggerFactory)
+    .AsBuilder()
+    .Use((inner, _) => new LoggingAgent(inner, logger))
+    .Use((inner, _) => new OpenTelemetryAgent(inner, telemetrySource))
+    .Build();
 ```
 
 ---
 
 ## 子 Agent 管理
 
-### spawn 工具实现
+### 使用 AsAIFunction()
 
 ```csharp
 public static AITool CreateSpawnTool(
     IChatClient chatClient,
     IWorkspaceManager workspace,
-    ISkillsLoader skillsLoader,
     ILogger logger)
 {
+    [Description("Create a sub-agent to handle a specific task.")]
+    async Task<string> SpawnAsync(
+        [Description("The task for the sub-agent to handle")] string task,
+        [Description("Optional label for the sub-agent")] string? label = null)
+    {
+        var subAgentName = label ?? $"subagent_{Guid.NewGuid():N}";
+        
+        var subAgent = new ChatClientAgent(
+            chatClient,
+            instructions: $"You are a specialized agent. Task: {task}",
+            name: subAgentName);
+        
+        logger.LogInformation("Spawning sub-agent: {Name}", subAgentName);
+        
+        var response = await subAgent.RunAsync(task);
+        
+        return $"Sub-agent {subAgentName} completed:\n{response.Text}";
+    }
+
     return AIFunctionFactory.Create(
-        async (string task, string? label = null) =>
-        {
-            var subAgentName = label ?? $"subagent_{Guid.NewGuid():N}";
-            
-            // 创建子 Agent
-            var subAgent = chatClient.AsAIAgent(
-                name: subAgentName,
-                instructions: $"You are a specialized agent. Task: {task}",
-                tools: CreateSubAgentTools(workspace));
-            
-            logger.LogInformation("Spawning sub-agent: {Name} for task: {Task}", subAgentName, task);
-            
-            var response = await subAgent.RunAsync(task);
-            
-            return $"Sub-agent {subAgentName} completed:\n{response.Text}";
-        },
+        SpawnAsync,
         new AIFunctionFactoryOptions
         {
             Name = "spawn",
             Description = "Create a sub-agent to handle a specific task."
         });
 }
+
+// 将 Agent 转换为工具供其他 Agent 调用
+var childAgent = new ChatClientAgent(chatClient, instructions: "...", name: "ChildAgent");
+var childAgentTool = childAgent.AsAIFunction(
+    new AIFunctionFactoryOptions
+    {
+        Name = "ask_child_agent",
+        Description = "Ask the child agent for help"
+    });
+
+// 注册到父 Agent 的工具列表
+var parentAgent = new ChatClientAgent(
+    chatClient,
+    new ChatClientAgentOptions
+    {
+        ChatOptions = new ChatOptions
+        {
+            Tools = [childAgentTool, ...other tools]
+        }
+    });
 ```
 
 ---
@@ -457,15 +548,29 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddNanoBotAgent(this IServiceCollection services)
     {
-        // 注册上下文提供者
+        // 注册 ChatHistoryProvider
+        services.AddSingleton<ChatHistoryProvider, FileBackedChatHistoryProvider>();
+
+        // 注册 AIContextProvider
         services.AddSingleton<AIContextProvider, BootstrapContextProvider>();
         services.AddSingleton<AIContextProvider, MemoryContextProvider>();
-        services.AddSingleton<AIContextProvider, HistoryContextProvider>();
         services.AddSingleton<AIContextProvider, SkillsContextProvider>();
-        
-        // 注册 Agent
-        services.AddSingleton<NanoBotAgent>();
-        
+
+        // 注册 ChatClientAgent
+        services.AddSingleton<ChatClientAgent>(sp =>
+        {
+            var chatClient = sp.GetRequiredService<IChatClient>();
+            var workspace = sp.GetRequiredService<IWorkspaceManager>();
+            var skillsLoader = sp.GetRequiredService<ISkillsLoader>();
+            var tools = sp.GetServices<AITool>().ToList();
+            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+            var contextProviders = sp.GetServices<AIContextProvider>().ToList();
+            var historyProvider = sp.GetRequiredService<ChatHistoryProvider>();
+
+            return NanoBotAgentFactory.Create(
+                chatClient, workspace, skillsLoader, tools, loggerFactory);
+        });
+
         return services;
     }
 }
@@ -478,39 +583,44 @@ public static class ServiceCollectionExtensions
 ```mermaid
 graph LR
     subgraph "NanoBot.Agent"
-        NanoBotAgent[NanoBotAgent]
+        Factory[NanoBotAgentFactory]
+        FileHistoryProvider[FileBackedChatHistoryProvider]
         BootstrapProvider[BootstrapContextProvider]
         MemoryProvider[MemoryContextProvider]
         SkillsProvider[SkillsContextProvider]
     end
-    
+
     subgraph "Microsoft.Agents.AI"
         ChatClientAgent[ChatClientAgent]
         AIAgentBuilder[AIAgentBuilder]
         AgentSession[AgentSession]
+        ChatHistoryProvider[ChatHistoryProvider]
         AIContextProvider[AIContextProvider]
     end
-    
+
     subgraph "Microsoft.Extensions.AI"
         IChatClient[IChatClient]
         AITool[AITool]
     end
-    
+
     subgraph "NanoBot.Infrastructure"
         WorkspaceManager[IWorkspaceManager]
         SkillsLoader[ISkillsLoader]
+        MemoryStore[IMemoryStore]
     end
-    
+
     IChatClient --> ChatClientAgent
     AITool --> ChatClientAgent
-    ChatClientAgent --> NanoBotAgent
+    ChatClientAgent --> Factory
+    ChatHistoryProvider --> FileHistoryProvider
     AIContextProvider --> BootstrapProvider
     AIContextProvider --> MemoryProvider
     AIContextProvider --> SkillsProvider
+    WorkspaceManager --> FileHistoryProvider
     WorkspaceManager --> BootstrapProvider
     WorkspaceManager --> MemoryProvider
+    MemoryStore --> MemoryProvider
     SkillsLoader --> SkillsProvider
-    AIAgentBuilder --> NanoBotAgent
 ```
 
 ---
@@ -519,7 +629,7 @@ graph LR
 
 ### 1. 不要重新实现 Agent 循环
 
-❌ **错误做法**：
+**错误做法**：
 ```csharp
 public class MyAgent
 {
@@ -543,38 +653,58 @@ public class MyAgent
 }
 ```
 
-✅ **正确做法**：
+**正确做法**：
 ```csharp
-// 框架自动处理工具调用循环
-var agent = chatClient.AsAIAgent(tools: tools);
+var agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
+{
+    ChatOptions = new ChatOptions { Tools = tools }
+});
 var response = await agent.RunAsync(input);
 ```
 
-### 2. 使用 AIContextProvider 注入上下文
+### 2. 正确使用 AIContextProvider
 
+**错误做法**：
 ```csharp
-public class MyContextProvider : AIContextProvider
+protected override async Task<AIContext> GetContextAsync(...)  // 方法名错误
+protected override async Task<AIContext> ProvideContextAsync(...)  // 方法名错误
+```
+
+**正确做法**：
+```csharp
+protected override async ValueTask<AIContext> ProvideAIContextAsync(
+    InvokingContext context,
+    CancellationToken cancellationToken)
 {
-    protected override async Task<AIContext> GetContextAsync(
-        InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        // 动态加载上下文
-        return new AIContext { ... };
-    }
+    return new AIContext { Instructions = "..." };
 }
 ```
 
-### 3. 使用 AIAgentBuilder 添加中间件
+### 3. 区分 ChatHistoryProvider 和 AIContextProvider
 
+**ChatHistoryProvider**：管理 `ChatMessage` 列表
 ```csharp
-var agent = chatClient
-    .AsAIAgent(tools: tools)
-    .AsBuilder()
-    .UseLogging(logger)
-    .UseRateLimiting(limiter)
-    .UseMemoryUpdate(workspace)
-    .Build();
+protected override ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(...)
+protected override ValueTask StoreChatHistoryAsync(...)
+```
+
+**AIContextProvider**：提供 `Instructions`、`Messages`、`Tools`
+```csharp
+protected override ValueTask<AIContext> ProvideAIContextAsync(...)
+protected override ValueTask StoreAIContextAsync(...)
+```
+
+### 4. 使用 AsAIFunction 实现 Agent 协作
+
+**错误做法**：自定义子 Agent 管理逻辑
+
+**正确做法**：
+```csharp
+var childTool = childAgent.AsAIFunction();
+var parentAgent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
+{
+    ChatOptions = new ChatOptions { Tools = [childTool] }
+});
 ```
 
 ---
@@ -585,15 +715,18 @@ var agent = chatClient
 |----------|-----------------|
 | 定义 `IAgent` 接口 | 直接使用 `ChatClientAgent` |
 | 实现 Agent 循环 | 框架自动处理 |
-| 自定义会话管理 | 使用 `AgentSession` |
+| 自定义会话管理 | 使用 `AgentSession` + 序列化 |
 | 手动注入上下文 | 使用 `AIContextProvider` |
+| 自定义历史管理 | 使用 `ChatHistoryProvider` |
 | 自定义中间件系统 | 使用 `AIAgentBuilder` |
+| 自定义子 Agent 管理 | 使用 `AsAIFunction()` |
 
 **核心收益**：
 - 减少约 800+ 行代码
 - 框架自动处理工具调用循环
-- 内置会话管理
+- 内置会话管理（序列化/反序列化）
 - 标准化的中间件管道
+- 标准化的 Agent 协作机制
 
 ---
 

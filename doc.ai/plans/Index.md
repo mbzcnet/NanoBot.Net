@@ -95,13 +95,13 @@ graph LR
 
 **目标**: 基于 Microsoft.Agents.AI 实现 Agent 运行时，支持多轮对话、工具调用循环、记忆持久化和会话管理。
 
-**状态**: 待开始
+**状态**: ✅ 已完成
 
 **任务清单**:
-- 上下文提供者模块（5 任务）- 实现 AIContextProvider
-- 记忆管理模块（4 任务）- 实现 IMemoryStore
-- NanoBotAgent 模块（4 任务）- 封装 ChatClientAgent
-- Agent 运行时模块（5 任务）- 消息处理循环
+- Provider 模块（5 任务）- ✅ 已完成
+- 记忆管理模块（4 任务）- ✅ 已完成
+- Agent 工厂模块（4 任务）- ✅ 已完成
+- Agent 运行时模块（4 任务）- ✅ 已完成
 
 **详细计划**: [Phase3-Agent-Core.md](./Phase3-Agent-Core.md)
 
@@ -131,9 +131,9 @@ graph LR
 | Phase 0: 重构 | 4 | 14 | 待开始 |
 | Phase 1: 基础设施层 | 3 | 23 | ✅ 已完成（需重构） |
 | Phase 2: 核心服务层 | 4 | 53 | ✅ 已完成（需重构） |
-| Phase 3: Agent 核心层 | 4 | 18 | 待开始 |
+| Phase 3: Agent 核心层 | 4 | 17 | ✅ 已完成 |
 | Phase 4: 应用层 | 5 | 38 | 待开始 |
-| **总计** | **20** | **146** | - |
+| **总计** | **20** | **145** | - |
 
 ## 依赖关系图
 
