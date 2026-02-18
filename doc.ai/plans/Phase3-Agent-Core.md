@@ -1,32 +1,188 @@
-# Phase 3: Agent 核心层实现计划
+# Phase 3: Agent 核心层实现计划（基于 Microsoft.Agents.AI）
 
-本阶段实现 NanoBot.Net 的 Agent 核心层，包括 Agent 循环、上下文构建、记忆管理和会话管理。
+本阶段实现 NanoBot.Net 的 Agent 核心层，**直接使用 Microsoft.Agents.AI 框架提供的 `ChatClientAgent` 和 `AIContextProvider`**，避免重复造轮子。
 
 ## 阶段目标
 
-实现完整的 Agent 运行时，支持多轮对话、工具调用循环、记忆持久化和会话管理。
+基于 Microsoft.Agents.AI 框架实现 Agent 运行时，通过框架提供的类型实现多轮对话、工具调用、记忆管理和会话管理。
+
+## 核心原则
+
+### 框架已提供（不需要实现）
+
+| 功能 | 框架类型 | 说明 |
+|------|----------|------|
+| Agent 基类 | `ChatClientAgent` | Agent 实现，支持 RunAsync/RunStreamingAsync |
+| 工具调用循环 | 框架自动处理 | 无需手动实现循环 |
+| 会话管理 | `AgentSession`/`AgentThread` | 会话状态管理 |
+| 中间件 | `AIAgentBuilder` | Agent 管道构建 |
+| 上下文注入 | `AIContextProvider` | 动态上下文注入 |
+
+### 需要实现
+
+| 功能 | 说明 | 原因 |
+|------|------|------|
+| NanoBotAgent | 封装 ChatClientAgent | 整合 nanobot 特有功能 |
+| BootstrapContextProvider | 加载 AGENTS.md、SOUL.md | nanobot 特有 |
+| MemoryContextProvider | 加载 MEMORY.md | nanobot 特有 |
+| HistoryContextProvider | 加载 HISTORY.md | nanobot 特有 |
+| SkillsContextProvider | 加载 Skills | nanobot 特有 |
+| MemoryStore | 记忆读写 | nanobot 特有 |
+
+---
 
 ## 相关方案文档
 
 - [Agent-Core.md](../solutions/Agent-Core.md) - Agent 核心层设计
+- [Overview.md](../solutions/Overview.md) - 框架集成策略
 
 ## 阶段依赖
 
-- Phase 1 基础设施层已完成
-- Phase 2 核心服务层已完成
-- LLM 提供商可用
-- 工具系统可用
+- Phase 1-2 重构已完成
+- Microsoft.Agents.AI 包已引用
+- `IChatClient` 工厂可用
+- 工具以 `AITool` 形式注册
 - 消息总线可用
 - Workspace 管理可用
+
+---
 
 ## 任务清单概览
 
 | 任务清单 | 主要内容 | 并行度 |
 |----------|----------|--------|
+| [上下文提供者模块](#任务清单-上下文提供者模块) | AIContextProvider 实现 | 高 |
 | [记忆管理模块](#任务清单-记忆管理模块) | IMemoryStore 实现 | 高 |
-| [会话管理模块](#任务清单-会话管理模块) | ISessionManager 实现 | 高 |
-| [Agent 上下文模块](#任务清单-agent-上下文模块) | IAgentContext 实现 | 高 |
-| [Agent 核心模块](#任务清单-agent-核心模块) | IAgent 实现 | 中 |
+| [NanoBotAgent 模块](#任务清单-nanobotagent-模块) | Agent 封装实现 | 中 |
+| [Agent 运行时模块](#任务清单-agent-运行时模块) | 消息处理循环 | 中 |
+
+---
+
+## 任务清单：上下文提供者模块
+
+### 任务目标
+
+实现框架的 `AIContextProvider` 抽象，注入 nanobot 特有的上下文（Bootstrap、Memory、Skills）。
+
+### 相关方案文档
+
+- [Agent-Core.md](../solutions/Agent-Core.md) - AIContextProvider 实现
+
+### 任务依赖
+
+- Workspace 管理模块
+- Skills 加载模块
+
+### 任务列表
+
+#### Task 3.1.1: 实现 BootstrapContextProvider
+
+**描述**: 实现 Bootstrap 文件上下文提供者。
+
+**交付物**:
+- `NanoBot.Agent/Context/BootstrapContextProvider.cs` 文件
+- 继承 `AIContextProvider`
+- 加载 AGENTS.md、SOUL.md
+
+**完成标准**:
+- 正确继承 `AIContextProvider`
+- 动态加载 Bootstrap 文件
+- 返回 `AIContext`
+
+**示例代码**:
+```csharp
+public class BootstrapContextProvider : AIContextProvider
+{
+    private readonly IWorkspaceManager _workspace;
+    
+    public BootstrapContextProvider(IWorkspaceManager workspace)
+    {
+        _workspace = workspace;
+    }
+    
+    protected override async Task<AIContext> GetContextAsync(
+        InvokingContext context,
+        CancellationToken cancellationToken)
+    {
+        var aiContext = new AIContext();
+        
+        var agentsPath = _workspace.GetFilePath("AGENTS.md");
+        if (File.Exists(agentsPath))
+        {
+            aiContext.AdditionalData["agents"] = await File.ReadAllTextAsync(agentsPath, cancellationToken);
+        }
+        
+        var soulPath = _workspace.GetFilePath("SOUL.md");
+        if (File.Exists(soulPath))
+        {
+            aiContext.AdditionalData["soul"] = await File.ReadAllTextAsync(soulPath, cancellationToken);
+        }
+        
+        return aiContext;
+    }
+}
+```
+
+---
+
+#### Task 3.1.2: 实现 MemoryContextProvider
+
+**描述**: 实现记忆上下文提供者。
+
+**交付物**:
+- `NanoBot.Agent/Context/MemoryContextProvider.cs` 文件
+- 加载 MEMORY.md
+
+**完成标准**:
+- 正确加载记忆文件
+- 返回 `AIContext`
+
+---
+
+#### Task 3.1.3: 实现 HistoryContextProvider
+
+**描述**: 实现历史上下文提供者。
+
+**交付物**:
+- `NanoBot.Agent/Context/HistoryContextProvider.cs` 文件
+- 加载 HISTORY.md（最近 N 条）
+
+**完成标准**:
+- 正确加载历史文件
+- 支持条目数量限制
+
+---
+
+#### Task 3.1.4: 实现 SkillsContextProvider
+
+**描述**: 实现 Skills 上下文提供者。
+
+**交付物**:
+- `NanoBot.Agent/Context/SkillsContextProvider.cs` 文件
+- 加载 Skills 摘要
+
+**完成标准**:
+- 正确加载 Skills
+- 支持 always=true 的完整加载
+
+---
+
+#### Task 3.1.5: 编写上下文提供者测试
+
+**描述**: 编写上下文提供者的单元测试。
+
+**交付物**:
+- `NanoBot.Agent.Tests/Context/ContextProviderTests.cs` 文件
+
+**完成标准**:
+- 测试覆盖率 >= 80%
+- 所有测试通过
+
+### 成功指标
+
+- 所有 ContextProvider 正确实现
+- 框架正确调用 ContextProvider
+- 单元测试覆盖率 >= 80%
 
 ---
 
@@ -42,56 +198,39 @@
 
 ### 任务依赖
 
-- Workspace 管理模块（需要文件路径）
-- 配置管理模块（需要 MemoryConfig）
+- Workspace 管理模块
 
 ### 任务列表
 
-#### Task 3.1.1: 定义记忆存储类型
-
-**描述**: 定义记忆存储相关的数据类型。
-
-**交付物**:
-- HistoryEntry.cs 文件
-
-**完成标准**:
-- 类型定义与设计文档一致
-- 包含时间戳、角色、内容、工具信息
-
----
-
-#### Task 3.1.2: 定义 IMemoryStore 接口
+#### Task 3.2.1: 定义 IMemoryStore 接口
 
 **描述**: 定义记忆存储接口。
 
 **交付物**:
-- IMemoryStore.cs 接口文件
+- `NanoBot.Core/Memory/IMemoryStore.cs` 接口文件
 - 读写方法声明
-- 历史管理方法声明
 
 **完成标准**:
 - 接口定义与设计文档一致
-- 支持追加和清理操作
 
 ---
 
-#### Task 3.1.3: 实现 MemoryStore 类
+#### Task 3.2.2: 实现 MemoryStore 类
 
 **描述**: 实现记忆存储。
 
 **交付物**:
-- MemoryStore.cs 实现文件
+- `NanoBot.Infrastructure/Memory/MemoryStore.cs` 实现文件
 - MEMORY.md 读写逻辑
 - HISTORY.md 追加逻辑
 
 **完成标准**:
 - 正确读写记忆文件
-- 支持历史条目限制
 - 线程安全
 
 ---
 
-#### Task 3.1.4: 实现记忆合并逻辑
+#### Task 3.2.3: 实现记忆合并逻辑
 
 **描述**: 实现会话消息合并到记忆的逻辑。
 
@@ -105,13 +244,12 @@
 
 ---
 
-#### Task 3.1.5: 编写记忆模块单元测试
+#### Task 3.2.4: 编写记忆模块测试
 
 **描述**: 编写记忆模块的单元测试。
 
 **交付物**:
-- NanoBot.Core.Memory.Tests 项目
-- MemoryStoreTests.cs
+- `NanoBot.Infrastructure.Tests/Memory/MemoryStoreTests.cs` 文件
 
 **完成标准**:
 - 测试覆盖率 >= 80%
@@ -121,240 +259,214 @@
 
 - 记忆读写正确
 - 历史追加正确
-- 合并逻辑正确
 - 单元测试覆盖率 >= 80%
 
 ---
 
-## 任务清单：会话管理模块
+## 任务清单：NanoBotAgent 模块
 
 ### 任务目标
 
-实现会话管理器，支持会话持久化和缓存。
+封装 `ChatClientAgent`，整合 nanobot 特有功能。
 
 ### 相关方案文档
 
-- [Agent-Core.md](../solutions/Agent-Core.md) - ISessionManager 接口
+- [Agent-Core.md](../solutions/Agent-Core.md) - NanoBotAgent 实现
 
 ### 任务依赖
 
-- Workspace 管理模块（需要 sessions 目录）
-- 配置管理模块
+- 上下文提供者模块
+- 记忆管理模块
+- IChatClient 工厂
+- 工具列表
 
 ### 任务列表
 
-#### Task 3.2.1: 定义会话类型
+#### Task 3.3.1: 实现 NanoBotAgent 类
 
-**描述**: 定义会话相关的数据类型。
+**描述**: 实现 NanoBotAgent，封装 ChatClientAgent。
 
 **交付物**:
-- Session.cs 文件
-- SessionMessage.cs 文件
-- SessionInfo.cs 文件
+- `NanoBot.Agent/NanoBotAgent.cs` 文件
+- 使用 `ChatClientAgent` 作为内部实现
+- 注入 ContextProviders
 
 **完成标准**:
-- 类型定义与设计文档一致
-- Session 包含 LastConsolidated 属性
+- 正确封装 `ChatClientAgent`
+- 支持同步和流式响应
+
+**示例代码**:
+```csharp
+public class NanoBotAgent
+{
+    private readonly ChatClientAgent _innerAgent;
+    
+    public NanoBotAgent(
+        IChatClient chatClient,
+        IEnumerable<AIContextProvider> contextProviders,
+        IReadOnlyList<AITool> tools)
+    {
+        _innerAgent = chatClient
+            .AsAIAgent(
+                name: "NanoBot",
+                instructions: BuildInstructionsAsync,
+                tools: tools,
+                contextProviders: contextProviders.ToList())
+            .AsBuilder()
+            .UseFunctionInvocation()
+            .Build();
+    }
+    
+    public async Task<AgentRunResponse> RunAsync(string input, AgentThread? thread = null, CancellationToken ct = default)
+    {
+        return await _innerAgent.RunAsync(input, thread, ct);
+    }
+    
+    public async IAsyncEnumerable<AgentRunResponseUpdate> RunStreamingAsync(
+        string input, 
+        AgentThread? thread = null,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        await foreach (var update in _innerAgent.RunStreamingAsync(input, thread, ct))
+        {
+            yield return update;
+        }
+    }
+}
+```
 
 ---
 
-#### Task 3.2.2: 定义 ISessionManager 接口
+#### Task 3.3.2: 实现指令构建逻辑
 
-**描述**: 定义会话管理器接口。
+**描述**: 实现动态构建 Agent 指令的逻辑。
 
 **交付物**:
-- ISessionManager.cs 接口文件
-- 会话操作方法声明
+- `BuildInstructionsAsync` 方法实现
+- 加载 AGENTS.md、SOUL.md、Skills
 
 **完成标准**:
-- 接口定义与设计文档一致
+- 正确构建系统指令
+- 支持动态更新
 
 ---
 
-#### Task 3.2.3: 实现 SessionManager 类
+#### Task 3.3.3: 实现中间件管道
 
-**描述**: 实现会话管理器。
+**描述**: 使用 `AIAgentBuilder` 添加中间件。
 
 **交付物**:
-- SessionManager.cs 实现文件
-- JSONL 持久化实现
-- 内存缓存实现
+- 日志中间件
+- 记忆更新中间件
+- 速率限制中间件
+
+**完成标准**:
+- 中间件正确执行
+- 支持自定义扩展
+
+---
+
+#### Task 3.3.4: 编写 NanoBotAgent 测试
+
+**描述**: 编写 NanoBotAgent 的单元测试。
+
+**交付物**:
+- `NanoBot.Agent.Tests/NanoBotAgentTests.cs` 文件
+
+**完成标准**:
+- 测试覆盖率 >= 80%
+- 所有测试通过
+
+### 成功指标
+
+- NanoBotAgent 正确封装 ChatClientAgent
+- 支持同步和流式响应
+- 中间件正确执行
+
+---
+
+## 任务清单：Agent 运行时模块
+
+### 任务目标
+
+实现 Agent 运行时，处理消息总线的消息。
+
+### 相关方案文档
+
+- [Agent-Core.md](../solutions/Agent-Core.md) - Agent 运行时
+
+### 任务依赖
+
+- NanoBotAgent 模块
+- 消息总线
+- 通道管理器
+
+### 任务列表
+
+#### Task 3.4.1: 实现 AgentRuntime 类
+
+**描述**: 实现 Agent 运行时，监听消息总线。
+
+**交付物**:
+- `NanoBot.Agent/AgentRuntime.cs` 文件
+- 订阅入站消息
+- 调用 NanoBotAgent
+
+**完成标准**:
+- 正确监听消息总线
+- 正确调用 Agent
+
+---
+
+#### Task 3.4.2: 实现会话管理
+
+**描述**: 使用框架的 `AgentThread` 管理会话。
+
+**交付物**:
+- 会话创建逻辑
+- 会话缓存逻辑
 
 **完成标准**:
 - 正确创建和获取会话
-- 正确保存和加载会话
-- 缓存正确工作
+- 支持会话持久化
 
 ---
 
-#### Task 3.2.4: 实现 JSONL 持久化
+#### Task 3.4.3: 实现消息处理流程
 
-**描述**: 实现会话的 JSONL 格式持久化。
+**描述**: 实现完整的消息处理流程。
 
 **交付物**:
-- JSONL 读写逻辑
-- 文件路径管理
+- 入站消息处理
+- 出站消息发送
+- 错误处理
 
 **完成标准**:
-- 正确序列化和反序列化
-- 支持追加写入
-- 文件格式正确
+- 正确处理消息
+- 正确发送响应
 
 ---
 
-#### Task 3.2.5: 实现会话清理逻辑
+#### Task 3.4.4: 实现子 Agent 管理
 
-**描述**: 实现会话清理和导出功能。
+**描述**: 实现 spawn 工具的子 Agent 创建。
 
 **交付物**:
-- 清除会话方法
-- 导出会话方法
-- 列出会话方法
+- 子 Agent 创建逻辑
+- 任务执行和结果收集
 
 **完成标准**:
-- 正确清除指定会话
-- 正确导出会话数据
+- 正确创建子 Agent
+- 正确返回结果
 
 ---
 
-#### Task 3.2.6: 编写会话模块单元测试
+#### Task 3.4.5: 编写运行时测试
 
-**描述**: 编写会话模块的单元测试。
-
-**交付物**:
-- NanoBot.Core.Sessions.Tests 项目
-- SessionManagerTests.cs
-- SessionTests.cs
-
-**完成标准**:
-- 测试覆盖率 >= 80%
-- 包含 LastConsolidated 持久化测试
-- 所有测试通过
-
-### 成功指标
-
-- 会话持久化正确
-- 缓存机制有效
-- LastConsolidated 正确维护
-- 单元测试覆盖率 >= 80%
-
----
-
-## 任务清单：Agent 上下文模块
-
-### 任务目标
-
-实现 Agent 上下文构建，组装发送给 LLM 的完整上下文。
-
-### 相关方案文档
-
-- [Agent-Core.md](../solutions/Agent-Core.md) - IAgentContext 接口
-
-### 任务依赖
-
-- 记忆管理模块
-- 会话管理模块
-- Skills 加载模块
-- Bootstrap 加载模块
-
-### 任务列表
-
-#### Task 3.3.1: 定义上下文类型
-
-**描述**: 定义上下文相关的数据类型。
+**描述**: 编写运行时的单元测试。
 
 **交付物**:
-- ChatMessage.cs 文件
-- ToolCall.cs 文件（如未在 Phase 2 创建）
-
-**完成标准**:
-- 类型定义与设计文档一致
-- 支持多种消息角色
-
----
-
-#### Task 3.3.2: 定义 IAgentContext 接口
-
-**描述**: 定义 Agent 上下文接口。
-
-**交付物**:
-- IAgentContext.cs 接口文件
-- 上下文构建方法声明
-
-**完成标准**:
-- 接口定义与设计文档一致
-
----
-
-#### Task 3.3.3: 实现 AgentContext 类
-
-**描述**: 实现 Agent 上下文构建。
-
-**交付物**:
-- AgentContext.cs 实现文件
-- 系统提示词构建
-- 历史消息获取
-
-**完成标准**:
-- 正确构建系统提示词
-- 正确获取对话历史
-- 正确获取记忆内容
-
----
-
-#### Task 3.3.4: 实现系统提示词构建
-
-**描述**: 实现完整的系统提示词构建逻辑。
-
-**交付物**:
-- BuildSystemPromptAsync 方法实现
-- 各部分内容拼接
-
-**完成标准**:
-- 包含核心身份信息
-- 包含 Bootstrap 文件内容
-- 包含记忆内容
-- 包含 Skills 摘要
-
----
-
-#### Task 3.3.5: 实现 Skills 渐进式加载
-
-**描述**: 实现 Skills 的渐进式加载机制。
-
-**交付物**:
-- 始终加载 Skills 的完整内容
-- 可用 Skills 的 XML 摘要
-- SkillsSummary 格式化
-
-**完成标准**:
-- always=true 的 Skills 完整加载
-- 其他 Skills 仅显示摘要
-- XML 格式正确
-
----
-
-#### Task 3.3.6: 实现上下文缓存
-
-**描述**: 实现上下文内容的缓存机制。
-
-**交付物**:
-- 缓存逻辑实现
-- 缓存失效机制
-
-**完成标准**:
-- 避免重复构建
-- 文件变更时正确失效
-
----
-
-#### Task 3.3.7: 编写上下文模块单元测试
-
-**描述**: 编写上下文模块的单元测试。
-
-**交付物**:
-- NanoBot.Core.Agents.Tests 项目
-- AgentContextTests.cs
+- `NanoBot.Agent.Tests/AgentRuntimeTests.cs` 文件
 
 **完成标准**:
 - 测试覆盖率 >= 80%
@@ -362,194 +474,43 @@
 
 ### 成功指标
 
-- 系统提示词构建正确
-- Skills 渐进式加载正确
-- 缓存机制有效
-- 单元测试覆盖率 >= 80%
+- 消息处理流程正确
+- 会话管理正确
+- 子 Agent 创建正确
 
 ---
 
-## 任务清单：Agent 核心模块
+## 项目目录结构
 
-### 任务目标
-
-实现 Agent 核心逻辑，包括单轮处理和多轮循环。
-
-### 相关方案文档
-
-- [Agent-Core.md](../solutions/Agent-Core.md) - IAgent 接口
-
-### 任务依赖
-
-- Agent 上下文模块
-- LLM 提供商模块
-- 工具系统模块
-- 消息总线模块
-- 会话管理模块
-- 记忆管理模块
-
-### 任务列表
-
-#### Task 4.1.1: 定义 Agent 请求响应类型
-
-**描述**: 定义 Agent 请求和响应相关的数据类型。
-
-**交付物**:
-- AgentRequest.cs 文件
-- AgentResponse.cs 文件
-- AgentResponseMetadata.cs 文件
-
-**完成标准**:
-- 类型定义与设计文档一致
-- 包含完整的元数据
-
----
-
-#### Task 4.1.2: 定义 IAgent 接口
-
-**描述**: 定义 Agent 接口。
-
-**交付物**:
-- IAgent.cs 接口文件
-- 单轮和多轮处理方法声明
-
-**完成标准**:
-- 接口定义与设计文档一致
-- 包含 Id、Name、WorkspacePath 属性
-
----
-
-#### Task 4.1.3: 实现 Agent 基础类
-
-**描述**: 实现 Agent 基础结构和依赖注入。
-
-**交付物**:
-- Agent.cs 实现文件
-- 构造函数和依赖注入
-- 属性实现
-
-**完成标准**:
-- 正确注入所有依赖
-- 属性正确初始化
-
----
-
-#### Task 4.1.4: 实现单轮处理逻辑
-
-**描述**: 实现 ProcessTurnAsync 方法。
-
-**交付物**:
-- ProcessTurnAsync 方法实现
-- LLM 调用逻辑
-- 响应构建逻辑
-
-**完成标准**:
-- 正确构建请求
-- 正确调用 LLM
-- 正确处理响应
-
----
-
-#### Task 4.1.5: 实现工具调用执行
-
-**描述**: 实现工具调用的执行逻辑。
-
-**交付物**:
-- 工具调用解析逻辑
-- 工具执行逻辑
-- 结果处理逻辑
-
-**完成标准**:
-- 正确解析工具调用
-- 正确执行工具
-- 正确处理执行结果
-
----
-
-#### Task 4.1.6: 实现多轮循环逻辑
-
-**描述**: 实现 RunLoopAsync 方法。
-
-**交付物**:
-- RunLoopAsync 方法实现
-- 迭代控制逻辑
-- 终止条件判断
-
-**完成标准**:
-- 正确执行多轮循环
-- 正确处理最大迭代限制
-- 正确处理取消请求
-
----
-
-#### Task 4.1.7: 实现消息历史管理
-
-**描述**: 实现对话历史的追加和管理。
-
-**交付物**:
-- 消息追加逻辑
-- 工具消息追加逻辑
-- 会话更新逻辑
-
-**完成标准**:
-- 正确追加用户消息
-- 正确追加助手响应
-- 正确追加工具结果
-
----
-
-#### Task 4.1.8: 实现记忆合并触发
-
-**描述**: 实现记忆合并的触发逻辑。
-
-**交付物**:
-- 合并条件判断
-- 合并执行逻辑
-- 会话清理逻辑
-
-**完成标准**:
-- 正确判断合并时机
-- 正确执行合并
-- 正确清理会话
-
----
-
-#### Task 4.1.9: 实现错误处理和重试
-
-**描述**: 实现 Agent 的错误处理和重试机制。
-
-**交付物**:
-- 异常捕获逻辑
-- 重试逻辑
-- 错误响应构建
-
-**完成标准**:
-- 正确捕获和处理异常
-- 合理的重试策略
-- 友好的错误响应
-
----
-
-#### Task 4.1.10: 编写 Agent 核心单元测试
-
-**描述**: 编写 Agent 核心的单元测试。
-
-**交付物**:
-- AgentTests.cs 文件
-- AgentLoopIntegrationTests.cs 文件
-
-**完成标准**:
-- 测试覆盖率 >= 80%
-- 包含集成测试
-- 所有测试通过
-
-### 成功指标
-
-- 单轮处理正确
-- 多轮循环正确
-- 工具调用执行正确
-- 记忆合并正确
-- 单元测试覆盖率 >= 80%
+```
+src/
+├── NanoBot.Core/
+│   └── Memory/
+│       └── IMemoryStore.cs
+│
+├── NanoBot.Agent/
+│   ├── NanoBotAgent.cs
+│   ├── AgentRuntime.cs
+│   └── Context/
+│       ├── BootstrapContextProvider.cs
+│       ├── MemoryContextProvider.cs
+│       ├── HistoryContextProvider.cs
+│       └── SkillsContextProvider.cs
+│
+├── NanoBot.Infrastructure/
+│   └── Memory/
+│       └── MemoryStore.cs
+│
+└── tests/
+    ├── NanoBot.Agent.Tests/
+    │   ├── NanoBotAgentTests.cs
+    │   ├── AgentRuntimeTests.cs
+    │   └── Context/
+    │       └── ContextProviderTests.cs
+    └── NanoBot.Infrastructure.Tests/
+        └── Memory/
+            └── MemoryStoreTests.cs
+```
 
 ---
 
@@ -557,19 +518,20 @@
 
 | 风险 | 影响 | 概率 | 缓解措施 |
 |------|------|------|----------|
-| LLM 响应超时 | 高 | 中 | 实现超时控制和重试 |
-| 工具执行异常 | 中 | 中 | 完善错误处理，隔离执行 |
-| 记忆合并失败 | 中 | 低 | 备份机制，手动恢复 |
-| 会话数据损坏 | 高 | 低 | JSONL 追加写入，定期备份 |
+| 框架 API 变更 | 高 | 低 | 使用稳定版本，关注更新日志 |
+| 上下文注入失败 | 中 | 低 | 完善错误处理，日志记录 |
+| 会话持久化问题 | 中 | 低 | 实现 FileBackedAgentThread |
+
+---
 
 ## 阶段完成标准
 
-- 所有任务清单完成
-- 所有单元测试通过
-- 代码审查通过
-- Agent 循环可正常运行
-- 工具调用可正常执行
-- 记忆和会话持久化正常
+- [ ] 所有 ContextProvider 实现完成
+- [ ] MemoryStore 实现完成
+- [ ] NanoBotAgent 封装完成
+- [ ] AgentRuntime 实现完成
+- [ ] 所有单元测试通过
+- [ ] Agent 循环可正常运行
 
 ## 下一阶段
 

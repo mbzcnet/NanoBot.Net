@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using NanoBot.Core.Bus;
 using NanoBot.Infrastructure.Bus;
 using Xunit;
@@ -193,7 +194,7 @@ public class MessageBusTests
         Assert.Equal(5, counter);
     }
 
-    /// <summary>Testing.md: Stop_PreventsNewMessages - 停止后新发布的消息不应被分发到订阅者</summary>
+    /// <summary>Testing.md: Stop_PreventsNewMessages - 停止后不能再发布出站消息（或新消息不会被分发）</summary>
     [Fact]
     public async Task Stop_PreventsNewMessagesFromBeingDispatched()
     {
@@ -212,10 +213,11 @@ public class MessageBusTests
 
         bus.Stop();
 
-        await bus.PublishOutboundAsync(CreateOutboundMessage("test", "chat", "after-stop"));
-        await Task.Delay(150);
-
+        await Task.Delay(50);
         Assert.Equal(1, receivedCount);
+
+        await Assert.ThrowsAsync<ChannelClosedException>(async () =>
+            await bus.PublishOutboundAsync(CreateOutboundMessage("test", "chat", "after-stop")));
     }
 
     [Fact]

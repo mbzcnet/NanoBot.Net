@@ -16,6 +16,7 @@
 | [Infrastructure.md](./Infrastructure.md) | **基础设施层**：IMessageBus、ICronService、IHeartbeatService、ISkillsLoader、ISubagentManager | 开发者 E   |
 | [Configuration.md](./Configuration.md)   | **配置管理层**：AgentConfig、各模块配置类、安全配置                                           | 开发者 F   |
 | [CLI.md](./CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
+| [Installation.md](./Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
 | [Testing.md](./Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
 
 ---
@@ -36,6 +37,7 @@
 
 - [Channels.md](./Channels.md) - 多通道接入
 - [Infrastructure.md](./Infrastructure.md) - Cron、Heartbeat、MCP
+- [Installation.md](./Installation.md) - 安装与发布
 
 ---
 

@@ -2,12 +2,13 @@
 
 本文档定义 **NanoBot.Net** 的 .NET 移植方案，仅包含对 [nanobot](https://github.com/HKUDS/nanobot) 的移植内容。LightRAG、FastCode 等均不纳入本方案，若需使用则作为外部服务另行调用。
 
-**核心框架**：本方案基于 **Microsoft.Agents.AI** 框架进行设计，充分利用其在 .NET 生态中的权威性和成熟度。
+**核心框架**：本方案基于 **Microsoft.Agents.AI** 框架进行设计，**直接使用框架提供的核心抽象**，避免重复造轮子。
 
 参考文档：
 - 本仓库 [README.md](../../README.md)
 - [Temp/nanobot/README.md](../../Temp/nanobot/README.md)
 - [Microsoft Agent Framework 官方文档](https://learn.microsoft.com/en-us/agent-framework/)
+- [Microsoft.Agents.AI API 文档](https://learn.microsoft.com/en-us/dotnet/api/microsoft.agents.ai)
 
 ---
 
@@ -21,7 +22,70 @@ NanoBot.Net 是 [nanobot](https://github.com/HKUDS/nanobot) 的 **.NET 移植**�
 
 - 明确 NanoBot.Net 的 .NET 移植版**技术栈**。
 - 明确 **nanobot** 能力在移植中的**完整保留**（原有能力一项不少）。
+- **充分利用 Microsoft.Agents.AI 框架**，避免重复造轮子，保持代码精简。
 - 在能力描述上**不超出当前已实现范围**；未实现部分仅作技术栈与扩展说明，不视为已具备能力。
+
+---
+
+## Microsoft.Agents.AI 框架核心能力
+
+Microsoft.Agents.AI 框架提供了完整的 Agent 开发基础设施，NanoBot.Net 应**直接使用**而非重新实现：
+
+### 框架提供的核心组件
+
+| 组件 | 框架类型 | 说明 | NanoBot.Net 使用方式 |
+|------|----------|------|---------------------|
+| **Agent 基类** | `AIAgent` | Agent 抽象基类，提供 RunAsync/RunStreamingAsync | 继承或使用 `ChatClientAgent` |
+| **ChatClient** | `IChatClient` | LLM 调用抽象，支持 OpenAI/Azure/Anthropic 等 | 直接使用，无需自定义 Provider 抽象 |
+| **工具系统** | `AITool`/`AIFunction` | 工具定义和函数调用 | 直接使用，无需自定义 ITool 抽象 |
+| **会话管理** | `AgentSession` | 会话状态管理 | 直接使用 |
+| **上下文提供者** | `AIContextProvider` | 动态上下文注入 | 实现自定义 ContextProvider |
+| **聊天历史** | `ChatHistoryProvider` | 聊天历史存储 | 实现自定义存储 |
+| **中间件** | `AIAgentBuilder` | Agent 管道构建 | 使用 `Use()` 方法添加中间件 |
+| **MCP 支持** | Python 版 `MCPTool` | Model Context Protocol | .NET 版需自行实现（框架暂无） |
+
+### 框架提供的 LLM 客户端扩展
+
+```csharp
+// OpenAI ChatClient -> AIAgent
+ChatClientAgent agent = new OpenAIClient(apiKey)
+    .GetChatClient("gpt-4o")
+    .AsAIAgent(
+        name: "NanoBot",
+        instructions: "You are a helpful assistant.",
+        tools: myTools);
+
+// Azure OpenAI ChatClient -> AIAgent
+ChatClientAgent agent = new AzureOpenAIClient(endpoint, credential)
+    .GetChatClient("gpt-4o")
+    .AsAIAgent(instructions: "...");
+
+// Anthropic -> AIAgent (via IChatClient)
+ChatClientAgent agent = new AnthropicClient()
+    .AsAIAgent(instructions: "...");
+```
+
+### 框架提供的工具注册
+
+```csharp
+// 使用 AIFunctionFactory 创建工具
+var tools = new List<AITool>
+{
+    AIFunctionFactory.Create(ReadFileAsync, new AIFunctionFactoryOptions
+    {
+        Name = "read_file",
+        Description = "Read file contents"
+    }),
+    AIFunctionFactory.Create(WriteFileAsync, new AIFunctionFactoryOptions
+    {
+        Name = "write_file",
+        Description = "Write content to file"
+    })
+};
+
+// 传递给 Agent
+var agent = chatClient.AsAIAgent(tools: tools);
+```
 
 ---
 
@@ -30,12 +94,13 @@ NanoBot.Net 是 [nanobot](https://github.com/HKUDS/nanobot) 的 **.NET 移植**�
 | 维度 | 选型说明 |
 |------|----------|
 | **语言与运行时** | C# / .NET 8+ (LTS) |
-| **核心框架** | **Microsoft.Agents.AI** - 微软官方 Agent 框架，提供 Agent、Activity、Channel、Middleware 等核心抽象 |
-| **核心形态** | 与 nanobot 一致的模块划分：Agent、Tools、Providers、Channels、Bus、Config、CLI 等，基于 Microsoft.Agents.AI 的架构模式实现 |
+| **核心框架** | **Microsoft.Agents.AI** - 直接使用框架的 AIAgent、IChatClient、AITool 等核心类型 |
+| **LLM 客户端** | 使用 `Microsoft.Extensions.AI` 的 `IChatClient` 抽象，支持 OpenAI/Azure/Anthropic/Ollama 等 |
+| **工具系统** | 使用 `AITool`/`AIFunction` 抽象，通过 `AIFunctionFactory` 创建 |
 | **依赖注入** | `Microsoft.Extensions.DependencyInjection` - 用于服务注册与生命周期管理 |
 | **配置管理** | `Microsoft.Extensions.Configuration` - 支持 JSON、环境变量等多种配置源 |
 | **日志系统** | `Microsoft.Extensions.Logging` - 统一日志抽象，支持多种日志提供程序 |
-| **HTTP 客户端** | `HttpClient` + `IHttpClientFactory` - 用于 LLM API 调用和 Web 工具 |
+| **HTTP 客户端** | `HttpClient` + `IHttpClientFactory` - 用于 Web 工具 |
 | **JSON 处理** | `System.Text.Json` - 高性能 JSON 序列化/反序列化 |
 | **异步编程** | `async/await` + `Task` + `Channel<T>` - 用于消息队列和并发处理 |
 
@@ -163,20 +228,43 @@ graph TB
 
 ## Microsoft.Agents.AI 集成映射
 
+**重要原则**：NanoBot.Net 直接使用框架提供的类型，而非定义新的抽象接口。
+
 | nanobot 模块 | Microsoft.Agents.AI 对应 | NanoBot.Net 实现职责 |
 |--------------|--------------------------|---------------------|
-| agent/loop | `IAgent` + `AgentRuntime` | 实现 `IAgent` 接口，封装 Agent 循环逻辑 |
-| agent/context | `ActivityContext` + `ConversationState` | 上下文构建：历史、Memory、Skills 注入 |
-| agent/memory | `IStorage` + Custom Memory | 持久化记忆的读写与召回（MEMORY.md + HISTORY.md） |
-| agent/tools | `ITool` + `ToolRegistry` | 工具注册与执行，实现 `ITool` 接口 |
-| agent/skills | Custom Skills Loader | Skills 加载与执行机制 |
-| providers | `ILLMProvider` + Custom | LLM 提供商抽象与实现 |
-| channels | `IChannelAdapter` | 多通道接入，实现 `IChannelAdapter` 接口 |
-| bus | `Channel<T>` + Custom Bus | 消息路由与队列（基于 .NET Channel） |
-| cron | Custom Cron Service | 定时任务调度 |
-| heartbeat | Custom Heartbeat | 主动唤醒机制 |
-| config | `IConfiguration` | 配置加载（支持 config.json） |
-| cli | `System.CommandLine` | 命令行：onboard、agent、gateway、status 等 |
+| agent/loop | `ChatClientAgent` + `AIAgentBuilder` | **直接使用** `ChatClientAgent`，通过 `AIAgentBuilder` 添加中间件 |
+| agent/context | `AIContextProvider` | 实现 `AIContextProvider` 注入 bootstrap 文件、memory、skills |
+| agent/memory | `ChatHistoryProvider` + 自定义 | 实现 `ChatHistoryProvider` 管理 MEMORY.md 和 HISTORY.md |
+| agent/tools | `AITool` + `AIFunctionFactory` | **直接使用** `AIFunctionFactory` 创建工具函数 |
+| agent/skills | 自定义 `ISkillsLoader` | Skills 加载与解析（框架无此概念） |
+| providers | `IChatClient` 扩展方法 | **直接使用** `AsAIAgent()` 扩展方法，无需自定义 Provider 抽象 |
+| channels | 自定义 `IChannel` | 通道适配器（框架无此概念） |
+| bus | 自定义 `IMessageBus` | 消息路由与队列（框架无此概念） |
+| cron | 自定义 `ICronService` | 定时任务调度（框架无此概念） |
+| heartbeat | 自定义 `IHeartbeatService` | 主动唤醒机制（框架无此概念） |
+| config | `IConfiguration` | 配置加载（使用 .NET 标准配置） |
+| cli | `System.CommandLine` | 命令行入口 |
+
+### 框架使用策略
+
+1. **直接使用框架类型**：
+   - `AIAgent` / `ChatClientAgent` - Agent 实现
+   - `IChatClient` - LLM 调用
+   - `AITool` / `AIFunction` - 工具定义
+   - `AgentSession` - 会话管理
+   - `AIAgentBuilder` - 中间件管道
+
+2. **实现框架抽象**：
+   - `AIContextProvider` - 注入 nanobot 特有上下文（bootstrap、memory、skills）
+   - `ChatHistoryProvider` - 自定义聊天历史存储
+
+3. **自定义实现**（框架无对应功能）：
+   - `IMessageBus` - 消息总线
+   - `ICronService` - 定时任务
+   - `IHeartbeatService` - 心跳服务
+   - `ISkillsLoader` - Skills 加载
+   - `ISubagentManager` - 子 Agent 管理
+   - `IChannel` - 通道适配器
 
 ---
 

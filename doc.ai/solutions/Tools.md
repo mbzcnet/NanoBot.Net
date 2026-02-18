@@ -1,543 +1,521 @@
 # 工具层设计
 
-本文档定义 NanoBot.Net 的工具层接口设计，对应 nanobot 的 agent/tools/ 目录。
+本文档定义 NanoBot.Net 的工具层设计。
 
-**依赖关系**：工具层依赖于 Agent 核心层（IAgent）和基础设施层（Config）。
-
----
-
-## 模块概览
-
-| 模块 | 接口 | 对应原文件 | 职责 |
-|------|------|-----------|------|
-| 工具抽象 | `ITool` | `nanobot/agent/tools/base.py` | 工具接口定义 |
-| 工具注册表 | `IToolRegistry` | - | 工具注册与查找 |
-| MCP 客户端 | `IMcpClient` | `nanobot/agent/tools/mcp.py` | MCP 协议客户端 |
+**核心原则**：直接使用 `Microsoft.Extensions.AI` 的 `AITool`/`AIFunction` 抽象，**不定义自定义的工具接口**。
 
 ---
 
-## ITool 接口
+## 设计原则
 
-工具接口，对应 nanobot/agent/tools/base.py 的 Tool 类，基于 Microsoft.Agents.AI 的 ITool 模式设计。
+### 为什么不需要自定义工具接口
+
+Microsoft.Agents.AI 框架已经提供了完整的工具系统：
+
+1. **`AITool` 抽象**：工具基类
+2. **`AIFunction`**：函数工具实现
+3. **`AIFunctionFactory`**：工具创建工厂
+4. **`FunctionInvokingChatClient`**：自动处理函数调用
+
+NanoBot.Net 只需：
+- 使用 `AIFunctionFactory.Create()` 创建工具
+- 将工具传递给 `ChatOptions.Tools`
+- 框架自动处理工具调用循环
+
+---
+
+## 框架提供的工具创建方式
+
+### 使用 AIFunctionFactory
 
 ```csharp
-namespace NanoBot.Core.Tools;
+using Microsoft.Extensions.AI;
 
-/// <summary>
-/// 工具接口
-/// </summary>
-public interface ITool
-{
-    /// <summary>工具名称（用于函数调用）</summary>
-    string Name { get; }
+// 方式 1：从委托创建
+AITool readTool = AIFunctionFactory.Create(
+    (string path) => File.ReadAllText(path),
+    new AIFunctionFactoryOptions
+    {
+        Name = "read_file",
+        Description = "Read the contents of a file"
+    });
 
-    /// <summary>工具描述</summary>
-    string Description { get; }
+// 方式 2：从方法创建
+AITool writeTool = AIFunctionFactory.Create(
+    WriteFileAsync,
+    new AIFunctionFactoryOptions
+    {
+        Name = "write_file",
+        Description = "Write content to a file"
+    });
 
-    /// <summary>参数 JSON Schema</summary>
-    JsonElement Parameters { get; }
-
-    /// <summary>执行工具</summary>
-    Task<ToolResult> ExecuteAsync(
-        JsonElement arguments,
-        IToolContext context,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>验证参数</summary>
-    ValidationResult ValidateParameters(JsonElement arguments);
-}
+// 方式 3：带复杂参数
+AITool execTool = AIFunctionFactory.Create(
+    (string command, int timeout = 60) => ExecuteCommandAsync(command, timeout),
+    new AIFunctionFactoryOptions
+    {
+        Name = "exec",
+        Description = "Execute a shell command"
+    });
 ```
 
-### ToolResult
+### 将工具传递给 Agent
 
 ```csharp
-namespace NanoBot.Core.Tools;
-
-/// <summary>工具执行结果</summary>
-public record ToolResult
+var tools = new List<AITool>
 {
-    /// <summary>输出内容</summary>
-    public required string Output { get; init; }
+    AIFunctionFactory.Create(ReadFileAsync, new() { Name = "read_file", Description = "..." }),
+    AIFunctionFactory.Create(WriteFileAsync, new() { Name = "write_file", Description = "..." }),
+    AIFunctionFactory.Create(ExecAsync, new() { Name = "exec", Description = "..." })
+};
 
-    /// <summary>是否成功</summary>
-    public bool IsSuccess { get; init; } = true;
-
-    /// <summary>错误信息</summary>
-    public string? ErrorMessage { get; init; }
-}
-```
-
-### IToolContext
-
-```csharp
-namespace NanoBot.Core.Tools;
-
-/// <summary>工具执行上下文</summary>
-public interface IToolContext
-{
-    /// <summary>工作目录</summary>
-    string WorkingDirectory { get; }
-
-    /// <summary>当前 Agent</summary>
-    IAgent Agent { get; }
-
-    /// <summary>服务提供者</summary>
-    IServiceProvider Services { get; }
-}
-```
-
-### ValidationResult
-
-```csharp
-namespace NanoBot.Core.Tools;
-
-/// <summary>参数验证结果</summary>
-public record ValidationResult
-{
-    /// <summary>是否有效</summary>
-    public bool IsValid { get; init; }
-
-    /// <summary>错误信息列表</summary>
-    public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
-
-    public static ValidationResult Success() => new() { IsValid = true };
-    public static ValidationResult Failure(params string[] errors) => new() { IsValid = false, Errors = errors };
-}
+var agent = chatClient.AsAIAgent(
+    instructions: "You are a helpful assistant.",
+    tools: tools);
 ```
 
 ---
 
-## IToolRegistry 接口
+## 内置工具实现
 
-工具注册表接口，管理所有可用工具的注册和查找。
+### 文件工具
 
 ```csharp
-namespace NanoBot.Core.Tools;
+namespace NanoBot.Tools.FileSystem;
 
-/// <summary>
-/// 工具注册表接口
-/// </summary>
-public interface IToolRegistry
+public static class FileTools
 {
-    /// <summary>注册工具</summary>
-    void Register(ITool tool);
-
-    /// <summary>批量注册工具</summary>
-    void RegisterRange(IEnumerable<ITool> tools);
-
-    /// <summary>获取工具</summary>
-    ITool? GetTool(string name);
-
-    /// <summary>获取所有工具</summary>
-    IReadOnlyList<ITool> GetAllTools();
-
-    /// <summary>获取工具的 OpenAI 函数 Schema</summary>
-    IReadOnlyList<JsonElement> GetToolSchemas();
-
-    /// <summary>检查工具是否存在</summary>
-    bool HasTool(string name);
+    public static AITool CreateReadFileTool(string? workspacePath = null)
+    {
+        return AIFunctionFactory.Create(
+            (string path, int? startLine = null, int? endLine = null) =>
+            {
+                var fullPath = ResolvePath(path, workspacePath);
+                if (!File.Exists(fullPath))
+                    return $"Error: File not found: {path}";
+                
+                var lines = File.ReadAllLines(fullPath);
+                if (startLine.HasValue || endLine.HasValue)
+                {
+                    var start = startLine ?? 0;
+                    var end = endLine ?? lines.Length;
+                    lines = lines.Skip(start).Take(end - start).ToArray();
+                }
+                
+                return string.Join("\n", lines.Select((l, i) => $"{i + 1}→{l}"));
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "read_file",
+                Description = "Read the contents of a file. Returns the file content with line numbers."
+            });
+    }
+    
+    public static AITool CreateWriteFileTool(string? workspacePath = null)
+    {
+        return AIFunctionFactory.Create(
+            (string path, string content) =>
+            {
+                var fullPath = ResolvePath(path, workspacePath);
+                Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+                File.WriteAllText(fullPath, content);
+                return $"Successfully wrote to {path}";
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "write_file",
+                Description = "Write content to a file. Creates parent directories if needed."
+            });
+    }
+    
+    public static AITool CreateEditFileTool(string? workspacePath = null)
+    {
+        return AIFunctionFactory.Create(
+            (string path, string oldText, string newText) =>
+            {
+                var fullPath = ResolvePath(path, workspacePath);
+                if (!File.Exists(fullPath))
+                    return $"Error: File not found: {path}";
+                
+                var content = File.ReadAllText(fullPath);
+                if (!content.Contains(oldText))
+                    return $"Error: Text not found in file: {oldText[..Math.Min(50, oldText.Length)]}...";
+                
+                content = content.Replace(oldText, newText);
+                File.WriteAllText(fullPath, content);
+                return $"Successfully edited {path}";
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "edit_file",
+                Description = "Edit a file by replacing specific text."
+            });
+    }
+    
+    public static AITool CreateListDirTool(string? workspacePath = null)
+    {
+        return AIFunctionFactory.Create(
+            (string path, bool recursive = false) =>
+            {
+                var fullPath = ResolvePath(path, workspacePath);
+                if (!Directory.Exists(fullPath))
+                    return $"Error: Directory not found: {path}";
+                
+                var entries = recursive
+                    ? Directory.GetFileSystemEntries(fullPath, "*", SearchOption.AllDirectories)
+                    : Directory.GetFileSystemEntries(fullPath);
+                
+                return string.Join("\n", entries.Select(e =>
+                {
+                    var isDir = Directory.Exists(e);
+                    return isDir ? $"[DIR] {Path.GetFileName(e)}/" : $"[FILE] {Path.GetFileName(e)}";
+                }));
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "list_dir",
+                Description = "List contents of a directory."
+            });
+    }
+    
+    private static string ResolvePath(string path, string? workspacePath)
+    {
+        if (Path.IsPathRooted(path))
+            return path;
+        return Path.Combine(workspacePath ?? Directory.GetCurrentDirectory(), path);
+    }
 }
+```
+
+### Shell 工具
+
+```csharp
+namespace NanoBot.Tools.Shell;
+
+public static class ShellTools
+{
+    private static readonly string[] DeniedPatterns = 
+    {
+        "rm -rf /", "format", "dd if=", "shutdown", "reboot", "mkfs"
+    };
+    
+    public static AITool CreateExecTool(
+        string? workspacePath = null,
+        int defaultTimeout = 60,
+        IEnumerable<string>? additionalDeniedPatterns = null)
+    {
+        var denied = DeniedPatterns.Concat(additionalDeniedPatterns ?? []).ToHashSet();
+        
+        return AIFunctionFactory.Create(
+            async (string command, int timeout = 60, string? workingDir = null) =>
+            {
+                if (denied.Any(p => command.Contains(p, StringComparison.OrdinalIgnoreCase)))
+                    return $"Error: Command contains blocked pattern";
+                
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "/bin/bash",
+                    Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
+                    WorkingDirectory = workingDir ?? workspacePath ?? Directory.GetCurrentDirectory(),
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false
+                };
+                
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
+                using var process = new Process { StartInfo = startInfo };
+                
+                process.Start();
+                
+                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+                
+                await process.WaitForExitAsync(cts.Token);
+                
+                var output = await outputTask;
+                var error = await errorTask;
+                
+                if (!string.IsNullOrEmpty(error))
+                    return $"Error: {error}\nOutput: {output}";
+                
+                return output.Length > 10000 ? output[..10000] + "\n... (truncated)" : output;
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "exec",
+                Description = "Execute a shell command. Use with caution."
+            });
+    }
+}
+```
+
+### Web 工具
+
+```csharp
+namespace NanoBot.Tools.Web;
+
+public static class WebTools
+{
+    public static AITool CreateWebSearchTool(string? apiKey = null)
+    {
+        return AIFunctionFactory.Create(
+            async (string query, int count = 5) =>
+            {
+                var key = apiKey ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY");
+                if (string.IsNullOrEmpty(key))
+                    return "Error: BRAVE_API_KEY not configured";
+                
+                using var http = new HttpClient();
+                http.DefaultRequestHeaders.Add("X-Subscription-Token", key);
+                
+                var url = $"https://api.search.brave.com/res/v1/web/search?q={Uri.EscapeDataString(query)}&count={count}";
+                var response = await http.GetStringAsync(url);
+                
+                // Parse and format results...
+                return FormatSearchResults(response);
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "web_search",
+                Description = "Search the web using Brave Search API."
+            });
+    }
+    
+    public static AITool CreateWebFetchTool()
+    {
+        return AIFunctionFactory.Create(
+            async (string url, int maxChars = 50000) =>
+            {
+                using var http = new HttpClient();
+                var html = await http.GetStringAsync(url);
+                
+                // Extract readable content using readability...
+                var content = ExtractReadableContent(html);
+                
+                return content.Length > maxChars 
+                    ? content[..maxChars] + "\n... (truncated)" 
+                    : content;
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "web_fetch",
+                Description = "Fetch and extract main content from a URL."
+            });
+    }
+}
+```
+
+### 消息工具
+
+```csharp
+namespace NanoBot.Tools.Messaging;
+
+public static class MessageTools
+{
+    public static AITool CreateMessageTool(IMessageBus messageBus)
+    {
+        return AIFunctionFactory.Create(
+            async (string content, string? channel = null, string? chatId = null) =>
+            {
+                var message = new OutboundMessage
+                {
+                    Content = content,
+                    ChannelId = channel,
+                    ChatId = chatId
+                };
+                
+                await messageBus.PublishOutboundAsync(message);
+                return "Message sent successfully";
+            },
+            new AIFunctionFactoryOptions
+            {
+                Name = "message",
+                Description = "Send a message to a specific channel and chat."
+            });
+    }
+}
+```
+
+---
+
+## MCP 客户端
+
+**注意**：Microsoft.Agents.AI 框架的 .NET 版本目前没有内置 MCP 支持（Python 版有 `MCPTool`）。NanoBot.Net 需要自行实现 MCP 客户端。
+
+### MCP 客户端实现
+
+```csharp
+namespace NanoBot.Tools.Mcp;
+
+public interface IMcpClient
+{
+    Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken ct = default);
+    Task DisconnectAsync(string serverName, CancellationToken ct = default);
+    Task<IReadOnlyList<AITool>> GetToolsAsync(string serverName, CancellationToken ct = default);
+    Task<string> CallToolAsync(string serverName, string toolName, Dictionary<string, object> args, CancellationToken ct = default);
+    IReadOnlyList<string> ConnectedServers { get; }
+}
+
+public class McpClient : IMcpClient
+{
+    private readonly Dictionary<string, McpServerConnection> _connections = new();
+    
+    public async Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken ct = default)
+    {
+        var connection = new McpServerConnection(config);
+        await connection.ConnectAsync(ct);
+        _connections[serverName] = connection;
+    }
+    
+    public async Task<IReadOnlyList<AITool>> GetToolsAsync(string serverName, CancellationToken ct = default)
+    {
+        if (!_connections.TryGetValue(serverName, out var connection))
+            throw new InvalidOperationException($"Server '{serverName}' not connected");
+        
+        var mcpTools = await connection.ListToolsAsync(ct);
+        
+        return mcpTools.Select(t => AIFunctionFactory.Create(
+            (JsonElement args) => CallToolAsync(serverName, t.Name, args),
+            new AIFunctionFactoryOptions
+            {
+                Name = t.Name,
+                Description = t.Description
+            })).ToList();
+    }
+    
+    // ... 其他实现
+}
+```
+
+### 将 MCP 工具转换为 AITool
+
+```csharp
+public static class McpExtensions
+{
+    public static async Task<IReadOnlyList<AITool>> ToAIToolsAsync(
+        this IMcpClient client,
+        string serverName,
+        CancellationToken ct = default)
+    {
+        return await client.GetToolsAsync(serverName, ct);
+    }
+}
+
+// 使用示例
+var mcpClient = new McpClient();
+await mcpClient.ConnectAsync("filesystem", new McpServerConfig
+{
+    Command = "npx",
+    Args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+});
+
+var mcpTools = await mcpClient.ToAIToolsAsync("filesystem");
+var allTools = builtinTools.Concat(mcpTools).ToList();
+```
+
+---
+
+## 工具注册与 DI
+
+### 服务注册
+
+```csharp
+public static class ServiceCollectionExtensions
+{
+    public static IServiceCollection AddNanoBotTools(
+        this IServiceCollection services,
+        string? workspacePath = null)
+    {
+        // 注册工具工厂
+        services.AddSingleton(sp =>
+        {
+            var workspace = workspacePath ?? sp.GetRequiredService<IWorkspaceManager>().GetWorkspacePath();
+            var messageBus = sp.GetService<IMessageBus>();
+            
+            var tools = new List<AITool>
+            {
+                FileTools.CreateReadFileTool(workspace),
+                FileTools.CreateWriteFileTool(workspace),
+                FileTools.CreateEditFileTool(workspace),
+                FileTools.CreateListDirTool(workspace),
+                ShellTools.CreateExecTool(workspace),
+                WebTools.CreateWebSearchTool(),
+                WebTools.CreateWebFetchTool()
+            };
+            
+            if (messageBus != null)
+            {
+                tools.Add(MessageTools.CreateMessageTool(messageBus));
+            }
+            
+            return tools.AsReadOnly();
+        });
+        
+        return services;
+    }
+}
+```
+
+---
+
+## 工具调用上下文
+
+### 访问当前上下文
+
+```csharp
+public static AITool CreateContextAwareTool()
+{
+    return AIFunctionFactory.Create(
+        (string path) =>
+        {
+            // 访问当前 Agent 运行上下文
+            var context = AIAgent.CurrentRunContext;
+            if (context != null)
+            {
+                var sessionId = context.Session?.Id;
+                var agentId = context.Agent?.Id;
+                // 使用上下文信息...
+            }
+            
+            return File.ReadAllText(path);
+        },
+        new AIFunctionFactoryOptions { Name = "read_file", Description = "..." });
+}
+```
+
+### 使用 FunctionInvocationContext
+
+```csharp
+// 通过 AIAgentBuilder 添加函数调用中间件
+var agent = chatClient.AsAIAgent(tools: tools)
+    .AsBuilder()
+    .Use((agent, context, next, ct) =>
+    {
+        // 记录工具调用
+        _logger.LogInformation("Tool called: {ToolName}", context.Function.Name);
+        
+        // 调用下一个中间件
+        return next(context, ct);
+    })
+    .Build();
 ```
 
 ---
 
 ## 内置工具清单
 
-| 工具名称 | 功能描述 | 关键参数 | 对应原文件 |
-|----------|----------|----------|-----------|
-| **read_file** | 读取文件内容 | `path`: 文件路径 | `tools/filesystem.py` |
-| **write_file** | 写入文件内容，自动创建父目录 | `path`, `content` | `tools/filesystem.py` |
-| **edit_file** | 替换文件中的文本 | `path`, `old_text`, `new_text` | `tools/filesystem.py` |
-| **list_dir** | 列出目录内容 | `path`: 目录路径 | `tools/filesystem.py` |
-| **exec** | 执行 Shell 命令 | `command`, `timeout`, `deny_patterns` | `tools/shell.py` |
-| **web_search** | 使用 Brave Search 搜索网页 | `query`, `api_key` | `tools/web.py` |
-| **web_fetch** | 获取网页并提取可读内容 | `url`, `max_chars` | `tools/web.py` |
-| **message** | 发送消息到指定通道 | `channel`, `chat_id`, `content` | `tools/spawn.py` |
-| **spawn** | 创建子 Agent 执行后台任务 | `task`, `label` | `tools/spawn.py` |
-| **cron** | 管理定时任务 | `action`, `name`, `schedule`, `message` | `tools/cron.py` |
-
----
-
-## 内置工具类图
-
-```mermaid
-classDiagram
-    class ITool {
-        <<interface>>
-        +string Name
-        +string Description
-        +JsonElement Parameters
-        +ExecuteAsync(arguments, context, ct) Task~ToolResult~
-        +ValidateParameters(arguments) ValidationResult
-    }
-
-    class ToolBase {
-        <<abstract>>
-        +Path? AllowedDir
-    }
-
-    class ReadFileTool {
-        +Name: "read_file"
-    }
-
-    class WriteFileTool {
-        +Name: "write_file"
-    }
-
-    class EditFileTool {
-        +Name: "edit_file"
-    }
-
-    class ListDirTool {
-        +Name: "list_dir"
-    }
-
-    class ExecTool {
-        +Name: "exec"
-        +Timeout: int
-        +DenyPatterns: string[]
-    }
-
-    class WebSearchTool {
-        +Name: "web_search"
-        +ApiKey: string
-    }
-
-    class WebFetchTool {
-        +Name: "web_fetch"
-        +MaxChars: int
-    }
-
-    class MessageTool {
-        +Name: "message"
-    }
-
-    class SpawnTool {
-        +Name: "spawn"
-    }
-
-    class CronTool {
-        +Name: "cron"
-    }
-
-    ITool <|.. ToolBase
-    ToolBase <|-- ReadFileTool
-    ToolBase <|-- WriteFileTool
-    ToolBase <|-- EditFileTool
-    ToolBase <|-- ListDirTool
-    ToolBase <|-- ExecTool
-    ToolBase <|-- WebSearchTool
-    ToolBase <|-- WebFetchTool
-    ToolBase <|-- MessageTool
-    ToolBase <|-- SpawnTool
-    ToolBase <|-- CronTool
-```
-
----
-
-## 文件工具详细设计
-
-### read_file
-
-```csharp
-/// <summary>读取文件内容</summary>
-public record ReadFileArgs
-{
-    /// <summary>文件路径（相对于工作目录）</summary>
-    public required string Path { get; init; }
-
-    /// <summary>起始行号（可选）</summary>
-    public int? StartLine { get; init; }
-
-    /// <summary>结束行号（可选）</summary>
-    public int? EndLine { get; init; }
-}
-```
-
-### write_file
-
-```csharp
-/// <summary>写入文件内容</summary>
-public record WriteFileArgs
-{
-    /// <summary>文件路径</summary>
-    public required string Path { get; init; }
-
-    /// <summary>文件内容</summary>
-    public required string Content { get; init; }
-
-    /// <summary>是否追加模式</summary>
-    public bool Append { get; init; } = false;
-}
-```
-
-### edit_file
-
-```csharp
-/// <summary>编辑文件内容</summary>
-public record EditFileArgs
-{
-    /// <summary>文件路径</summary>
-    public required string Path { get; init; }
-
-    /// <summary>要替换的文本</summary>
-    public required string OldText { get; init; }
-
-    /// <summary>新文本</summary>
-    public required string NewText { get; init; }
-
-    /// <summary>是否替换所有匹配</summary>
-    public bool ReplaceAll { get; init; } = false;
-}
-```
-
-### list_dir
-
-```csharp
-/// <summary>列出目录内容</summary>
-public record ListDirArgs
-{
-    /// <summary>目录路径</summary>
-    public required string Path { get; init; }
-
-    /// <summary>是否递归列出</summary>
-    public bool Recursive { get; init; } = false;
-
-    /// <summary>文件名过滤模式</summary>
-    public string? Pattern { get; init; }
-}
-```
-
----
-
-## Shell 工具详细设计
-
-### exec
-
-```csharp
-/// <summary>执行 Shell 命令</summary>
-public record ExecArgs
-{
-    /// <summary>要执行的命令</summary>
-    public required string Command { get; init; }
-
-    /// <summary>超时时间（秒）</summary>
-    public int Timeout { get; init; } = 60;
-
-    /// <summary>工作目录（可选）</summary>
-    public string? WorkingDir { get; init; }
-
-    /// <summary>环境变量（可选）</summary>
-    public IDictionary<string, string>? Env { get; init; }
-}
-```
-
-**安全限制**：
-- 禁止执行的命令模式（可在配置中设置）
-- 默认限制在工作目录内执行
-- 超时自动终止
-
----
-
-## Web 工具详细设计
-
-### web_search
-
-```csharp
-/// <summary>网页搜索</summary>
-public record WebSearchArgs
-{
-    /// <summary>搜索关键词</summary>
-    public required string Query { get; init; }
-
-    /// <summary>结果数量限制</summary>
-    public int Count { get; init; } = 10;
-}
-```
-
-### web_fetch
-
-```csharp
-/// <summary>获取网页内容</summary>
-public record WebFetchArgs
-{
-    /// <summary>网页 URL</summary>
-    public required string Url { get; init; }
-
-    /// <summary>最大字符数</summary>
-    public int MaxChars { get; init; } = 10000;
-
-    /// <summary>是否提取可读内容</summary>
-    public bool ExtractReadable { get; init; } = true;
-}
-```
-
----
-
-## 消息工具详细设计
-
-### message
-
-```csharp
-/// <summary>发送消息</summary>
-public record MessageArgs
-{
-    /// <summary>目标通道</summary>
-    public required string Channel { get; init; }
-
-    /// <summary>目标聊天 ID</summary>
-    public required string ChatId { get; init; }
-
-    /// <summary>消息内容</summary>
-    public required string Content { get; init; }
-}
-```
-
----
-
-## Spawn 工具详细设计
-
-### spawn
-
-```csharp
-/// <summary>创建子 Agent</summary>
-public record SpawnArgs
-{
-    /// <summary>任务描述</summary>
-    public required string Task { get; init; }
-
-    /// <summary>任务标签（可选）</summary>
-    public string? Label { get; init; }
-}
-```
-
----
-
-## Cron 工具详细设计
-
-### cron
-
-```csharp
-/// <summary>定时任务管理</summary>
-public record CronArgs
-{
-    /// <summary>操作类型：list, add, remove, enable, disable</summary>
-    public required string Action { get; init; }
-
-    /// <summary>任务名称</summary>
-    public string? Name { get; init; }
-
-    /// <summary>调度配置</summary>
-    public CronSchedule? Schedule { get; init; }
-
-    /// <summary>要发送的消息</summary>
-    public string? Message { get; init; }
-
-    /// <summary>目标通道</summary>
-    public string? Channel { get; init; }
-
-    /// <summary>目标用户</summary>
-    public string? TargetUser { get; init; }
-}
-```
-
----
-
-## IMcpClient 接口
-
-MCP 客户端接口，对应 nanobot/agent/tools/mcp.py，Model Context Protocol 客户端。
-
-```csharp
-namespace NanoBot.Core.Mcp;
-
-/// <summary>
-/// MCP 客户端接口
-/// </summary>
-public interface IMcpClient
-{
-    /// <summary>连接到 MCP 服务器</summary>
-    Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken cancellationToken = default);
-
-    /// <summary>断开连接</summary>
-    Task DisconnectAsync(string serverName, CancellationToken cancellationToken = default);
-
-    /// <summary>获取服务器提供的工具列表</summary>
-    Task<IReadOnlyList<McpTool>> ListToolsAsync(string serverName, CancellationToken cancellationToken = default);
-
-    /// <summary>调用 MCP 工具</summary>
-    Task<McpToolResult> CallToolAsync(
-        string serverName,
-        string toolName,
-        Dictionary<string, object> arguments,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>获取已连接的服务器</summary>
-    IReadOnlyList<string> ConnectedServers { get; }
-
-    /// <summary>获取所有可用工具</summary>
-    IReadOnlyList<McpTool> GetAllTools();
-}
-```
-
-### McpServerConfig
-
-```csharp
-namespace NanoBot.Core.Mcp;
-
-/// <summary>MCP 服务器配置</summary>
-public record McpServerConfig
-{
-    /// <summary>启动命令</summary>
-    public required string Command { get; init; }
-
-    /// <summary>命令参数</summary>
-    public IReadOnlyList<string> Args { get; init; } = Array.Empty<string>();
-
-    /// <summary>环境变量</summary>
-    public IReadOnlyDictionary<string, string> Env { get; init; } = new Dictionary<string, string>();
-
-    /// <summary>工作目录</summary>
-    public string? Cwd { get; init; }
-}
-```
-
-### McpTool
-
-```csharp
-namespace NanoBot.Core.Mcp;
-
-/// <summary>MCP 工具定义</summary>
-public record McpTool
-{
-    /// <summary>所属服务器名称</summary>
-    public required string ServerName { get; init; }
-
-    /// <summary>工具名称</summary>
-    public required string Name { get; init; }
-
-    /// <summary>工具描述</summary>
-    public required string Description { get; init; }
-
-    /// <summary>输入 Schema</summary>
-    public required JsonElement InputSchema { get; init; }
-}
-```
-
-### McpToolResult
-
-```csharp
-namespace NanoBot.Core.Mcp;
-
-/// <summary>MCP 工具执行结果</summary>
-public record McpToolResult
-{
-    /// <summary>结果内容</summary>
-    public required string Content { get; init; }
-
-    /// <summary>是否为错误</summary>
-    public bool IsError { get; init; }
-}
-```
+| 工具名称 | 功能描述 | 关键参数 |
+|----------|----------|----------|
+| **read_file** | 读取文件内容 | `path`, `startLine`, `endLine` |
+| **write_file** | 写入文件内容 | `path`, `content` |
+| **edit_file** | 替换文件中的文本 | `path`, `oldText`, `newText` |
+| **list_dir** | 列出目录内容 | `path`, `recursive` |
+| **exec** | 执行 Shell 命令 | `command`, `timeout`, `workingDir` |
+| **web_search** | 搜索网页 | `query`, `count` |
+| **web_fetch** | 获取网页内容 | `url`, `maxChars` |
+| **message** | 发送消息 | `content`, `channel`, `chatId` |
+| **spawn** | 创建子 Agent | `task`, `label` |
+| **cron** | 管理定时任务 | `action`, `name`, `schedule`, `message` |
 
 ---
 
@@ -545,52 +523,104 @@ public record McpToolResult
 
 ```mermaid
 graph LR
-    subgraph "工具层"
-        ITool[ITool]
-        IToolRegistry[IToolRegistry]
-        IMcpClient[IMcpClient]
+    subgraph "NanoBot.Tools"
+        FileTools[FileTools]
+        ShellTools[ShellTools]
+        WebTools[WebTools]
+        McpClient[McpClient]
     end
-
-    subgraph "Agent 核心层"
-        IAgent[IAgent]
+    
+    subgraph "Microsoft.Extensions.AI"
+        AIFunctionFactory[AIFunctionFactory]
+        AITool[AITool]
     end
-
-    subgraph "基础设施层"
-        IMessageBus[IMessageBus]
-        ICronService[ICronService]
-        ISubagentManager[ISubagentManager]
+    
+    subgraph "Microsoft.Agents.AI"
+        ChatClientAgent[ChatClientAgent]
+        FunctionInvokingChatClient[FunctionInvokingChatClient]
     end
-
-    ITool --> IAgent : uses
-    IToolRegistry --> ITool : manages
-    IMcpClient --> ITool : wraps as
-    MessageTool --> IMessageBus
-    CronTool --> ICronService
-    SpawnTool --> ISubagentManager
+    
+    FileTools --> AIFunctionFactory
+    ShellTools --> AIFunctionFactory
+    WebTools --> AIFunctionFactory
+    McpClient --> AIFunctionFactory
+    AIFunctionFactory --> AITool
+    AITool --> ChatClientAgent
+    ChatClientAgent --> FunctionInvokingChatClient
 ```
 
 ---
 
 ## 实现要点
 
-### 工具注册
+### 1. 不要定义自定义工具接口
 
-1. 在 DI 容器中注册所有内置工具
-2. 支持动态注册外部工具
-3. 工具 Schema 自动生成
+❌ **错误做法**：
+```csharp
+public interface ITool
+{
+    string Name { get; }
+    string Description { get; }
+    Task<ToolResult> ExecuteAsync(JsonElement args);
+}
+```
 
-### 安全控制
+✅ **正确做法**：
+```csharp
+AITool tool = AIFunctionFactory.Create(MyFunctionAsync, new()
+{
+    Name = "my_tool",
+    Description = "Tool description"
+});
+```
 
-1. 文件操作限制在工作目录
-2. Shell 命令黑名单过滤
-3. 超时自动终止
+### 2. 使用强类型参数
 
-### MCP 集成
+```csharp
+// 框架自动处理 JSON 序列化
+AITool tool = AIFunctionFactory.Create(
+    (string path, int line, bool recursive) => DoSomething(path, line, recursive),
+    new() { Name = "my_tool" });
+```
 
-1. 通过 stdio 与 MCP 服务器通信
-2. 自动发现服务器提供的工具
-3. 将 MCP 工具包装为 ITool
+### 3. 安全控制
+
+```csharp
+public static AITool CreateSafeExecTool(string workspacePath)
+{
+    return AIFunctionFactory.Create(
+        (string command) =>
+        {
+            // 检查危险命令
+            if (IsDangerousCommand(command))
+                return "Error: Command blocked for security reasons";
+            
+            // 限制在工作目录内
+            // ...
+            
+            return ExecuteCommand(command);
+        },
+        new() { Name = "exec" });
+}
+```
 
 ---
 
-*返回 [概览文档](./NanoBot.Net-Overview.md)*
+## 总结
+
+| 传统做法 | NanoBot.Net 做法 |
+|----------|-----------------|
+| 定义 `ITool` 接口 | 直接使用 `AITool` |
+| 实现 `ToolBase` 基类 | 使用 `AIFunctionFactory.Create()` |
+| 自定义 `ToolRegistry` | 使用 `List<AITool>` |
+| 手动处理工具调用循环 | 框架自动处理 |
+
+**核心收益**：
+- 减少约 300+ 行代码
+- 框架自动处理函数调用循环
+- 类型安全的参数处理
+- 自动生成 JSON Schema
+
+---
+
+*返回 [概览文档](./Overview.md)*
