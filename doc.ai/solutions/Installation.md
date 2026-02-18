@@ -30,28 +30,28 @@ NanoBot.Net 作为 .NET 应用程序，支持多种安装方式，覆盖 macOS�
 ```ruby
 class Nanobot < Formula
   desc "A lightweight personal AI assistant framework (.NET)"
-  homepage "https://github.com/NanoBot/NanoBot.Net"
+  homepage "https://github.com/mbzcnet/NanoBot.Net"
   version "0.1.0"
   license "MIT"
 
   on_macos do
     on_intel do
-      url "https://github.com/NanoBot/NanoBot.Net/releases/download/v#{version}/nanobot-osx-x64.tar.gz"
+      url "https://github.com/mbzcnet/NanoBot.Net/releases/download/v#{version}/nanobot-osx-x64.tar.gz"
       sha256 "TODO: 计算实际值"
     end
     on_arm do
-      url "https://github.com/NanoBot/NanoBot.Net/releases/download/v#{version}/nanobot-osx-arm64.tar.gz"
+      url "https://github.com/mbzcnet/NanoBot.Net/releases/download/v#{version}/nanobot-osx-arm64.tar.gz"
       sha256 "TODO: 计算实际值"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/NanoBot/NanoBot.Net/releases/download/v#{version}/nanobot-linux-x64.tar.gz"
+      url "https://github.com/mbzcnet/NanoBot.Net/releases/download/v#{version}/nanobot-linux-x64.tar.gz"
       sha256 "TODO: 计算实际值"
     end
     on_arm do
-      url "https://github.com/NanoBot/NanoBot.Net/releases/download/v#{version}/nanobot-linux-arm64.tar.gz"
+      url "https://github.com/mbzcnet/NanoBot.Net/releases/download/v#{version}/nanobot-linux-arm64.tar.gz"
       sha256 "TODO: 计算实际值"
     end
   end
@@ -83,7 +83,7 @@ homebrew-nanobot/
 
 ```bash
 # 添加 Tap
-brew tap NanoBot/tap
+brew tap mbzcnet/tap
 
 # 安装
 brew install nanobot
@@ -119,12 +119,12 @@ PackageIdentifier: NanoBot.NanoBot
 PackageVersion: 0.1.0
 PackageLocale: en-US
 Publisher: NanoBot
-PublisherUrl: https://github.com/NanoBot
-PublisherSupportUrl: https://github.com/NanoBot/NanoBot.Net/issues
+PublisherUrl: https://github.com/mbzcnet
+PublisherSupportUrl: https://github.com/mbzcnet/NanoBot.Net/issues
 PackageName: NanoBot
-PackageUrl: https://github.com/NanoBot/NanoBot.Net
+PackageUrl: https://github.com/mbzcnet/NanoBot.Net
 License: MIT
-LicenseUrl: https://github.com/NanoBot/NanoBot.Net/blob/main/LICENSE
+LicenseUrl: https://github.com/mbzcnet/NanoBot.Net/blob/main/LICENSE
 Copyright: Copyright (c) NanoBot
 ShortDescription: A lightweight personal AI assistant framework
 Description: |
@@ -138,7 +138,7 @@ Tags:
   - llm
   - agent
   - dotnet
-ReleaseNotesUrl: https://github.com/NanoBot/NanoBot.Net/releases/tag/v0.1.0
+ReleaseNotesUrl: https://github.com/mbzcnet/NanoBot.Net/releases/tag/v0.1.0
 ```
 
 #### 2.1.2 NanoBot.NanoBot.installer.yaml
@@ -155,14 +155,14 @@ Commands:
   - nanobot
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/NanoBot/NanoBot.Net/releases/download/v0.1.0/nanobot-win-x64.zip
+    InstallerUrl: https://github.com/mbzcnet/NanoBot.Net/releases/download/v0.1.0/nanobot-win-x64.zip
     InstallerSha256: TODO: 计算实际值
     NestedInstallerType: portable
     NestedInstallerFiles:
       - RelativeFilePath: nanobot.exe
         PortableCommandAlias: nanobot
   - Architecture: arm64
-    InstallerUrl: https://github.com/NanoBot/NanoBot.Net/releases/download/v0.1.0/nanobot-win-arm64.zip
+    InstallerUrl: https://github.com/mbzcnet/NanoBot.Net/releases/download/v0.1.0/nanobot-win-arm64.zip
     InstallerSha256: TODO: 计算实际值
     NestedInstallerType: portable
     NestedInstallerFiles:
@@ -180,7 +180,7 @@ PackageVersion: 0.1.0
 PackageLocale: en-US
 Publisher: NanoBot
 PackageName: NanoBot
-PackageUrl: https://github.com/NanoBot/NanoBot.Net
+PackageUrl: https://github.com/mbzcnet/NanoBot.Net
 License: MIT
 ShortDescription: A lightweight personal AI assistant framework
 Description: |
@@ -207,7 +207,7 @@ nanobot --version
 
 ### 3.1 Unix 安装脚本 (macOS / Linux / WSL)
 
-**文件位置**: `scripts/install.sh`
+**文件位置**: `install/install.sh`
 
 ```bash
 #!/bin/bash
@@ -218,7 +218,7 @@ nanobot --version
 # Usage:
 #   curl -fsSL https://get.nanobot.ai | bash
 #   or
-#   curl -fsSL https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.sh | bash
 #
 
 set -e
@@ -386,7 +386,7 @@ main "$@"
 
 .EXAMPLE
     irm get.nanobot.ai | iex
-    irm https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/scripts/install.ps1 | iex
+    irm https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.ps1 | iex
 #>
 
 param(
@@ -526,9 +526,9 @@ Write-Host ""
 Write-Host "Run 'nanobot onboard' to get started!"
 ```
 
-### 3.3 Windows CMD 批处理脚本
+### 3.3 Windows CMD 批处理脚本 (可选)
 
-**文件位置**: `scripts/install.cmd`
+**文件位置**: `install/install.cmd` (未实现，可使用 PowerShell 脚本替代)
 
 ```batch
 @echo off
@@ -650,9 +650,9 @@ endlocal
     <Authors>NanoBot</Authors>
     <Description>A lightweight personal AI assistant framework</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/NanoBot/NanoBot.Net</PackageProjectUrl>
+    <PackageProjectUrl>https://github.com/mbzcnet/NanoBot.Net</PackageProjectUrl>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <RepositoryUrl>https://github.com/NanoBot/NanoBot.Net.git</RepositoryUrl>
+    <RepositoryUrl>https://github.com/mbzcnet/NanoBot.Net.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
@@ -901,7 +901,7 @@ ls -l $(which nanobot)
 
 ```bash
 brew uninstall nanobot
-brew untap NanoBot/tap  # 可选，移除 Tap
+brew untap mbzcnet/tap  # 可选，移除 Tap
 ```
 
 ### 7.2 Winget 卸载
@@ -936,27 +936,14 @@ dotnet tool uninstall --global NanoBot.Cli
 
 ```
 NanoBot.Net/
-├── scripts/
+├── install/
 │   ├── install.sh          # Unix 安装脚本
 │   ├── install.ps1         # Windows PowerShell 安装脚本
-│   ├── install.cmd         # Windows CMD 安装脚本
 │   ├── publish.sh          # 发布构建脚本
-│   └── uninstall.sh        # 卸载脚本
-│
-├── homebrew-nanobot/       # Homebrew Tap 仓库
-│   ├── Formula/
-│   │   └── nanobot.rb
-│   └── README.md
-│
-├── winget-pkgs/            # Winget manifest (提交到 microsoft/winget-pkgs)
-│   └── manifests/
-│       └── n/
-│           └── NanoBot/
-│               └── NanoBot/
-│                   └── 0.1.0/
-│                       ├── NanoBot.NanoBot.yaml
-│                       ├── NanoBot.NanoBot.installer.yaml
-│                       └── NanoBot.NanoBot.locale.en-US.yaml
+│   └── homebrew-nanobot/   # Homebrew Tap 仓库
+│       ├── Formula/
+│       │   └── nanobot.rb
+│       └── README.md
 │
 └── .github/
     └── workflows/

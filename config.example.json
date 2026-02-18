@@ -1,0 +1,69 @@
+{
+  "Name": "NanoBot",
+  "Workspace": {
+    "Path": "~/.nanobot/workspace"
+  },
+  "Llm": {
+    "Model": "gpt-4o-mini",
+    "Provider": "openai",
+    "ApiKey": "${OPENAI_API_KEY}",
+    "Temperature": 0.7,
+    "MaxTokens": 4096
+  },
+  "Channels": {
+    "Telegram": {
+      "Enabled": false,
+      "Token": "${TELEGRAM_BOT_TOKEN}"
+    },
+    "Discord": {
+      "Enabled": false,
+      "Token": "${DISCORD_BOT_TOKEN}"
+    },
+    "Slack": {
+      "Enabled": false,
+      "BotToken": "${SLACK_BOT_TOKEN}",
+      "AppToken": "${SLACK_APP_TOKEN}"
+    },
+    "Email": {
+      "Enabled": false,
+      "SmtpHost": "smtp.gmail.com",
+      "SmtpPort": 587,
+      "SmtpUser": "${EMAIL_USER}",
+      "SmtpPassword": "${EMAIL_PASSWORD}",
+      "ImapHost": "imap.gmail.com",
+      "ImapPort": 993,
+      "ImapUser": "${EMAIL_USER}",
+      "ImapPassword": "${EMAIL_PASSWORD}"
+    }
+  },
+  "Mcp": {
+    "Servers": {
+      "filesystem": {
+        "Command": "mcp-server-filesystem",
+        "Args": ["--root", "~/.nanobot/workspace"],
+        "Enabled": false
+      }
+    }
+  },
+  "Security": {
+    "AllowedDirs": [],
+    "DenyCommandPatterns": [
+      "rm -rf /",
+      "sudo",
+      "chmod 777"
+    ],
+    "RestrictToWorkspace": true,
+    "ShellTimeout": 60
+  },
+  "Memory": {
+    "Enabled": true,
+    "MemoryFile": "MEMORY.md",
+    "HistoryFile": "HISTORY.md",
+    "MaxHistoryEntries": 500
+  },
+  "Heartbeat": {
+    "Enabled": false,
+    "IntervalSeconds": 300,
+    "Message": "Checking in. Is there anything you need help with?"
+  }
+}
