@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Moq;
+using NanoBot.Core.Cron;
 using NanoBot.Tools.BuiltIn;
 using Xunit;
 
@@ -107,6 +109,96 @@ public class CronToolsTests
 
         Assert.NotNull(tool);
         Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateCronTool_HasCorrectName()
+    {
+        var tool = CronTools.CreateCronTool(null, "whatsapp", "123456");
+
+        Assert.Equal("cron", tool.Name);
+    }
+
+    [Fact]
+    public void CreateCronTool_HasCorrectDescription()
+    {
+        var tool = CronTools.CreateCronTool(null, "whatsapp", "123456");
+
+        Assert.Contains("Schedule reminders", tool.Description);
+        Assert.Contains("add", tool.Description);
+        Assert.Contains("list", tool.Description);
+        Assert.Contains("remove", tool.Description);
+    }
+
+    [Fact]
+    public async Task CronTools_AddJobMethod_ValidatesTimezone()
+    {
+        var mockCronService = new Mock<ICronService>();
+        mockCronService.Setup(x => x.AddJob(It.IsAny<CronJobDefinition>()))
+            .Returns(new CronJob { Id = "test", Name = "test", Message = "test", Schedule = new CronSchedule { Kind = CronScheduleKind.Cron }, Enabled = true });
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        var result = await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "add",
+                ["message"] = "Test",
+                ["cronExpr"] = "0 9 * * *",
+                ["tz"] = "Invalid/Timezone"
+            },
+            CancellationToken.None);
+
+        Assert.Contains("Unknown timezone", result?.ToString() ?? "");
+    }
+
+    [Fact]
+    public async Task CronTools_AddJobMethod_TimezoneRequiresCronExpr()
+    {
+        var mockCronService = new Mock<ICronService>();
+        mockCronService.Setup(x => x.AddJob(It.IsAny<CronJobDefinition>()))
+            .Returns(new CronJob { Id = "test", Name = "test", Message = "test", Schedule = new CronSchedule { Kind = CronScheduleKind.Every }, Enabled = true });
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        var result = await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "add",
+                ["message"] = "Test",
+                ["everySeconds"] = 60,
+                ["tz"] = "America/New_York"
+            },
+            CancellationToken.None);
+
+        Assert.Contains("tz can only be used with cron_expr", result?.ToString() ?? "");
+    }
+
+    [Fact]
+    public async Task CronTools_AddJobMethod_SetsDeliverTrue()
+    {
+        var mockCronService = new Mock<ICronService>();
+        CronJobDefinition? capturedDefinition = null;
+        mockCronService.Setup(x => x.AddJob(It.IsAny<CronJobDefinition>()))
+            .Callback<CronJobDefinition>(d => capturedDefinition = d)
+            .Returns(new CronJob { Id = "test", Name = "test", Message = "test", Schedule = new CronSchedule { Kind = CronScheduleKind.Cron }, Enabled = true });
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "add",
+                ["message"] = "Test",
+                ["cronExpr"] = "0 9 * * *"
+            },
+            CancellationToken.None);
+
+        Assert.NotNull(capturedDefinition);
+        Assert.True(capturedDefinition.Deliver);
     }
 }
 

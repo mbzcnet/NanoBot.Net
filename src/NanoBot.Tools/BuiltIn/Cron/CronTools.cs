@@ -1,3 +1,4 @@
+using System.Globalization;
 using Cronos;
 using Microsoft.Extensions.AI;
 using NanoBot.Core.Cron;
@@ -9,8 +10,8 @@ public static class CronTools
     public static AITool CreateCronTool(ICronService? cronService, string? defaultChannel = null, string? defaultChatId = null)
     {
         return AIFunctionFactory.Create(
-            (string action, string? message, int? everySeconds, string? cronExpr, string? at, string? jobId) =>
-                ExecuteCronAsync(action, message, everySeconds, cronExpr, at, jobId, cronService, defaultChannel, defaultChatId),
+            (string action, string? message, int? everySeconds, string? cronExpr, string? tz, string? at, string? jobId) =>
+                ExecuteCronAsync(action, message, everySeconds, cronExpr, tz, at, jobId, cronService, defaultChannel, defaultChatId),
             new AIFunctionFactoryOptions
             {
                 Name = "cron",
@@ -23,6 +24,7 @@ public static class CronTools
         string? message,
         int? everySeconds,
         string? cronExpr,
+        string? tz,
         string? at,
         string? jobId,
         ICronService? cronService,
@@ -38,7 +40,7 @@ public static class CronTools
 
             return action.ToLowerInvariant() switch
             {
-                "add" => AddJob(message, everySeconds, cronExpr, at, cronService, defaultChannel, defaultChatId),
+                "add" => AddJob(message, everySeconds, cronExpr, tz, at, cronService, defaultChannel, defaultChatId),
                 "list" => ListJobs(cronService),
                 "remove" => RemoveJob(jobId, cronService),
                 _ => Task.FromResult($"Error: Unknown action: {action}")
@@ -54,6 +56,7 @@ public static class CronTools
         string? message,
         int? everySeconds,
         string? cronExpr,
+        string? tz,
         string? at,
         ICronService cronService,
         string? defaultChannel,
@@ -69,6 +72,23 @@ public static class CronTools
             return Task.FromResult("Error: No session context (channel/chat_id)");
         }
 
+        if (!string.IsNullOrEmpty(tz) && string.IsNullOrEmpty(cronExpr))
+        {
+            return Task.FromResult("Error: tz can only be used with cron_expr");
+        }
+
+        if (!string.IsNullOrEmpty(tz))
+        {
+            try
+            {
+                _ = TimeZoneInfo.FindSystemTimeZoneById(tz);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                return Task.FromResult($"Error: Unknown timezone '{tz}'");
+            }
+        }
+
         CronSchedule schedule;
         bool deleteAfter = false;
 
@@ -80,8 +100,8 @@ public static class CronTools
         {
             try
             {
-                CronExpression.Parse(cronExpr);
-                schedule = new CronSchedule { Kind = CronScheduleKind.Cron, Expression = cronExpr };
+                CronExpression.Parse(cronExpr, CronFormat.IncludeSeconds);
+                schedule = new CronSchedule { Kind = CronScheduleKind.Cron, Expression = cronExpr, TimeZone = tz };
             }
             catch (CronFormatException)
             {
@@ -107,6 +127,7 @@ public static class CronTools
             Name = message.Length > 30 ? message[..30] : message,
             Schedule = schedule,
             Message = message,
+            Deliver = true,
             ChannelId = defaultChannel,
             TargetUserId = defaultChatId,
             DeleteAfterRun = deleteAfter

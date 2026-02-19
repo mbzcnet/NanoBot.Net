@@ -8,7 +8,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddTools(this IServiceCollection services)
     {
-        services.AddSingleton<IMcpClient, McpClient>();
+        services.AddSingleton<IMcpClient, NanoBotMcpClient>();
         services.AddHttpClient("Tools");
 
         return services;

@@ -2,7 +2,7 @@
 
 本文档定义 NanoBot.Net 的 LLM 提供商层设计。
 
-**核心原则**：直接使用 `Microsoft.Extensions.AI` 的 `IChatClient` 抽象，**不定义自定义的 Provider 抽象**。
+**核心原则**：直接使用 `Microsoft.Agents.AI` 框架提供的 `ChatClientAgent`，无需自行封装 `IChatClient`。
 
 ---
 
@@ -10,34 +10,39 @@
 
 ### 为什么不需要自定义 Provider 抽象
 
-Microsoft.Agents.AI 框架已经提供了完整的 LLM 客户端抽象：
+Microsoft.Agents.AI 框架已经提供了完整的 Agent 封装：
 
-1. **`IChatClient` 接口**：统一的 LLM 调用抽象
-2. **`AsAIAgent()` 扩展方法**：将任何 `IChatClient` 转换为 `AIAgent`
-3. **官方客户端实现**：OpenAI、Azure OpenAI、Anthropic 等
+1. **`ChatClientAgent`**：基于任意 `IChatClient` 的 Agent，自动处理工具调用循环
+2. **`AsAIAgent()` 扩展方法**：一键将 `IChatClient` 转换为 `AIAgent`
+3. **官方 SDK 支持**：OpenAI、Azure OpenAI、Anthropic 等
 
 NanoBot.Net 只需：
-- 使用官方或社区提供的 `IChatClient` 实现
-- 通过配置选择不同的客户端
-- 使用 `AsAIAgent()` 创建 Agent
+- 使用官方 SDK 创建 `IChatClient`
+- 通过 `AsAIAgent()` 创建 Agent
+- 直接使用框架的 Agent 能力（多模态、会话管理等）
 
 ---
 
-## 框架提供的 LLM 客户端
+## 框架提供的使用方式
 
-### OpenAI
+### 基本使用
 
 ```csharp
-using OpenAI;
+using Microsoft.Agents.AI;
 
-// 直接使用 OpenAI SDK 的 ChatClient
-var client = new OpenAIClient(apiKey).GetChatClient("gpt-4o");
+// 创建 OpenAI ChatClient
+var chatClient = new OpenAI.OpenAIClient(apiKey)
+    .GetChatClient("gpt-4o")
+    .AsIChatClient();
 
-// 转换为 AIAgent
-var agent = client.AsAIAgent(
+// 转换为 Agent
+var agent = chatClient.AsAIAgent(
     name: "NanoBot",
     instructions: "You are a helpful assistant.",
     tools: myTools);
+
+// 运行 Agent
+var response = await agent.RunAsync("Hello!");
 ```
 
 ### Azure OpenAI
@@ -46,41 +51,64 @@ var agent = client.AsAIAgent(
 using Azure.AI.OpenAI;
 using Azure.Identity;
 
-// 使用 Azure 认证
 var client = new AzureOpenAIClient(
     new Uri(endpoint),
     new AzureCliCredential())
     .GetChatClient("gpt-4o");
 
-// 转换为 AIAgent
 var agent = client.AsAIAgent(instructions: "...");
 ```
 
 ### Anthropic
 
 ```csharp
-// 使用 Microsoft.Agents.AI.Anthropic 扩展
-var agent = new AnthropicClient()
-    .AsAIAgent(instructions: "...");
+// 使用 Anthropic SDK
+var client = new AnthropicClient();
+var agent = client.AsAIAgent(instructions: "...");
 ```
 
 ### Ollama（本地模型）
 
 ```csharp
-// 使用 Microsoft.Extensions.AI.Ollama 或自定义 IChatClient
+// 使用 Ollama IChatClient 实现
 var client = new OllamaChatClient("http://localhost:11434", "llama3.2");
 var agent = client.AsAIAgent(instructions: "...");
 ```
 
-### OpenRouter（多模型聚合）
+---
+
+## 多模态支持
+
+框架原生支持多模态消息，无需额外处理：
+
+### 图像输入
 
 ```csharp
-// OpenRouter 兼容 OpenAI API，可使用自定义 IChatClient
-var client = new OpenAICompatibleClient(
-    "https://openrouter.ai/api/v1",
-    apiKey,
-    "anthropic/claude-3.5-sonnet");
-var agent = client.AsAIAgent(instructions: "...");
+// 使用 URI 内容
+var message = new ChatMessage(ChatRole.User, [
+    new TextContent("What do you see in this image?"),
+    new UriContent("https://example.com/image.jpg", "image/jpeg")
+]);
+
+var response = await agent.RunAsync(message);
+
+// 使用本地图像（BinaryContent）
+var imageBytes = await File.ReadAllBytesAsync("photo.jpg");
+var message2 = new ChatMessage(ChatRole.User, [
+    new TextContent("Describe this image:"),
+    new BinaryContent(imageBytes, "image/jpeg")
+]);
+
+var response2 = await agent.RunAsync(message2);
+```
+
+### 流式响应
+
+```csharp
+await foreach (var update in agent.RunStreamingAsync("Tell me a story"))
+{
+    Console.Write(update.Text);
+}
 ```
 
 ---
@@ -103,10 +131,10 @@ public class LlmConfig
 }
 ```
 
-### 客户端工厂
+### 客户端工厂（简化版）
 
 ```csharp
-namespace NanoBot.Infrastructure.Llm;
+namespace NanoBot.Providers;
 
 public interface IChatClientFactory
 {
@@ -115,48 +143,39 @@ public interface IChatClientFactory
 
 public class ChatClientFactory : IChatClientFactory
 {
+    private static readonly Dictionary<string, ProviderSpec> ProviderSpecs = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["openai"] = new ProviderSpec("OPENAI_API_KEY", "https://api.openai.com/v1"),
+        ["openrouter"] = new ProviderSpec("OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+        ["anthropic"] = new ProviderSpec("ANTHROPIC_API_KEY", "https://api.anthropic.com/v1"),
+        ["deepseek"] = new ProviderSpec("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1"),
+        ["groq"] = new ProviderSpec("GROQ_API_KEY", "https://api.groq.com/openai/v1"),
+        ["ollama"] = new ProviderSpec("", "http://localhost:11434/v1", isLocal: true)
+    };
+
     public IChatClient CreateChatClient(LlmConfig config)
     {
-        return config.Provider.ToLowerInvariant() switch
-        {
-            "openai" => CreateOpenAIClient(config),
-            "azure" => CreateAzureClient(config),
-            "anthropic" => CreateAnthropicClient(config),
-            "ollama" => CreateOllamaClient(config),
-            "openrouter" => CreateOpenRouterClient(config),
-            "deepseek" => CreateDeepSeekClient(config),
-            "groq" => CreateGroqClient(config),
-            _ => throw new NotSupportedException($"Provider '{config.Provider}' is not supported")
-        };
+        var provider = config.Provider ?? "openai";
+        if (!ProviderSpecs.TryGetValue(provider, out var spec))
+            throw new NotSupportedException($"Provider '{provider}' not supported");
+
+        var apiKey = config.ApiKey ?? Environment.GetEnvironmentVariable(spec.EnvKey) ?? "";
+        var apiBase = config.ApiBase ?? spec.DefaultApiBase;
+
+        var client = new OpenAI.OpenAIClient(
+            new System.ClientModel.ApiKeyCredential(apiKey),
+            new OpenAI.OpenAIClientOptions { Endpoint = new Uri(apiBase) });
+
+        return client.GetChatClient(config.Model).AsIChatClient();
     }
-    
-    private IChatClient CreateOpenAIClient(LlmConfig config)
-    {
-        return new OpenAIClient(config.ApiKey!)
-            .GetChatClient(config.Model);
-    }
-    
-    private IChatClient CreateAzureClient(LlmConfig config)
-    {
-        return new AzureOpenAIClient(
-            new Uri(config.Endpoint!),
-            new AzureCliCredential())
-            .GetChatClient(config.Model);
-    }
-    
-    private IChatClient CreateOpenRouterClient(LlmConfig config)
-    {
-        return new OpenAICompatibleClient(
-            "https://openrouter.ai/api/v1",
-            config.ApiKey!,
-            config.Model);
-    }
-    
-    // ... 其他提供商实现
+
+    private record ProviderSpec(string EnvKey, string DefaultApiBase, bool IsLocal = false);
 }
 ```
 
-### DI 注册
+---
+
+## DI 注册
 
 ```csharp
 public static class ServiceCollectionExtensions
@@ -166,7 +185,7 @@ public static class ServiceCollectionExtensions
         LlmConfig config)
     {
         services.AddSingleton<IChatClientFactory, ChatClientFactory>();
-        services.AddSingleton(sp => 
+        services.AddSingleton(sp =>
             sp.GetRequiredService<IChatClientFactory>().CreateChatClient(config));
         
         return services;
@@ -176,124 +195,36 @@ public static class ServiceCollectionExtensions
 
 ---
 
+## Agent 创建（推荐方式）
+
+```csharp
+public static class NanoBotAgentFactory
+{
+    public static ChatClientAgent Create(
+        IChatClient chatClient,
+        string instructions,
+        IList<AITool>? tools = null)
+    {
+        return chatClient.AsAIAgent(
+            name: "NanoBot",
+            instructions: instructions,
+            tools: tools);
+    }
+}
+```
+
+---
+
 ## 预定义提供商配置
 
-| 提供商 | Provider 值 | 默认模型 | API Base |
-|--------|-------------|----------|----------|
-| **OpenAI** | `openai` | `gpt-4o` | `https://api.openai.com/v1` |
-| **Azure OpenAI** | `azure` | - | 用户配置 |
-| **Anthropic** | `anthropic` | `claude-3-5-sonnet-20241022` | `https://api.anthropic.com/v1` |
-| **OpenRouter** | `openrouter` | `anthropic/claude-3.5-sonnet` | `https://openrouter.ai/api/v1` |
-| **DeepSeek** | `deepseek` | `deepseek-chat` | `https://api.deepseek.com/v1` |
-| **Groq** | `groq` | `llama-3.3-70b-versatile` | `https://api.groq.com/openai/v1` |
-| **Moonshot** | `moonshot` | `moonshot-v1-8k` | `https://api.moonshot.cn/v1` |
-| **Zhipu** | `zhipu` | `glm-4` | `https://open.bigmodel.cn/api/paas/v4` |
-| **Ollama** | `ollama` | `llama3.2` | `http://localhost:11434/v1` |
-
----
-
-## 使用示例
-
-### 基本使用
-
-```csharp
-// 从配置创建客户端
-var factory = new ChatClientFactory();
-var chatClient = factory.CreateChatClient(config);
-
-// 创建 Agent
-var agent = chatClient.AsAIAgent(
-    name: "NanoBot",
-    instructions: await BuildInstructionsAsync());
-
-// 运行
-var response = await agent.RunAsync("Hello!");
-```
-
-### 使用 ChatOptions
-
-```csharp
-var options = new ChatOptions
-{
-    Temperature = 0.7,
-    MaxOutputTokens = 4096,
-    Tools = myTools,
-    Instructions = "You are a helpful assistant."
-};
-
-var agent = chatClient.AsAIAgent(options);
-```
-
-### 流式响应
-
-```csharp
-await foreach (var update in agent.RunStreamingAsync("Tell me a story"))
-{
-    Console.Write(update.Text);
-}
-```
-
----
-
-## OpenAI 兼容客户端
-
-对于兼容 OpenAI API 的提供商，可以实现通用的 `IChatClient`：
-
-```csharp
-public class OpenAICompatibleClient : IChatClient
-{
-    private readonly HttpClient _httpClient;
-    private readonly string _model;
-    private readonly string _apiKey;
-    
-    public OpenAICompatibleClient(
-        string endpoint,
-        string apiKey,
-        string model,
-        HttpClient? httpClient = null)
-    {
-        _httpClient = httpClient ?? new HttpClient { BaseAddress = new Uri(endpoint) };
-        _apiKey = apiKey;
-        _model = model;
-        _httpClient.DefaultRequestHeaders.Authorization = 
-            new AuthenticationHeaderValue("Bearer", apiKey);
-    }
-    
-    public async Task<ChatResponse> GetResponseAsync(
-        IList<ChatMessage> messages,
-        ChatOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        // 实现 OpenAI 兼容的 API 调用
-        var request = new
-        {
-            model = _model,
-            messages = messages.Select(m => new { role = m.Role.ToString().ToLower(), content = m.Text }),
-            temperature = options?.Temperature,
-            max_tokens = options?.MaxOutputTokens,
-            tools = options?.Tools?.Select(t => t.ToOpenAIFormat())
-        };
-        
-        var response = await _httpClient.PostAsJsonAsync("/chat/completions", request, cancellationToken);
-        // ... 解析响应
-    }
-    
-    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-        IList<ChatMessage> messages,
-        ChatOptions? options = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        // 实现流式响应
-    }
-    
-    public object? GetService(Type serviceType, object? serviceKey = null)
-    {
-        return serviceType == typeof(ChatClientMetadata) 
-            ? new ChatClientMetadata("OpenAI-Compatible", new Uri(_httpClient.BaseAddress!, "/"), _model)
-            : null;
-    }
-}
-```
+| 提供商 | Provider 值 | 默认模型 |
+|--------|-------------|----------|
+| **OpenAI** | `openai` | `gpt-4o` |
+| **OpenRouter** | `openrouter` | `anthropic/claude-3.5-sonnet` |
+| **Anthropic** | `anthropic` | `claude-3-5-sonnet-20241022` |
+| **DeepSeek** | `deepseek` | `deepseek-chat` |
+| **Groq** | `groq` | `llama-3.3-70b-versatile` |
+| **Ollama** | `ollama` | `llama3.2` |
 
 ---
 
@@ -301,97 +232,25 @@ public class OpenAICompatibleClient : IChatClient
 
 ```mermaid
 graph LR
-    subgraph "NanoBot.Net"
+    subgraph "NanoBot.Providers"
         Config[LlmConfig]
         Factory[IChatClientFactory]
-    end
-    
-    subgraph "Microsoft.Extensions.AI"
-        IChatClient[IChatClient]
-        ChatOptions[ChatOptions]
-    end
-    
-    subgraph "Microsoft.Agents.AI"
-        AsAIAgent[AsAIAgent]
-        ChatClientAgent[ChatClientAgent]
     end
     
     subgraph "LLM SDKs"
         OpenAI[OpenAI SDK]
         Azure[Azure.AI.OpenAI]
-        Anthropic[Anthropic SDK]
+    end
+    
+    subgraph "Microsoft.Agents.AI"
+        ChatClientAgent[ChatClientAgent]
+        AsAIAgent[AsAIAgent]
     end
     
     Config --> Factory
-    Factory --> IChatClient
-    OpenAI --> IChatClient
-    Azure --> IChatClient
-    Anthropic --> IChatClient
-    IChatClient --> AsAIAgent
+    Factory --> OpenAI
+    OpenAI --> AsAIAgent
     AsAIAgent --> ChatClientAgent
-    ChatOptions --> AsAIAgent
-```
-
----
-
-## 实现要点
-
-### 1. 不要定义自定义 Provider 接口
-
-❌ **错误做法**：
-```csharp
-public interface ILLMProvider
-{
-    Task<LLMResponse> CompleteAsync(LLMRequest request);
-}
-```
-
-✅ **正确做法**：
-```csharp
-// 直接使用 IChatClient
-IChatClient client = new OpenAIClient(apiKey).GetChatClient("gpt-4o");
-var agent = client.AsAIAgent(instructions: "...");
-```
-
-### 2. 使用 ChatOptions 传递参数
-
-```csharp
-var options = new ChatOptions
-{
-    Temperature = 0.7,
-    MaxOutputTokens = 4096,
-    Instructions = systemPrompt,
-    Tools = tools
-};
-
-var response = await client.GetResponseAsync(messages, options);
-```
-
-### 3. 工具通过 ChatOptions.Tools 传递
-
-```csharp
-var tools = new List<AITool>
-{
-    AIFunctionFactory.Create(ReadFileAsync),
-    AIFunctionFactory.Create(WriteFileAsync)
-};
-
-var options = new ChatOptions { Tools = tools };
-```
-
-### 4. 错误处理
-
-```csharp
-try
-{
-    var response = await client.GetResponseAsync(messages, options);
-}
-catch (HttpRequestException ex)
-{
-    // 处理 API 错误
-    _logger.LogError(ex, "LLM API call failed");
-    throw;
-}
 ```
 
 ---
@@ -400,15 +259,14 @@ catch (HttpRequestException ex)
 
 | 传统做法 | NanoBot.Net 做法 |
 |----------|-----------------|
-| 定义 `ILLMProvider` 接口 | 直接使用 `IChatClient` |
-| 实现 `OpenAIProvider`、`AnthropicProvider` 等 | 使用官方 SDK 或 `OpenAICompatibleClient` |
-| 定义 `LLMRequest`/`LLMResponse` | 使用 `ChatMessage`/`ChatResponse` |
-| 自定义工具注册 | 使用 `AIFunctionFactory` |
+| 定义 `ILLMProvider` 接口 | 直接使用框架的 `ChatClientAgent` |
+| 实现 Provider 类 | 使用官方 SDK 的 `IChatClient` |
+| 手动处理工具调用循环 | 框架自动处理 |
+| 自行实现多模态 | 框架内置支持 |
 
 **核心收益**：
 - 减少约 500+ 行代码
-- 直接使用框架能力
-- 更好的互操作性
+- 直接使用框架的完整功能（多模态、会话管理等）
 - 更少的维护负担
 
 ---

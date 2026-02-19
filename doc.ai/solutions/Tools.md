@@ -340,77 +340,74 @@ public static class MessageTools
 
 ## MCP 客户端
 
-**注意**：Microsoft.Agents.AI 框架的 .NET 版本目前没有内置 MCP 支持（Python 版有 `MCPTool`）。NanoBot.Net 需要自行实现 MCP 客户端。
+**重要更新**：Microsoft.Agents.AI 框架现在通过 `ModelContextProtocol` 包提供官方 MCP 支持。NanoBot.Net 直接使用官方 SDK。
 
-### MCP 客户端实现
+### 使用官方 MCP SDK
+
+```csharp
+using ModelContextProtocol.Client;
+
+// 创建 MCP 客户端连接
+await using var mcpClient = await McpClient.CreateAsync(new StdioClientTransport(new()
+{
+    Name = "filesystem",
+    Command = "npx",
+    Arguments = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+}));
+
+// 获取工具列表（McpClientTool 继承自 AIFunction，可直接作为 AITool 使用）
+IList<McpClientTool> mcpTools = await mcpClient.ListToolsAsync();
+
+// 将 MCP 工具转换为 AITool
+var allTools = builtinTools.Concat(mcpTools.Cast<AITool>()).ToList();
+
+// 创建 Agent 时使用
+var agent = chatClient.AsAIAgent(
+    instructions: "You are a helpful assistant.",
+    tools: [.. allTools]);
+```
+
+### NanoBot.Net 的 MCP 客户端封装
 
 ```csharp
 namespace NanoBot.Tools.Mcp;
 
-public interface IMcpClient
+public interface IMcpClient : IAsyncDisposable
 {
+    IReadOnlyList<string> ConnectedServers { get; }
+    Task<IList<McpClientTool>> ListToolsAsync(string serverName, CancellationToken ct = default);
+    Task<IReadOnlyList<AITool>> GetAllAIToolsAsync(CancellationToken ct = default);
     Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken ct = default);
     Task DisconnectAsync(string serverName, CancellationToken ct = default);
-    Task<IReadOnlyList<AITool>> GetToolsAsync(string serverName, CancellationToken ct = default);
-    Task<string> CallToolAsync(string serverName, string toolName, Dictionary<string, object> args, CancellationToken ct = default);
-    IReadOnlyList<string> ConnectedServers { get; }
 }
 
-public class McpClient : IMcpClient
+public class NanoBotMcpClient : IMcpClient
 {
-    private readonly Dictionary<string, McpServerConnection> _connections = new();
-    
-    public async Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken ct = default)
-    {
-        var connection = new McpServerConnection(config);
-        await connection.ConnectAsync(ct);
-        _connections[serverName] = connection;
-    }
-    
-    public async Task<IReadOnlyList<AITool>> GetToolsAsync(string serverName, CancellationToken ct = default)
-    {
-        if (!_connections.TryGetValue(serverName, out var connection))
-            throw new InvalidOperationException($"Server '{serverName}' not connected");
-        
-        var mcpTools = await connection.ListToolsAsync(ct);
-        
-        return mcpTools.Select(t => AIFunctionFactory.Create(
-            (JsonElement args) => CallToolAsync(serverName, t.Name, args),
-            new AIFunctionFactoryOptions
-            {
-                Name = t.Name,
-                Description = t.Description
-            })).ToList();
-    }
-    
-    // ... 其他实现
+    // 使用官方 ModelContextProtocol.Client.McpClient 实现
+    // ...
 }
 ```
 
-### 将 MCP 工具转换为 AITool
+### 配置示例
 
-```csharp
-public static class McpExtensions
+```json
 {
-    public static async Task<IReadOnlyList<AITool>> ToAIToolsAsync(
-        this IMcpClient client,
-        string serverName,
-        CancellationToken ct = default)
-    {
-        return await client.GetToolsAsync(serverName, ct);
+  "Tools": {
+    "McpServers": {
+      "filesystem": {
+        "Command": "npx",
+        "Args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"]
+      },
+      "github": {
+        "Command": "npx",
+        "Args": ["-y", "@modelcontextprotocol/server-github"],
+        "Env": {
+          "GITHUB_TOKEN": "your-token"
+        }
+      }
     }
+  }
 }
-
-// 使用示例
-var mcpClient = new McpClient();
-await mcpClient.ConnectAsync("filesystem", new McpServerConfig
-{
-    Command = "npx",
-    Args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
-});
-
-var mcpTools = await mcpClient.ToAIToolsAsync("filesystem");
-var allTools = builtinTools.Concat(mcpTools).ToList();
 ```
 
 ---

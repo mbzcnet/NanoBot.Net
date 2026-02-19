@@ -95,7 +95,7 @@ var agent = chatClient.AsAIAgent(tools: tools);
 |------|----------|
 | **语言与运行时** | C# / .NET 8+ (LTS) |
 | **核心框架** | **Microsoft.Agents.AI** - 直接使用框架的 AIAgent、IChatClient、AITool 等核心类型 |
-| **LLM 客户端** | 使用 `Microsoft.Extensions.AI` 的 `IChatClient` 抽象，支持 OpenAI/Azure/Anthropic/Ollama 等 |
+| **LLM 客户端** | 使用 `Microsoft.Agents.AI` 的 `ChatClientAgent`，框架内置多模态支持 |
 | **工具系统** | 使用 `AITool`/`AIFunction` 抽象，通过 `AIFunctionFactory` 创建 |
 | **依赖注入** | `Microsoft.Extensions.DependencyInjection` - 用于服务注册与生命周期管理 |
 | **配置管理** | `Microsoft.Extensions.Configuration` - 支持 JSON、环境变量等多种配置源 |

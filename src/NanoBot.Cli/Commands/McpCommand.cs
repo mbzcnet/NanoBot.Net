@@ -106,7 +106,7 @@ public class McpCommand : ICliCommand
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddHttpClient();
-        services.AddSingleton<IMcpClient, McpClient>();
+        services.AddSingleton<IMcpClient, NanoBotMcpClient>();
         var serviceProvider = services.BuildServiceProvider();
 
         var mcpClient = serviceProvider.GetRequiredService<IMcpClient>();

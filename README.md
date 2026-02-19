@@ -522,7 +522,7 @@ src/
 |-----------|--------|
 | **Language/Runtime** | C# / .NET 8+ (LTS) |
 | **Core Framework** | Microsoft.Agents.AI |
-| **LLM Client** | Microsoft.Extensions.AI (IChatClient) |
+| **LLM Client** | Microsoft.Agents.AI (ChatClientAgent) - Built-in multimodal support |
 | **Tool System** | AITool / AIFunction |
 | **Dependency Injection** | Microsoft.Extensions.DependencyInjection |
 | **Configuration** | Microsoft.Extensions.Configuration |
