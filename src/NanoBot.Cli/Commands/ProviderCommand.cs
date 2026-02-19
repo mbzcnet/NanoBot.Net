@@ -8,20 +8,22 @@ public class ProviderCommand : ICliCommand
     public string Name => "provider";
     public string Description => "Manage providers";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var loginCommand = new Command("login", "Authenticate with an OAuth provider");
         var providerArg = new Argument<string>("provider", "OAuth provider (e.g. 'openai-codex', 'github-copilot')");
         loginCommand.Add(providerArg);
-        loginCommand.SetHandler(async (provider) =>
+        loginCommand.SetHandler(async (context) =>
         {
+            var provider = context.ParseResult.GetValueForArgument(providerArg);
+            var cancellationToken = context.GetCancellationToken();
             await LoginAsync(provider, cancellationToken);
-        }, providerArg);
+        });
 
         var command = new Command(Name, Description);
         command.AddCommand(loginCommand);
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private static Task LoginAsync(string provider, CancellationToken cancellationToken)

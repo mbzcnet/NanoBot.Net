@@ -11,11 +11,12 @@ public class McpCommand : ICliCommand
     public string Name => "mcp";
     public string Description => "MCP server management";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var listCommand = new Command("list", "List MCP servers");
-        listCommand.SetHandler(async () =>
+        listCommand.SetHandler(async (context) =>
         {
+            var cancellationToken = context.GetCancellationToken();
             await ListServersAsync(cancellationToken);
         });
 
@@ -26,10 +27,12 @@ public class McpCommand : ICliCommand
         );
         serverOption.AddAlias("-s");
         toolsCommand.Add(serverOption);
-        toolsCommand.SetHandler(async (server) =>
+        toolsCommand.SetHandler(async (context) =>
         {
+            var server = context.ParseResult.GetValueForOption(serverOption);
+            var cancellationToken = context.GetCancellationToken();
             await ListToolsAsync(server, cancellationToken);
-        }, serverOption);
+        });
 
         var connectCommand = new Command("connect", "Connect to MCP server");
         var connectNameArg = new Argument<string>("name", "Server name");
@@ -41,18 +44,24 @@ public class McpCommand : ICliCommand
         connectCommand.Add(connectNameArg);
         connectCommand.Add(connectCommandArg);
         connectCommand.Add(argsOption);
-        connectCommand.SetHandler(async (name, cmd, args) =>
+        connectCommand.SetHandler(async (context) =>
         {
+            var name = context.ParseResult.GetValueForArgument(connectNameArg);
+            var cmd = context.ParseResult.GetValueForArgument(connectCommandArg);
+            var args = context.ParseResult.GetValueForOption(argsOption);
+            var cancellationToken = context.GetCancellationToken();
             await ConnectServerAsync(name, cmd, args, cancellationToken);
-        }, connectNameArg, connectCommandArg, argsOption);
+        });
 
         var disconnectCommand = new Command("disconnect", "Disconnect MCP server");
         var disconnectNameArg = new Argument<string>("name", "Server name");
         disconnectCommand.Add(disconnectNameArg);
-        disconnectCommand.SetHandler(async (name) =>
+        disconnectCommand.SetHandler(async (context) =>
         {
+            var name = context.ParseResult.GetValueForArgument(disconnectNameArg);
+            var cancellationToken = context.GetCancellationToken();
             await DisconnectServerAsync(name, cancellationToken);
-        }, disconnectNameArg);
+        });
 
         var command = new Command(Name, Description);
         command.AddCommand(listCommand);
@@ -60,7 +69,7 @@ public class McpCommand : ICliCommand
         command.AddCommand(connectCommand);
         command.AddCommand(disconnectCommand);
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private static async Task ListServersAsync(CancellationToken cancellationToken)

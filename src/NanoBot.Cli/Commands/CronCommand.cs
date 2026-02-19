@@ -1,5 +1,4 @@
 using System.CommandLine;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Configuration;
@@ -13,7 +12,7 @@ public class CronCommand : ICliCommand
     public string Name => "cron";
     public string Description => "Scheduled task management";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var listCommand = new Command("list", "List scheduled jobs");
         var allOption = new Option<bool>(
@@ -23,10 +22,12 @@ public class CronCommand : ICliCommand
         );
         allOption.AddAlias("-a");
         listCommand.Add(allOption);
-        listCommand.SetHandler(async (all) =>
+        listCommand.SetHandler(async (context) =>
         {
+            var all = context.ParseResult.GetValueForOption(allOption);
+            var cancellationToken = context.GetCancellationToken();
             await ListJobsAsync(all, cancellationToken);
-        }, allOption);
+        });
 
         var addCommand = new Command("add", "Add a scheduled job");
         var nameOption = new Option<string>(
@@ -92,7 +93,7 @@ public class CronCommand : ICliCommand
         addCommand.Add(toOption);
         addCommand.Add(channelOption);
 
-        addCommand.SetHandler(async context =>
+        addCommand.SetHandler(async (context) =>
         {
             var name = context.ParseResult.GetValueForOption(nameOption)!;
             var message = context.ParseResult.GetValueForOption(messageOption)!;
@@ -103,16 +104,19 @@ public class CronCommand : ICliCommand
             var deliver = context.ParseResult.GetValueForOption(deliverOption);
             var to = context.ParseResult.GetValueForOption(toOption);
             var channel = context.ParseResult.GetValueForOption(channelOption);
+            var cancellationToken = context.GetCancellationToken();
             await AddJobAsync(name, message, every, cronExpr, tz, at, deliver, to, channel, cancellationToken);
         });
 
         var removeCommand = new Command("remove", "Remove a scheduled job");
         var jobIdArg = new Argument<string>("job-id", "Job ID to remove");
         removeCommand.Add(jobIdArg);
-        removeCommand.SetHandler(async (jobId) =>
+        removeCommand.SetHandler(async (context) =>
         {
+            var jobId = context.ParseResult.GetValueForArgument(jobIdArg);
+            var cancellationToken = context.GetCancellationToken();
             await RemoveJobAsync(jobId, cancellationToken);
-        }, jobIdArg);
+        });
 
         var enableCommand = new Command("enable", "Enable a job");
         var enableJobIdArg = new Argument<string>("job-id", "Job ID");
@@ -123,10 +127,13 @@ public class CronCommand : ICliCommand
         );
         enableCommand.Add(enableJobIdArg);
         enableCommand.Add(disableOption);
-        enableCommand.SetHandler(async (jobId, disable) =>
+        enableCommand.SetHandler(async (context) =>
         {
+            var jobId = context.ParseResult.GetValueForArgument(enableJobIdArg);
+            var disable = context.ParseResult.GetValueForOption(disableOption);
+            var cancellationToken = context.GetCancellationToken();
             await EnableJobAsync(jobId, !disable, cancellationToken);
-        }, enableJobIdArg, disableOption);
+        });
 
         var runCommand = new Command("run", "Manually run a job");
         var runJobIdArg = new Argument<string>("job-id", "Job ID to run");
@@ -138,10 +145,12 @@ public class CronCommand : ICliCommand
         forceOption.AddAlias("-f");
         runCommand.Add(runJobIdArg);
         runCommand.Add(forceOption);
-        runCommand.SetHandler(async (jobId, force) =>
+        runCommand.SetHandler(async (context) =>
         {
+            var jobId = context.ParseResult.GetValueForArgument(runJobIdArg);
+            var cancellationToken = context.GetCancellationToken();
             await RunJobAsync(jobId, cancellationToken);
-        }, runJobIdArg, forceOption);
+        });
 
         var command = new Command(Name, Description);
         command.AddCommand(listCommand);
@@ -150,7 +159,7 @@ public class CronCommand : ICliCommand
         command.AddCommand(enableCommand);
         command.AddCommand(runCommand);
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private static async Task ListJobsAsync(bool includeDisabled, CancellationToken cancellationToken)

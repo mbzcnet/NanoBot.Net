@@ -12,13 +12,13 @@
 
 **NanoBot.Net** is a .NET port of the excellent [nanobot](https://github.com/HKUDS/nanobot) — an ultra-lightweight personal AI assistant.
 
-⚡️ Delivers core agent functionality in **~12,000 lines** of C# code, re-implemented with necessary .NET optimizations and extensions.
+⚡️ Delivers core agent functionality with clean C# code, re-implemented with necessary .NET optimizations and extensions.
 
 🏗️ Built on **Microsoft.Agents.AI** framework — leveraging the official .NET Agent framework for optimal compatibility and extensibility.
 
 ## Key Features
 
-🪶 **Lightweight**: ~12,000 lines of clean C# code — minimal footprint, maximum efficiency.
+🪶 **Lightweight**: Clean C# code — minimal footprint, maximum efficiency.
 
 🔬 **Research-Ready**: Clean, readable C# code that's easy to understand, modify, and extend.
 
@@ -466,21 +466,6 @@ src/
 ├── NanoBot.Channels/       # Channel implementations
 └── NanoBot.Cli/            # CLI entry point
 ```
-
-### Code Statistics
-
-| Module | Lines of Code | Description |
-|--------|---------------|-------------|
-| NanoBot.Infrastructure | ~2,934 | Workspace, Bus, Cron, Memory, Skills |
-| NanoBot.Channels | ~2,681 | Telegram, Discord, Slack, Feishu, etc. |
-| NanoBot.Cli | ~2,304 | Command-line interface |
-| NanoBot.Agent | ~1,306 | Agent runtime, context providers |
-| NanoBot.Core | ~1,260 | Core interfaces and models |
-| NanoBot.Tools | ~1,188 | File, Shell, Web, MCP tools |
-| NanoBot.Providers | ~162 | LLM provider factory |
-| **Total** | **~11,835** | |
-
-> Run `find src -name "*.cs" -type f ! -path "*/obj/*" | xargs wc -l` to verify.
 
 ## Architecture
 

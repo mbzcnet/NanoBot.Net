@@ -9,7 +9,7 @@ public class StatusCommand : ICliCommand
     public string Name => "status";
     public string Description => "Show Agent status";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var jsonOption = new Option<bool>(
             name: "--json",
@@ -29,12 +29,15 @@ public class StatusCommand : ICliCommand
             configOption
         };
 
-        command.SetHandler(async (json, configPath) =>
+        command.SetHandler(async (context) =>
         {
+            var json = context.ParseResult.GetValueForOption(jsonOption);
+            var configPath = context.ParseResult.GetValueForOption(configOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteStatusAsync(json, configPath, cancellationToken);
-        }, jsonOption, configOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteStatusAsync(

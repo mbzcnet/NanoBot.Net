@@ -19,7 +19,7 @@ public class AgentCommand : ICliCommand
         "exit", "quit", "/exit", "/quit", ":q"
     };
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var messageOption = new Option<string?>(
             name: "--message",
@@ -61,12 +61,18 @@ public class AgentCommand : ICliCommand
             logsOption
         };
 
-        command.SetHandler(async (message, session, configPath, markdown, logs) =>
+        command.SetHandler(async (context) =>
         {
+            var message = context.ParseResult.GetValueForOption(messageOption);
+            var session = context.ParseResult.GetValueForOption(sessionOption);
+            var configPath = context.ParseResult.GetValueForOption(configOption);
+            var markdown = context.ParseResult.GetValueForOption(markdownOption);
+            var logs = context.ParseResult.GetValueForOption(logsOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteAgentAsync(message, session, configPath, markdown, logs, cancellationToken);
-        }, messageOption, sessionOption, configOption, markdownOption, logsOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteAgentAsync(

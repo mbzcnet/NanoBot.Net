@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.Text.Json;
 using NanoBot.Core.Configuration;
 
 namespace NanoBot.Cli.Commands;
@@ -9,17 +8,19 @@ public class ChannelsCommand : ICliCommand
     public string Name => "channels";
     public string Description => "Manage channels";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var statusCommand = new Command("status", "Show channel status");
-        statusCommand.SetHandler(async () =>
+        statusCommand.SetHandler(async (context) =>
         {
+            var cancellationToken = context.GetCancellationToken();
             await ShowChannelStatusAsync(cancellationToken);
         });
 
         var loginCommand = new Command("login", "Link device via QR code");
-        loginCommand.SetHandler(async () =>
+        loginCommand.SetHandler(async (context) =>
         {
+            var cancellationToken = context.GetCancellationToken();
             await LoginAsync(cancellationToken);
         });
 
@@ -27,7 +28,7 @@ public class ChannelsCommand : ICliCommand
         command.AddCommand(statusCommand);
         command.AddCommand(loginCommand);
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private static async Task ShowChannelStatusAsync(CancellationToken cancellationToken)

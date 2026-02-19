@@ -10,33 +10,24 @@ public static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        if (args.Length == 1 && (args[0] == "--version" || args[0] == "-v"))
+        {
+            Console.WriteLine($"{Logo} nbot v{Version}");
+            return 0;
+        }
+
         var rootCommand = new RootCommand($"{Logo} nbot v{Version} - A lightweight personal AI assistant");
-
-        var versionOption = new Option<bool>(
-            name: "--version",
-            description: "Show version information"
-        );
-        versionOption.AddAlias("-v");
-
-        rootCommand.AddGlobalOption(versionOption);
 
         var commands = GetCommands();
         foreach (var cmd in commands)
         {
-            rootCommand.AddCommand(CreateCommand(cmd));
+            rootCommand.AddCommand(cmd.CreateCommand());
         }
 
-        rootCommand.SetHandler((version) =>
+        rootCommand.SetHandler(() =>
         {
-            if (version)
-            {
-                Console.WriteLine($"{Logo} nbot v{Version}");
-            }
-            else
-            {
-                rootCommand.Invoke("--help");
-            }
-        }, versionOption);
+            rootCommand.Invoke("--help");
+        });
 
         return await rootCommand.InvokeAsync(args);
     }
@@ -56,23 +47,5 @@ public static class Program
             new ChannelsCommand(),
             new ProviderCommand()
         };
-    }
-
-    private static Command CreateCommand(ICliCommand cliCommand)
-    {
-        var command = new Command(cliCommand.Name, cliCommand.Description);
-
-        command.SetHandler(async (context) =>
-        {
-            var remainingArgs = context.ParseResult.Tokens
-                .Where(t => t.Type != System.CommandLine.Parsing.TokenType.Command)
-                .Select(t => t.Value)
-                .ToArray();
-
-            var exitCode = await cliCommand.ExecuteAsync(remainingArgs, context.GetCancellationToken());
-            context.ExitCode = exitCode;
-        });
-
-        return command;
     }
 }

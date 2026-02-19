@@ -17,7 +17,7 @@ public class GatewayCommand : ICliCommand
     public string Name => "gateway";
     public string Description => "Start Gateway service mode";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var portOption = new Option<int>(
             name: "--port",
@@ -46,12 +46,16 @@ public class GatewayCommand : ICliCommand
             verboseOption
         };
 
-        command.SetHandler(async (port, configPath, verbose) =>
+        command.SetHandler(async (context) =>
         {
+            var port = context.ParseResult.GetValueForOption(portOption);
+            var configPath = context.ParseResult.GetValueForOption(configOption);
+            var verbose = context.ParseResult.GetValueForOption(verboseOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteGatewayAsync(port, configPath, verbose, cancellationToken);
-        }, portOption, configOption, verboseOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteGatewayAsync(

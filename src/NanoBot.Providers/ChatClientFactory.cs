@@ -87,9 +87,20 @@ public class ChatClientFactory : IChatClientFactory
 
         var resolvedModel = ResolveModel(model, spec.LiteLLMPrefix);
 
+        if (spec.IsLocal && string.IsNullOrEmpty(resolvedApiKey))
+        {
+            resolvedApiKey = "local-no-key";
+        }
+
+        var clientOptions = new OpenAI.OpenAIClientOptions 
+        { 
+            Endpoint = new Uri(resolvedApiBase),
+            NetworkTimeout = TimeSpan.FromMinutes(5)
+        };
+
         var client = new OpenAI.OpenAIClient(
             new System.ClientModel.ApiKeyCredential(resolvedApiKey),
-            new OpenAI.OpenAIClientOptions { Endpoint = new Uri(resolvedApiBase) }
+            clientOptions
         );
 
         return client.GetChatClient(resolvedModel).AsIChatClient();

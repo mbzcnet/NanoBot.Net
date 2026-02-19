@@ -9,7 +9,7 @@ public class ConfigCommand : ICliCommand
     public string Name => "config";
     public string Description => "Configuration management";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var listOption = new Option<bool>(
             name: "--list",
@@ -44,12 +44,17 @@ public class ConfigCommand : ICliCommand
             configOption
         };
 
-        command.SetHandler(async (list, get, set, configPath) =>
+        command.SetHandler(async (context) =>
         {
+            var list = context.ParseResult.GetValueForOption(listOption);
+            var get = context.ParseResult.GetValueForOption(getOption);
+            var set = context.ParseResult.GetValueForOption(setOption);
+            var configPath = context.ParseResult.GetValueForOption(configOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteConfigAsync(list, get, set, configPath, cancellationToken);
-        }, listOption, getOption, setOption, configOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteConfigAsync(

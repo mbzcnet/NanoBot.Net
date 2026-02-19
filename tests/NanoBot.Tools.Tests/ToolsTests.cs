@@ -145,8 +145,11 @@ public class CronToolsTests
             {
                 ["action"] = "add",
                 ["message"] = "Test",
-                ["cronExpr"] = "0 9 * * *",
-                ["tz"] = "Invalid/Timezone"
+                ["everySeconds"] = null,
+                ["cronExpr"] = "0 0 9 * * *",
+                ["tz"] = "Invalid/Timezone",
+                ["at"] = null,
+                ["jobId"] = null
             },
             CancellationToken.None);
 
@@ -169,7 +172,10 @@ public class CronToolsTests
                 ["action"] = "add",
                 ["message"] = "Test",
                 ["everySeconds"] = 60,
-                ["tz"] = "America/New_York"
+                ["cronExpr"] = null,
+                ["tz"] = "America/New_York",
+                ["at"] = null,
+                ["jobId"] = null
             },
             CancellationToken.None);
 
@@ -193,7 +199,11 @@ public class CronToolsTests
             {
                 ["action"] = "add",
                 ["message"] = "Test",
-                ["cronExpr"] = "0 9 * * *"
+                ["everySeconds"] = null,
+                ["cronExpr"] = "0 0 9 * * *",
+                ["tz"] = null,
+                ["at"] = null,
+                ["jobId"] = null
             },
             CancellationToken.None);
 

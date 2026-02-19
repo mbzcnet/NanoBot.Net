@@ -235,7 +235,33 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration,
         AgentOptions? agentOptions = null)
     {
-        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>() ?? new AgentConfig();
+        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>();
+        if (agentConfig == null)
+        {
+            agentConfig = new AgentConfig
+            {
+                Name = configuration["Name"] ?? configuration["name"] ?? "NanoBot",
+                Workspace = configuration.GetSection("Workspace").Get<WorkspaceConfig>() 
+                    ?? configuration.GetSection("workspace").Get<WorkspaceConfig>() 
+                    ?? new WorkspaceConfig(),
+                Llm = configuration.GetSection("Llm").Get<LlmConfig>() 
+                    ?? configuration.GetSection("llm").Get<LlmConfig>() 
+                    ?? new LlmConfig(),
+                Channels = configuration.GetSection("Channels").Get<ChannelsConfig>() 
+                    ?? configuration.GetSection("channels").Get<ChannelsConfig>() 
+                    ?? new ChannelsConfig(),
+                Mcp = configuration.GetSection("Mcp").Get<McpConfig>() 
+                    ?? configuration.GetSection("mcp").Get<McpConfig>(),
+                Security = configuration.GetSection("Security").Get<SecurityConfig>() 
+                    ?? configuration.GetSection("security").Get<SecurityConfig>() 
+                    ?? new SecurityConfig(),
+                Memory = configuration.GetSection("Memory").Get<MemoryConfig>() 
+                    ?? configuration.GetSection("memory").Get<MemoryConfig>() 
+                    ?? new MemoryConfig(),
+                Heartbeat = configuration.GetSection("Heartbeat").Get<HeartbeatConfig>() 
+                    ?? configuration.GetSection("heartbeat").Get<HeartbeatConfig>()
+            };
+        }
 
         services
             .AddNanoBotConfiguration(configuration)

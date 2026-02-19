@@ -1,5 +1,4 @@
 using System.CommandLine;
-using System.Text;
 using NanoBot.Core.Configuration;
 
 namespace NanoBot.Cli.Commands;
@@ -9,7 +8,7 @@ public class OnboardCommand : ICliCommand
     public string Name => "onboard";
     public string Description => "Initialize nbot configuration and workspace";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var dirOption = new Option<string?>(
             name: "--dir",
@@ -28,12 +27,15 @@ public class OnboardCommand : ICliCommand
             nameOption
         };
 
-        command.SetHandler(async (dir, name) =>
+        command.SetHandler(async (context) =>
         {
+            var dir = context.ParseResult.GetValueForOption(dirOption);
+            var name = context.ParseResult.GetValueForOption(nameOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteOnboardAsync(dir, name, cancellationToken);
-        }, dirOption, nameOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteOnboardAsync(string? dir, string name, CancellationToken cancellationToken)

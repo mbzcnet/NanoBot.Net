@@ -1,7 +1,5 @@
 using System.CommandLine;
-using System.Text.Json;
 using NanoBot.Core.Configuration;
-using NanoBot.Core.Workspace;
 
 namespace NanoBot.Cli.Commands;
 
@@ -10,7 +8,7 @@ public class SessionCommand : ICliCommand
     public string Name => "session";
     public string Description => "Session management";
 
-    public async Task<int> ExecuteAsync(string[] args, CancellationToken cancellationToken = default)
+    public Command CreateCommand()
     {
         var listOption = new Option<bool>(
             name: "--list",
@@ -50,12 +48,18 @@ public class SessionCommand : ICliCommand
             configOption
         };
 
-        command.SetHandler(async (list, clear, clearAll, export, configPath) =>
+        command.SetHandler(async (context) =>
         {
+            var list = context.ParseResult.GetValueForOption(listOption);
+            var clear = context.ParseResult.GetValueForOption(clearOption);
+            var clearAll = context.ParseResult.GetValueForOption(clearAllOption);
+            var export = context.ParseResult.GetValueForOption(exportOption);
+            var configPath = context.ParseResult.GetValueForOption(configOption);
+            var cancellationToken = context.GetCancellationToken();
             await ExecuteSessionAsync(list, clear, clearAll, export, configPath, cancellationToken);
-        }, listOption, clearOption, clearAllOption, exportOption, configOption);
+        });
 
-        return await command.InvokeAsync(args);
+        return command;
     }
 
     private async Task ExecuteSessionAsync(

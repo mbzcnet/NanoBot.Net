@@ -57,11 +57,13 @@ public static class ConfigurationLoader
             return await LoadAsync(configPath, cancellationToken);
         }
 
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var defaultPaths = new[]
         {
             "config.json",
             "agent.json",
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nanobot", "config.json")
+            Path.Combine(homeDir, ".nbot", "config.json"),
+            Path.Combine(homeDir, ".nanobot", "config.json")
         };
 
         foreach (var path in defaultPaths)
