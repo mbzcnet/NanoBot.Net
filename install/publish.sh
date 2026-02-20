@@ -6,15 +6,27 @@
 #   ./publish.sh <version> [options]
 #
 # Options:
-#   --tag              Create and push git tag (triggers GitHub Actions release)
-#   --update-formula   Update Homebrew Formula sha256 after release
-#   --all              Run all steps: build, tag, wait for release, update formula
+#   --tag                Create and push git tag (triggers GitHub Actions release)
+#   --update-formula     Update Homebrew Formula sha256 after release
+#   --push-tap           Push updated formula to homebrew-tap repository
+#   --nuget              Push package to NuGet.org
+#   --all                Run all steps: build, tag, wait for release, update formula, push tap
+#
+# Environment Variables (for sensitive data):
+#   GITHUB_TOKEN         GitHub Personal Access Token (for push-tap)
+#   NUGET_API_KEY        NuGet.org API Key (for --nuget)
+#   HOMEBREW_TAP_REPO    Homebrew tap repository (default: mbzcnet/homebrew-tap)
+#   HOMEBREW_TAP_BRANCH  Homebrew tap branch (default: main)
 #
 # Examples:
-#   ./publish.sh 0.1.0                    # Build only
-#   ./publish.sh 0.1.0 --tag              # Build and push tag
-#   ./publish.sh 0.1.0 --update-formula   # Build and update formula (requires release exists)
-#   ./publish.sh 0.1.0 --all              # Full release workflow
+#   ./publish.sh 0.1.0                              # Build only
+#   ./publish.sh 0.1.0 --tag                        # Build and push tag
+#   ./publish.sh 0.1.0 --update-formula             # Build and update formula (release must exist)
+#   ./publish.sh 0.1.0 --push-tap                   # Build, update formula, push to tap
+#   ./publish.sh 0.1.0 --nuget                      # Build and push to NuGet
+#   ./publish.sh 0.1.0 --all                        # Full release workflow
+#   GITHUB_TOKEN=xxx ./publish.sh 0.1.0 --push-tap  # With GitHub token
+#   NUGET_API_KEY=xxx ./publish.sh 0.1.0 --nuget    # With NuGet key
 #
 
 set -e
@@ -22,8 +34,11 @@ set -e
 REPO="mbzcnet/NanoBot.Net"
 PROJECT="src/NanoBot.Cli/NanoBot.Cli.csproj"
 OUTPUT_DIR="dist"
-FORMULA_FILE="install/homebrew-nanobot/Formula/nanobot.rb"
+FORMULA_FILE="install/homebrew-nanobot/Formula/nbot.rb"
 BINARY_NAME="nbot"
+
+HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-mbzcnet/homebrew-tap}"
+HOMEBREW_TAP_BRANCH="${HOMEBREW_TAP_BRANCH:-main}"
 
 PLATFORMS=(
     "osx-x64"
@@ -51,13 +66,23 @@ usage() {
     echo "Options:"
     echo "  --tag              Create and push git tag"
     echo "  --update-formula   Update Homebrew Formula sha256"
+    echo "  --push-tap         Push formula to homebrew-tap repository"
+    echo "  --nuget            Push package to NuGet.org"
     echo "  --all              Full release workflow"
     echo ""
+    echo "Environment Variables:"
+    echo "  GITHUB_TOKEN         GitHub PAT for push-tap (required for --push-tap)"
+    echo "  NUGET_API_KEY        NuGet API key (required for --nuget)"
+    echo "  HOMEBREW_TAP_REPO    Tap repository (default: mbzcnet/homebrew-tap)"
+    echo "  HOMEBREW_TAP_BRANCH  Tap branch (default: main)"
+    echo ""
     echo "Examples:"
-    echo "  $0 0.1.0                    # Build only"
-    echo "  $0 0.1.0 --tag              # Build and push tag"
-    echo "  $0 0.1.0 --update-formula   # Update formula (release must exist)"
-    echo "  $0 0.1.0 --all              # Full release workflow"
+    echo "  $0 0.1.0                              # Build only"
+    echo "  $0 0.1.0 --tag                        # Build and push tag"
+    echo "  $0 0.1.0 --update-formula             # Update formula (release must exist)"
+    echo "  $0 0.1.0 --push-tap                   # Update formula and push to tap"
+    echo "  $0 0.1.0 --nuget                      # Build and push to NuGet"
+    echo "  $0 0.1.0 --all                        # Full release workflow"
     exit 1
 }
 
@@ -71,6 +96,8 @@ parse_args() {
     
     DO_TAG=false
     DO_UPDATE_FORMULA=false
+    DO_PUSH_TAP=false
+    DO_NUGET=false
     
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -82,9 +109,19 @@ parse_args() {
                 DO_UPDATE_FORMULA=true
                 shift
                 ;;
+            --push-tap)
+                DO_UPDATE_FORMULA=true
+                DO_PUSH_TAP=true
+                shift
+                ;;
+            --nuget)
+                DO_NUGET=true
+                shift
+                ;;
             --all)
                 DO_TAG=true
                 DO_UPDATE_FORMULA=true
+                DO_PUSH_TAP=true
                 shift
                 ;;
             *)
@@ -137,6 +174,20 @@ check_prerequisites() {
         if ! command -v shasum &> /dev/null && ! command -v sha256sum &> /dev/null; then
             error "shasum or sha256sum not found. Required for --update-formula option."
         fi
+    fi
+    
+    if [[ "$DO_PUSH_TAP" == true ]]; then
+        if [[ -z "$GITHUB_TOKEN" ]]; then
+            error "GITHUB_TOKEN is required for --push-tap. Set it as environment variable."
+        fi
+        info "GITHUB_TOKEN is set"
+    fi
+    
+    if [[ "$DO_NUGET" == true ]]; then
+        if [[ -z "$NUGET_API_KEY" ]]; then
+            error "NUGET_API_KEY is required for --nuget. Set it as environment variable."
+        fi
+        info "NUGET_API_KEY is set"
     fi
     
     info "Prerequisites OK"
@@ -313,6 +364,111 @@ update_homebrew_formula() {
     cat "$formula_path"
 }
 
+push_to_homebrew_tap() {
+    step "Pushing formula to homebrew-tap repository..."
+    
+    local tap_owner=$(echo "$HOMEBREW_TAP_REPO" | cut -d'/' -f1)
+    local tap_name=$(echo "$HOMEBREW_TAP_REPO" | cut -d'/' -f2)
+    local formula_content=$(cat "$FORMULA_FILE")
+    local formula_filename="Formula/nbot.rb"
+    
+    info "Target repository: $HOMEBREW_TAP_REPO"
+    info "Target branch: $HOMEBREW_TAP_BRANCH"
+    info "Formula file: $formula_filename"
+    
+    local api_url="https://api.github.com/repos/$HOMEBREW_TAP_REPO/contents/$formula_filename"
+    
+    local existing_sha=""
+    local existing_response=$(curl -s -w "\n%{http_code}" \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        "$api_url?ref=$HOMEBREW_TAP_BRANCH")
+    
+    local http_code=$(echo "$existing_response" | tail -n1)
+    local response_body=$(echo "$existing_response" | sed '$d')
+    
+    if [[ "$http_code" == "200" ]]; then
+        existing_sha=$(echo "$response_body" | grep -o '"sha"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4)
+        info "Existing file found, will update (sha: ${existing_sha:0:8}...)"
+    else
+        info "File does not exist, will create new file"
+    fi
+    
+    local encoded_content=$(echo -n "$formula_content" | base64)
+    
+    local commit_message="Update nbot to v$VERSION"
+    
+    local request_body
+    if [[ -n "$existing_sha" ]]; then
+        request_body=$(cat <<EOF
+{
+  "message": "$commit_message",
+  "content": "$encoded_content",
+  "sha": "$existing_sha",
+  "branch": "$HOMEBREW_TAP_BRANCH"
+}
+EOF
+)
+    else
+        request_body=$(cat <<EOF
+{
+  "message": "$commit_message",
+  "content": "$encoded_content",
+  "branch": "$HOMEBREW_TAP_BRANCH"
+}
+EOF
+)
+    fi
+    
+    local put_response=$(curl -s -w "\n%{http_code}" \
+        -X PUT \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -H "Content-Type: application/json" \
+        -d "$request_body" \
+        "$api_url")
+    
+    local put_http_code=$(echo "$put_response" | tail -n1)
+    local put_response_body=$(echo "$put_response" | sed '$d')
+    
+    if [[ "$put_http_code" == "200" || "$put_http_code" == "201" ]]; then
+        info "Successfully pushed formula to $HOMEBREW_TAP_REPO"
+        info "View at: https://github.com/$HOMEBREW_TAP_REPO/blob/$HOMEBREW_TAP_BRANCH/$formula_filename"
+    else
+        error "Failed to push formula. HTTP $put_http_code\nResponse: $put_response_body"
+    fi
+}
+
+push_to_nuget() {
+    step "Pushing package to NuGet.org..."
+    
+    local nupkg_dir="nupkg"
+    
+    mkdir -p "$nupkg_dir"
+    
+    info "Packing NanoBot.Cli..."
+    dotnet pack "$PROJECT" \
+        -c Release \
+        -p:PackageVersion="$VERSION" \
+        -o "$nupkg_dir"
+    
+    local nupkg_file="$nupkg_dir/NanoBot.Cli.$VERSION.nupkg"
+    
+    if [[ ! -f "$nupkg_file" ]]; then
+        error "Package file not found: $nupkg_file"
+    fi
+    
+    info "Package created: $nupkg_file"
+    
+    info "Pushing to NuGet.org..."
+    dotnet nuget push "$nupkg_file" \
+        --source https://api.nuget.org/v3/index.json \
+        --api-key "$NUGET_API_KEY"
+    
+    info "Successfully pushed to NuGet.org"
+    info "View at: https://www.nuget.org/packages/NanoBot.Cli/$VERSION"
+}
+
 main() {
     echo ""
     echo "=========================================="
@@ -329,7 +485,7 @@ main() {
         echo ""
         create_and_push_tag
         
-        if [[ "$DO_UPDATE_FORMULA" == true ]]; then
+        if [[ "$DO_UPDATE_FORMULA" == true || "$DO_PUSH_TAP" == true ]]; then
             wait_for_release
         fi
     fi
@@ -337,16 +493,33 @@ main() {
     if [[ "$DO_UPDATE_FORMULA" == true ]]; then
         echo ""
         update_homebrew_formula
-        
+    fi
+    
+    if [[ "$DO_PUSH_TAP" == true ]]; then
         echo ""
-        step "Next steps:"
-        echo "  1. Review the updated formula: git diff $FORMULA_FILE"
-        echo "  2. Commit the changes: git add $FORMULA_FILE && git commit -m 'Update formula for v$VERSION'"
-        echo "  3. Push to update the tap: git push"
+        push_to_homebrew_tap
+    fi
+    
+    if [[ "$DO_NUGET" == true ]]; then
+        echo ""
+        push_to_nuget
     fi
     
     echo ""
     info "Done!"
+    
+    echo ""
+    echo "=========================================="
+    echo "   Summary"
+    echo "=========================================="
+    echo "  Version:        v$VERSION"
+    echo "  Release:        https://github.com/$REPO/releases/tag/v$VERSION"
+    if [[ "$DO_PUSH_TAP" == true ]]; then
+        echo "  Homebrew Tap:   https://github.com/$HOMEBREW_TAP_REPO"
+    fi
+    if [[ "$DO_NUGET" == true ]]; then
+        echo "  NuGet Package:  https://www.nuget.org/packages/NanoBot.Cli/$VERSION"
+    fi
 }
 
 main "$@"
