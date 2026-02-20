@@ -90,15 +90,15 @@ parse_args() {
     if [[ $# -lt 1 ]]; then
         usage
     fi
-    
+
     VERSION="${1}"
     shift
-    
+
     DO_TAG=false
     DO_UPDATE_FORMULA=false
     DO_PUSH_TAP=false
     DO_NUGET=false
-    
+
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --tag)
@@ -129,12 +129,34 @@ parse_args() {
                 ;;
         esac
     done
-    
+
     if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
         error "Invalid version format: $VERSION (expected: X.Y.Z or X.Y.Z-suffix)"
     fi
-    
+
     info "Version: $VERSION"
+}
+
+update_version_in_props() {
+    step "Updating version in Directory.Build.props..."
+    
+    local props_file="Directory.Build.props"
+    
+    if [[ ! -f "$props_file" ]]; then
+        error "Directory.Build.props not found at project root"
+    fi
+    
+    sed -i.bak "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" "$props_file"
+    sed -i.bak "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION<\/AssemblyVersion>/" "$props_file"
+    sed -i.bak "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION<\/FileVersion>/" "$props_file"
+    sed -i.bak "s/<InformationalVersion>.*<\/InformationalVersion>/<InformationalVersion>$VERSION<\/InformationalVersion>/" "$props_file"
+    
+    rm -f "${props_file}.bak"
+    
+    info "Updated Directory.Build.props with version $VERSION"
+    echo ""
+    step "Directory.Build.props content:"
+    cat "$props_file"
 }
 
 check_prerequisites() {
@@ -195,21 +217,20 @@ check_prerequisites() {
 
 build_all_platforms() {
     step "Building NanoBot.Net v$VERSION..."
-    
+
     rm -rf "$OUTPUT_DIR"
     mkdir -p "$OUTPUT_DIR"
-    
+
     for PLATFORM in "${PLATFORMS[@]}"; do
         echo ""
         info "Building for $PLATFORM..."
-        
+
         dotnet publish "$PROJECT" \
             -c Release \
             -r "$PLATFORM" \
             --self-contained true \
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=true \
-            -p:Version="$VERSION" \
             -o "$OUTPUT_DIR/$PLATFORM"
         
         cd "$OUTPUT_DIR"
@@ -441,15 +462,14 @@ EOF
 
 push_to_nuget() {
     step "Pushing package to NuGet.org..."
-    
+
     local nupkg_dir="nupkg"
-    
+
     mkdir -p "$nupkg_dir"
-    
+
     info "Packing NanoBot.Cli..."
     dotnet pack "$PROJECT" \
         -c Release \
-        -p:PackageVersion="$VERSION" \
         -o "$nupkg_dir"
     
     local nupkg_file="$nupkg_dir/NanoBot.Cli.$VERSION.nupkg"
@@ -475,10 +495,12 @@ main() {
     echo "   NanoBot.Net Release Builder"
     echo "=========================================="
     echo ""
-    
+
     parse_args "$@"
     check_prerequisites
-    
+
+    update_version_in_props
+
     build_all_platforms
     
     if [[ "$DO_TAG" == true ]]; then

@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.CommandLine;
 using NanoBot.Cli.Commands;
 
@@ -6,7 +7,10 @@ namespace NanoBot.Cli;
 public static class Program
 {
     private const string Logo = "🐈";
-    private const string Version = "1.0.0";
+    private static readonly string Version = typeof(Program)
+        .Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion ?? typeof(Program).Assembly.GetName().Version?.ToString() ?? "unknown";
 
     public static async Task<int> Main(string[] args)
     {

@@ -10,7 +10,6 @@
     <ToolCommandName>nbot</ToolCommandName>
     <PackageOutputPath>./nupkg</PackageOutputPath>
     <PackageId>NanoBot.Cli</PackageId>
-    <PackageVersion>0.1.0</PackageVersion>
     <Authors>NanoBot</Authors>
     <Description>A lightweight personal AI assistant framework</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
