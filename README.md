@@ -81,37 +81,21 @@ dotnet run --project src/NanoBot.Cli -- --version
 
 ## Quick Start
 
-### 1. Initialize Workspace
+### 1. Run Configuration Wizard
 
 ```bash
-nbot onboard
+nbot configure
 ```
 
-This creates a `~/.nbot` directory with default configuration files.
+This launches an interactive wizard to set up your LLM provider and API key.
 
-### 2. Configure LLM Provider
-
-Edit `~/.nbot/config.json`:
-
-```json
-{
-  "Agent": {
-    "Llm": {
-      "Provider": "openai",
-      "Model": "gpt-4o",
-      "ApiKey": "your-api-key-here"
-    }
-  }
-}
-```
-
-Or use environment variable:
+For non-interactive setup:
 
 ```bash
-export NBOT_AGENT_LLM_APIKEY="your-api-key-here"
+nbot configure --non-interactive --provider openai --api-key YOUR_API_KEY
 ```
 
-### 3. Start Chatting
+### 2. Start Chatting
 
 ```bash
 nbot agent
@@ -123,11 +107,15 @@ Or send a single message:
 nbot agent -m "Hello, what can you do?"
 ```
 
+> **Note**: If configuration is incomplete, the agent will prompt you to run `nbot configure` first.
+
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `nbot onboard` | Initialize workspace |
+| `nbot configure` | Interactive configuration wizard |
+| `nbot configure -p openai -k YOUR_KEY` | Quick non-interactive setup |
+| `nbot onboard` | Initialize workspace (legacy) |
 | `nbot agent` | Start interactive chat |
 | `nbot agent -m "..."` | Send a single message |
 | `nbot gateway` | Start gateway service mode |
@@ -140,6 +128,36 @@ nbot agent -m "Hello, what can you do?"
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ## Configuration
+
+### Configuration Wizard
+
+The easiest way to configure NanoBot.Net is using the interactive wizard:
+
+```bash
+nbot configure
+```
+
+This will guide you through:
+1. **LLM Provider Selection** - Choose from OpenAI, Anthropic, OpenRouter, DeepSeek, Moonshot, Zhipu, or Ollama
+2. **Model Selection** - Defaults are provided for each provider
+3. **API Key** - Secure input with masking (or use environment variables)
+4. **Workspace Path** - Where to store sessions and memory
+
+For CI/CD or scripts, use non-interactive mode:
+
+```bash
+# Minimal setup
+nbot configure --non-interactive --provider openai --api-key YOUR_KEY
+
+# Full setup
+nbot configure --non-interactive \
+  --provider openrouter \
+  --model anthropic/claude-3.5-sonnet \
+  --api-key YOUR_KEY \
+  --workspace ~/my-workspace
+```
+
+### Configuration Loading
 
 Configuration is loaded from (in order):
 1. `--config` command line option

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Client;
+using NanoBot.Core.Configuration;
 
 namespace NanoBot.Tools.Mcp;
 
@@ -30,6 +31,15 @@ public class NanoBotMcpClient : IMcpClient
         try
         {
             _logger?.LogInformation("Connecting to MCP server '{ServerName}'...", serverName);
+
+            // Headers support will be added when stdio transport supports it
+            // if (config.Headers != null && config.Headers.Count > 0)
+            // {
+            //     foreach (var header in config.Headers)
+            //     {
+            //         _logger?.LogDebug("MCP server '{ServerName}' using custom header: {Key}", serverName, header.Key);
+            //     }
+            // }
 
             var transportOptions = new StdioClientTransportOptions
             {

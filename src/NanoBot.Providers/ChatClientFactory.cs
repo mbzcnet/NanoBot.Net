@@ -59,6 +59,18 @@ public class ChatClientFactory : IChatClientFactory
             DefaultApiBase: "http://localhost:11434/v1",
             DisplayName: "Ollama",
             IsLocal: true
+        ),
+        ["volcengine"] = new ProviderSpec(
+            EnvKey: "VOLCENGINE_API_KEY",
+            DefaultApiBase: "https://ark.cn-beijing.volces.com/api/v3",
+            DisplayName: "VolcEngine",
+            LiteLLMPrefix: "volcengine"
+        ),
+        ["siliconflow"] = new ProviderSpec(
+            EnvKey: "SILICONFLOW_API_KEY",
+            DefaultApiBase: "https://api.siliconflow.cn/v1",
+            DisplayName: "SiliconFlow",
+            LiteLLMPrefix: "siliconflow"
         )
     };
 
@@ -103,7 +115,11 @@ public class ChatClientFactory : IChatClientFactory
             clientOptions
         );
 
-        return client.GetChatClient(resolvedModel).AsIChatClient();
+        var chatClient = client.GetChatClient(resolvedModel).AsIChatClient();
+        
+        var sanitizingClient = new SanitizingChatClient(chatClient, _logger);
+        
+        return new InterimTextRetryChatClient(sanitizingClient, _logger);
     }
 
     private static string ResolveModel(string model, string? liteLLMPrefix)

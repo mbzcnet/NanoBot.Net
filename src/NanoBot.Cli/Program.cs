@@ -40,6 +40,7 @@ public static class Program
     {
         return new ICliCommand[]
         {
+            new ConfigureCommand(),
             new OnboardCommand(),
             new AgentCommand(),
             new GatewayCommand(),

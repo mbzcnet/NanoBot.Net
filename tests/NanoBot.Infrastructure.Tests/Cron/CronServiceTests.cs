@@ -282,4 +282,78 @@ public class CronServiceTests : IDisposable
 
         await service.StopAsync();
     }
+
+    [Fact]
+    public async Task AddJob_WithValidTimezone_Succeeds()
+    {
+        var service = new CronService(_testStorePath, _logger);
+        await service.StartAsync();
+
+        var definition = new CronJobDefinition
+        {
+            Name = "Timezone Test",
+            Schedule = new CronSchedule 
+            { 
+                Kind = CronScheduleKind.Cron,
+                Expression = "0 9 * * *",
+                TimeZone = "America/New_York"
+            },
+            Message = "Test"
+        };
+
+        var job = service.AddJob(definition);
+
+        Assert.NotNull(job);
+        Assert.Equal("America/New_York", job.Schedule.TimeZone);
+
+        await service.StopAsync();
+    }
+
+    [Fact]
+    public async Task AddJob_WithInvalidTimezone_ThrowsArgumentException()
+    {
+        var service = new CronService(_testStorePath, _logger);
+        await service.StartAsync();
+
+        var definition = new CronJobDefinition
+        {
+            Name = "Invalid Timezone Test",
+            Schedule = new CronSchedule 
+            { 
+                Kind = CronScheduleKind.Cron,
+                Expression = "0 9 * * *",
+                TimeZone = "Invalid/Timezone_That_Does_Not_Exist"
+            },
+            Message = "Test"
+        };
+
+        Assert.Throws<ArgumentException>(() => service.AddJob(definition));
+
+        await service.StopAsync();
+    }
+
+    [Fact]
+    public async Task AddJob_WithoutTimezone_Succeeds()
+    {
+        var service = new CronService(_testStorePath, _logger);
+        await service.StartAsync();
+
+        var definition = new CronJobDefinition
+        {
+            Name = "No Timezone Test",
+            Schedule = new CronSchedule 
+            { 
+                Kind = CronScheduleKind.Cron,
+                Expression = "0 9 * * *"
+            },
+            Message = "Test"
+        };
+
+        var job = service.AddJob(definition);
+
+        Assert.NotNull(job);
+        Assert.Null(job.Schedule.TimeZone);
+
+        await service.StopAsync();
+    }
 }

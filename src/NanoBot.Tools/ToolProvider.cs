@@ -30,7 +30,7 @@ public static class ToolProvider
         tools.Add(BuiltIn.FileTools.CreateEditFileTool(allowedDir));
         tools.Add(BuiltIn.FileTools.CreateListDirTool(allowedDir));
 
-        tools.Add(BuiltIn.ShellTools.CreateExecTool());
+        tools.Add(BuiltIn.ShellTools.CreateExecTool((IEnumerable<string>?)null));
 
         tools.Add(BuiltIn.WebTools.CreateWebSearchTool(httpClient));
         tools.Add(BuiltIn.WebTools.CreateWebFetchTool(httpClient));

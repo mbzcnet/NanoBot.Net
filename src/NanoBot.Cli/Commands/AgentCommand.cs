@@ -52,13 +52,20 @@ public class AgentCommand : ICliCommand
             getDefaultValue: () => false
         );
 
+        var skipCheckOption = new Option<bool>(
+            name: "--skip-check",
+            description: "Skip configuration check",
+            getDefaultValue: () => false
+        );
+
         var command = new Command(Name, Description)
         {
             messageOption,
             sessionOption,
             configOption,
             markdownOption,
-            logsOption
+            logsOption,
+            skipCheckOption
         };
 
         command.SetHandler(async (context) =>
@@ -68,8 +75,9 @@ public class AgentCommand : ICliCommand
             var configPath = context.ParseResult.GetValueForOption(configOption);
             var markdown = context.ParseResult.GetValueForOption(markdownOption);
             var logs = context.ParseResult.GetValueForOption(logsOption);
+            var skipCheck = context.ParseResult.GetValueForOption(skipCheckOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteAgentAsync(message, session, configPath, markdown, logs, cancellationToken);
+            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, cancellationToken);
         });
 
         return command;
@@ -81,8 +89,19 @@ public class AgentCommand : ICliCommand
         string? configPath,
         bool renderMarkdown,
         bool showLogs,
+        bool skipCheck,
         CancellationToken cancellationToken)
     {
+        if (!skipCheck)
+        {
+            var checkResult = await ConfigurationChecker.CheckAsync(configPath, cancellationToken);
+            if (!checkResult.IsReady)
+            {
+                PrintConfigurationGuidance(checkResult);
+                return;
+            }
+        }
+
         var config = await LoadConfigAsync(configPath, cancellationToken);
 
         var services = new ServiceCollection();
@@ -123,6 +142,35 @@ public class AgentCommand : ICliCommand
                 disposable.Dispose();
             }
         }
+    }
+
+    private static void PrintConfigurationGuidance(ConfigurationCheckResult result)
+    {
+        Console.WriteLine("🐈 nbot - Configuration Required\n");
+
+        if (!result.ConfigExists)
+        {
+            Console.WriteLine("Configuration file not found.");
+        }
+        else if (result.MissingFields.Count > 0)
+        {
+            Console.WriteLine("Configuration is incomplete:");
+            foreach (var field in result.MissingFields)
+            {
+                Console.WriteLine($"  • Missing: {field}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("Run the configuration wizard to get started:");
+        Console.WriteLine();
+        Console.WriteLine("  nbot configure");
+        Console.WriteLine();
+        Console.WriteLine("Or set up manually:");
+        Console.WriteLine("  nbot configure --provider openai --model gpt-4o-mini --api-key YOUR_KEY");
+        Console.WriteLine();
+        Console.WriteLine("For non-interactive setup:");
+        Console.WriteLine("  nbot configure --non-interactive --provider openai --api-key YOUR_KEY");
     }
 
     private static async Task<AgentConfig> LoadConfigAsync(string? configPath, CancellationToken cancellationToken)

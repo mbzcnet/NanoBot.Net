@@ -79,6 +79,8 @@ public class CronService : ICronService, IDisposable
         _lock.Wait();
         try
         {
+            ValidateSchedule(definition.Schedule);
+
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var job = new CronJob
             {
@@ -109,6 +111,25 @@ public class CronService : ICronService, IDisposable
         finally
         {
             _lock.Release();
+        }
+    }
+
+    private void ValidateSchedule(CronSchedule schedule)
+    {
+        if (schedule.Kind == CronScheduleKind.Cron && !string.IsNullOrEmpty(schedule.TimeZone))
+        {
+            try
+            {
+                TimeZoneInfo.FindSystemTimeZoneById(schedule.TimeZone);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                throw new ArgumentException($"Invalid timezone: {schedule.TimeZone}");
+            }
+            catch (InvalidTimeZoneException ex)
+            {
+                throw new ArgumentException($"Invalid timezone: {schedule.TimeZone}", ex);
+            }
         }
     }
 

@@ -6,18 +6,26 @@
 
 ## 文档结构
 
-| 文档                                  | 内容                                                                                                | 开发者     |
-| ------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------- |
-| [Overview.md](./Overview.md)             | **概述与架构**：项目目标、技术栈、层次架构、依赖关系                                          | 架构师     |
-| [Agent-Core.md](./Agent-Core.md)         | **Agent 核心层**：IAgent、IAgentContext、IMemoryStore、ISessionManager                        | 开发者 A   |
-| [Tools.md](./Tools.md)                   | **工具层**：ITool、IToolRegistry、内置工具、MCP 客户端                                        | 开发者 B   |
-| [Providers.md](./Providers.md)           | **提供商层**：ILLMProvider、IProviderRegistry、ProviderSpec                                   | 开发者 C   |
-| [Channels.md](./Channels.md)             | **通道层**：IChannel、IChannelManager、各通道实现方案                                         | 开发者 D   |
-| [Infrastructure.md](./Infrastructure.md) | **基础设施层**：IMessageBus、ICronService、IHeartbeatService、ISkillsLoader、ISubagentManager | 开发者 E   |
-| [Configuration.md](./Configuration.md)   | **配置管理层**：AgentConfig、各模块配置类、安全配置                                           | 开发者 F   |
-| [CLI.md](./CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
-| [Installation.md](./Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
-| [Testing.md](./Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
+| 文档                                          | 内容                                                                                                | 开发者     |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------- |
+| [Overview.md](./archive/Overview.md)             | **概述与架构**：项目目标、技术栈、层次架构、依赖关系                                          | 架构师     |
+| [Agent-Core.md](./archive/Agent-Core.md)         | **Agent 核心层**：IAgent、IAgentContext、IMemoryStore、ISessionManager                        | 开发者 A   |
+| [Tools.md](./archive/Tools.md)                   | **工具层**：ITool、IToolRegistry、内置工具、MCP 客户端                                        | 开发者 B   |
+| [Providers.md](./archive/Providers.md)           | **提供商层**：ILLMProvider、IProviderRegistry、ProviderSpec                                   | 开发者 C   |
+| [Channels.md](./archive/Channels.md)             | **通道层**：IChannel、IChannelManager、各通道实现方案                                         | 开发者 D   |
+| [Infrastructure.md](./archive/Infrastructure.md) | **基础设施层**：IMessageBus、ICronService、IHeartbeatService、ISkillsLoader、ISubagentManager | 开发者 E   |
+| [Configuration.md](./archive/Configuration.md)   | **配置管理层**：AgentConfig、各模块配置类、安全配置                                           | 开发者 F   |
+| [CLI.md](./archive/CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
+| [Installation.md](./archive/Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
+| [Testing.md](./archive/Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
+
+---
+
+## 补充方案文档
+
+| 文档                                                     | 内容                                                                               | 说明 |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------- | ---- |
+| [Feature-Supplements.md](./20260220-Feature-Supplements.md) | **功能补充方案**：基于原项目更新的移植版缺失功能实现方案，确保 100% 完成移植 | 必读 |
 
 ---
 

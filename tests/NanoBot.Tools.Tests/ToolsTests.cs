@@ -50,7 +50,7 @@ public class ShellToolsTests
     [Fact]
     public void CreateExecTool_ReturnsAITool()
     {
-        var tool = ShellTools.CreateExecTool();
+        var tool = ShellTools.CreateExecTool((ShellToolOptions?)null);
 
         Assert.NotNull(tool);
         Assert.IsAssignableFrom<AIFunction>(tool);

@@ -101,19 +101,30 @@ public partial class TelegramChannel : ChannelBase
             return;
         }
 
+        var replyToMessageId = GetReplyToMessageId(message);
+
         foreach (var chunk in SplitMessage(message.Content))
         {
             try
             {
                 var html = MarkdownToTelegramHtml(chunk);
-                await _botClient.SendTextMessageAsync(chatId, html, parseMode: ParseMode.Html, cancellationToken: cancellationToken);
+                await _botClient.SendTextMessageAsync(
+                    chatId, 
+                    html, 
+                    parseMode: ParseMode.Html, 
+                    replyToMessageId: replyToMessageId,
+                    cancellationToken: cancellationToken);
             }
             catch (ApiRequestException ex)
             {
                 _logger.LogWarning(ex, "HTML parse failed, falling back to plain text");
                 try
                 {
-                    await _botClient.SendTextMessageAsync(chatId, chunk, cancellationToken: cancellationToken);
+                    await _botClient.SendTextMessageAsync(
+                        chatId, 
+                        chunk, 
+                        replyToMessageId: replyToMessageId,
+                        cancellationToken: cancellationToken);
                 }
                 catch (Exception ex2)
                 {
@@ -127,6 +138,20 @@ public partial class TelegramChannel : ChannelBase
         }
     }
 
+    private int? GetReplyToMessageId(OutboundMessage message)
+    {
+        if (!_config.ReplyToMessage) return null;
+
+        if (message.Metadata != null &&
+            message.Metadata.TryGetValue("message_id", out var msgIdObj) &&
+            msgIdObj is int msgId)
+        {
+            return msgId;
+        }
+
+        return null;
+    }
+
     private async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
     {
         if (update.Message is not { } message)
@@ -138,13 +163,28 @@ public partial class TelegramChannel : ChannelBase
         var senderId = BuildSenderId(user);
         var chatId = message.Chat.Id.ToString();
 
+        var contentParts = new List<string>();
+
+        if (!string.IsNullOrEmpty(message.Text))
+            contentParts.Add(message.Text);
+
+        if (!string.IsNullOrEmpty(message.Caption))
+            contentParts.Add(message.Caption);
+
+        var content = string.Join("\n", contentParts);
+        
+        if (content.Trim().ToLowerInvariant() == "/help")
+        {
+            await SendHelpMessageAsync(chatId, cancellationToken);
+            return;
+        }
+
         if (!IsAllowed(senderId, _config.AllowFrom))
         {
             _logger.LogWarning("Access denied for sender {SenderId} on Telegram channel", senderId);
             return;
         }
 
-        var contentParts = new List<string>();
         var mediaPaths = new List<string>();
 
         if (!string.IsNullOrEmpty(message.Text))
@@ -164,7 +204,7 @@ public partial class TelegramChannel : ChannelBase
             contentParts.Add($"[{mediaType}: attachment]");
         }
 
-        var content = string.Join("\n", contentParts);
+        content = string.Join("\n", contentParts);
         if (string.IsNullOrEmpty(content))
             content = "[empty message]";
 
@@ -184,6 +224,24 @@ public partial class TelegramChannel : ChannelBase
                 ["is_group"] = message.Chat.Type != ChatType.Private
             }
         );
+    }
+
+    private async Task SendHelpMessageAsync(string chatId, CancellationToken cancellationToken)
+    {
+        if (_botClient == null || !long.TryParse(chatId, out var id)) return;
+
+        var helpText = @"🐈 nanobot commands:
+/new — Start a new conversation
+/help — Show available commands";
+
+        try
+        {
+            await _botClient.SendTextMessageAsync(id, helpText, cancellationToken: cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending help message to Telegram");
+        }
     }
 
     private Task HandleErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)

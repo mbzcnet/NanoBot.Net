@@ -238,15 +238,18 @@ public static class ServiceCollectionExtensions
         var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>();
         if (agentConfig == null)
         {
+            var llmSection = configuration.GetSection("llm");
+            var llmConfig = llmSection.Exists() 
+                ? BindLlmConfig(configuration) 
+                : new LlmConfig();
+
             agentConfig = new AgentConfig
             {
                 Name = configuration["Name"] ?? configuration["name"] ?? "NanoBot",
                 Workspace = configuration.GetSection("Workspace").Get<WorkspaceConfig>() 
                     ?? configuration.GetSection("workspace").Get<WorkspaceConfig>() 
                     ?? new WorkspaceConfig(),
-                Llm = configuration.GetSection("Llm").Get<LlmConfig>() 
-                    ?? configuration.GetSection("llm").Get<LlmConfig>() 
-                    ?? new LlmConfig(),
+                Llm = llmConfig,
                 Channels = configuration.GetSection("Channels").Get<ChannelsConfig>() 
                     ?? configuration.GetSection("channels").Get<ChannelsConfig>() 
                     ?? new ChannelsConfig(),
@@ -274,6 +277,41 @@ public static class ServiceCollectionExtensions
             .AddNanoBotAgent(agentOptions);
 
         return services;
+    }
+
+    private static LlmConfig BindLlmConfig(IConfiguration configuration)
+    {
+        var llm = new LlmConfig();
+        
+        var model = configuration["llm:model"] ?? configuration["llm:Model"];
+        if (!string.IsNullOrEmpty(model))
+            llm.Model = model;
+
+        var apiKey = configuration["llm:api_key"] ?? configuration["llm:ApiKey"] ?? configuration["llm:apiKey"];
+        if (!string.IsNullOrEmpty(apiKey))
+            llm.ApiKey = apiKey;
+
+        var apiBase = configuration["llm:api_base"] ?? configuration["llm:ApiBase"] ?? configuration["llm:apiBase"];
+        if (!string.IsNullOrEmpty(apiBase))
+            llm.ApiBase = apiBase;
+
+        var provider = configuration["llm:provider"] ?? configuration["llm:Provider"];
+        if (!string.IsNullOrEmpty(provider))
+            llm.Provider = provider;
+
+        var temperatureStr = configuration["llm:temperature"] ?? configuration["llm:Temperature"];
+        if (double.TryParse(temperatureStr, out var temperature))
+            llm.Temperature = temperature;
+
+        var maxTokensStr = configuration["llm:max_tokens"] ?? configuration["llm:MaxTokens"];
+        if (int.TryParse(maxTokensStr, out var maxTokens))
+            llm.MaxTokens = maxTokens;
+
+        var systemPrompt = configuration["llm:system_prompt"] ?? configuration["llm:SystemPrompt"];
+        if (!string.IsNullOrEmpty(systemPrompt))
+            llm.SystemPrompt = systemPrompt;
+
+        return llm;
     }
 
     public static IServiceCollection AddNanoBotCli(

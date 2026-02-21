@@ -9,4 +9,6 @@ public class McpServerConfig
     public Dictionary<string, string> Env { get; set; } = new();
 
     public string? Cwd { get; set; }
+
+    public Dictionary<string, string>? Headers { get; set; }
 }
