@@ -8,6 +8,14 @@ namespace NanoBot.Providers.Tests;
 public class MessageSanitizerTests
 {
     [Fact]
+    public void SanitizeMessages_Null_ReturnsNull()
+    {
+        var result = MessageSanitizer.SanitizeMessages(null!);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
     public void SanitizeMessages_EmptyList_ReturnsEmptyList()
     {
         var messages = new List<ChatMessage>();
@@ -207,6 +215,12 @@ public class SanitizingChatClientTests
     }
 
     [Fact]
+    public void SanitizingChatClient_Constructor_WithNullInner_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() => new SanitizingChatClient(null!));
+    }
+
+    [Fact]
     public void SanitizingChatClient_DoesNotDisposeTwice()
     {
         var mockInner = new Mock<Microsoft.Extensions.AI.IChatClient>();
@@ -217,5 +231,99 @@ public class SanitizingChatClientTests
         client.Dispose();
 
         disposableInner.Verify(x => x.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task SanitizingChatClient_GetResponseAsync_SanitizesMessagesBeforeCallingInner()
+    {
+        var mockInner = new Mock<Microsoft.Extensions.AI.IChatClient>();
+        IEnumerable<ChatMessage>? capturedMessages = null;
+        mockInner.Setup(x => x.GetResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<IEnumerable<ChatMessage>, ChatOptions?, CancellationToken>((msgs, _, _) => capturedMessages = msgs)
+            .ReturnsAsync(new ChatResponse(new ChatMessage(ChatRole.Assistant, "Done")));
+
+        var client = new SanitizingChatClient(mockInner.Object);
+        var inputMessages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.User, "Hello") { RawRepresentation = new object() }
+        };
+
+        await client.GetResponseAsync(inputMessages, null, CancellationToken.None);
+
+        Assert.NotNull(capturedMessages);
+        var list = capturedMessages!.ToList();
+        Assert.Single(list);
+        Assert.Null(list[0].RawRepresentation);
+    }
+
+    [Fact]
+    public async Task SanitizingChatClient_GetStreamingResponseAsync_SanitizesMessagesAndStreams()
+    {
+        var mockInner = new Mock<Microsoft.Extensions.AI.IChatClient>();
+        var update = new ChatResponseUpdate(ChatRole.Assistant, "Hi");
+        mockInner.Setup(x => x.GetStreamingResponseAsync(It.IsAny<IEnumerable<ChatMessage>>(), It.IsAny<ChatOptions>(), It.IsAny<CancellationToken>()))
+            .Returns(StreamUpdates(update));
+
+        var client = new SanitizingChatClient(mockInner.Object);
+        var messages = new List<ChatMessage> { new ChatMessage(ChatRole.User, "Hello") };
+        var count = 0;
+
+        await foreach (var u in client.GetStreamingResponseAsync(messages, null, CancellationToken.None))
+        {
+            count++;
+            Assert.Equal(ChatRole.Assistant, u.Role);
+            Assert.Equal("Hi", u.Text);
+        }
+
+        Assert.Equal(1, count);
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> StreamUpdates(ChatResponseUpdate update)
+    {
+        yield return update;
+        await Task.CompletedTask;
+    }
+}
+
+public class MessageSanitizerContainsThinkTagsTests
+{
+    [Fact]
+    public void ContainsThinkTags_EmptyString_ReturnsFalse()
+    {
+        Assert.False(MessageSanitizer.ContainsThinkTags(""));
+    }
+
+    [Fact]
+    public void ContainsThinkTags_Null_ReturnsFalse()
+    {
+        Assert.False(MessageSanitizer.ContainsThinkTags(null));
+    }
+
+    [Fact]
+    public void ContainsThinkTags_NoThinkTags_ReturnsFalse()
+    {
+        Assert.False(MessageSanitizer.ContainsThinkTags("Hello, world!"));
+    }
+
+    [Fact]
+    public void ContainsThinkTags_WithThinkTags_ReturnsTrue()
+    {
+        Assert.True(MessageSanitizer.ContainsThinkTags("<think>reasoning</think> Response"));
+    }
+
+    [Fact]
+    public void ContainsThinkTags_MultiLineThink_ReturnsTrue()
+    {
+        Assert.True(MessageSanitizer.ContainsThinkTags(@"<think>
+line1
+line2
+</think>
+Answer"));
+    }
+
+    [Fact]
+    public void ContainsThinkTags_CaseInsensitive_ReturnsTrue()
+    {
+        Assert.True(MessageSanitizer.ContainsThinkTags("<THINK>foo</THINK>"));
     }
 }

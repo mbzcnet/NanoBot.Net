@@ -128,4 +128,15 @@ public static class MessageSanitizer
 
         return result.Trim();
     }
+
+    /// <summary>
+    /// Returns true if the text contains <think> tags (thinking model output).
+    /// </summary>
+    public static bool ContainsThinkTags(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return false;
+        return System.Text.RegularExpressions.Regex.IsMatch(
+            text, @"<think[\s\S]*?</think\s*>",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    }
 }

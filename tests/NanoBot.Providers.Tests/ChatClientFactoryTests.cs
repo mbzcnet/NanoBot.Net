@@ -70,4 +70,45 @@ public class ChatClientFactoryTests
 
         Assert.NotNull(client);
     }
+
+    [Fact]
+    public void CreateChatClient_Ollama_WithoutApiKey_UsesLocalNoKey()
+    {
+        var client = _factory.CreateChatClient("ollama", "ministral-3:3b", apiKey: null, apiBase: "http://localhost:11434/v1");
+        Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void CreateChatClient_ProviderCaseInsensitive_AcceptsOllama()
+    {
+        var client = _factory.CreateChatClient("OLLAMA", "model", "key");
+        Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void CreateChatClient_WithLlmConfig_NullProvider_UsesOpenAi()
+    {
+        var config = new LlmConfig
+        {
+            Provider = null,
+            Model = "gpt-4o",
+            ApiKey = "test-key"
+        };
+        var client = _factory.CreateChatClient(config);
+        Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void CreateChatClient_Volcengine_Supported()
+    {
+        var client = _factory.CreateChatClient("volcengine", "model", "key");
+        Assert.NotNull(client);
+    }
+
+    [Fact]
+    public void CreateChatClient_Siliconflow_Supported()
+    {
+        var client = _factory.CreateChatClient("siliconflow", "model", "key");
+        Assert.NotNull(client);
+    }
 }

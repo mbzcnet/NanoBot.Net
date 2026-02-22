@@ -45,10 +45,13 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
             var text = response.Messages.FirstOrDefault()?.Text;
             var cleanText = MessageSanitizer.StripThinkTags(text);
 
-            if (!hasToolCalls && !textOnlyRetried && !string.IsNullOrEmpty(cleanText))
+            // Only retry for "thinking" models that output <think> tags before tool calls.
+            // Normal text-only responses (e.g. "Hello!") must not retry - that would double latency.
+            var looksLikeThinkingModel = MessageSanitizer.ContainsThinkTags(text);
+            if (!hasToolCalls && !textOnlyRetried && !string.IsNullOrEmpty(cleanText) && looksLikeThinkingModel)
             {
                 textOnlyRetried = true;
-                _logger?.LogDebug("Interim text response (no tools used yet), retrying: {Preview}",
+                _logger?.LogDebug("Interim text with think tags (no tools used yet), retrying: {Preview}",
                     cleanText[..Math.Min(80, cleanText.Length)]);
 
                 var assistantMessage = new ChatMessage(ChatRole.Assistant, text ?? string.Empty);
