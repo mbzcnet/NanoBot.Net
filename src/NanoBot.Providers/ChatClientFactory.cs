@@ -115,10 +115,15 @@ public class ChatClientFactory : IChatClientFactory
             clientOptions
         );
 
-        var chatClient = client.GetChatClient(resolvedModel).AsIChatClient();
-        
+        var baseClient = client.GetChatClient(resolvedModel).AsIChatClient();
+
+        // Add function invocation middleware for tool support
+        IChatClient chatClient = new ChatClientBuilder(baseClient)
+            .UseFunctionInvocation(loggerFactory: null)
+            .Build();
+
         var sanitizingClient = new SanitizingChatClient(chatClient, _logger);
-        
+
         return new InterimTextRetryChatClient(sanitizingClient, _logger);
     }
 

@@ -160,13 +160,18 @@ public static class ConfigurationChecker
 
     private static bool CheckApiKey(AgentConfig config)
     {
+        // Ollama and other local providers don't require an API key
+        var provider = config.Llm.Provider?.ToLowerInvariant() ?? "";
+        if (provider == "ollama")
+        {
+            return true;
+        }
+
         if (!string.IsNullOrWhiteSpace(config.Llm.ApiKey))
         {
             return true;
         }
 
-        var provider = config.Llm.Provider?.ToLowerInvariant() ?? "";
-        
         if (ProviderEnvKeys.TryGetValue(provider, out var envKey))
         {
             var envValue = Environment.GetEnvironmentVariable(envKey);

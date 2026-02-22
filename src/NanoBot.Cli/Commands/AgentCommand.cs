@@ -6,6 +6,8 @@ using NanoBot.Agent;
 using NanoBot.Cli.Extensions;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Workspace;
+using NLog.Config;
+using NLog.Extensions.Logging;
 
 namespace NanoBot.Cli.Commands;
 
@@ -107,13 +109,26 @@ public class AgentCommand : ICliCommand
         var services = new ServiceCollection();
         var configuration = BuildConfiguration(configPath);
 
+        // Configure NLog - load from executable directory for correct path when running from any cwd
+        var nlogPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
+        if (!File.Exists(nlogPath))
+        {
+            nlogPath = "nlog.config";
+        }
+        NLog.LogManager.Configuration = new XmlLoggingConfiguration(nlogPath);
+        services.AddLogging(builder =>
+        {
+            builder.ClearProviders();
+            builder.AddNLog();
+        });
+
         services.AddNanoBot(configuration);
 
         if (!showLogs)
         {
             services.Configure<LoggerFilterOptions>(options =>
             {
-                options.MinLevel = LogLevel.Warning;
+                options.MinLevel = Microsoft.Extensions.Logging.LogLevel.Warning;
             });
         }
 
