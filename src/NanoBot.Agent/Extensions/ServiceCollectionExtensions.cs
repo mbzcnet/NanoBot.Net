@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Context;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Workspace;
 
@@ -13,7 +14,8 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddNanoBotAgent(
         this IServiceCollection services,
-        IReadOnlyList<AITool>? tools = null)
+        IReadOnlyList<AITool>? tools = null,
+        int memoryWindow = 50)
     {
         services.AddSingleton<ISessionManager>(sp =>
         {
@@ -46,13 +48,16 @@ public static class ServiceCollectionExtensions
             var bus = sp.GetRequiredService<IMessageBus>();
             var sessionManager = sp.GetRequiredService<ISessionManager>();
             var workspace = sp.GetRequiredService<IWorkspaceManager>();
+            var memoryStore = sp.GetService<IMemoryStore>();
             var logger = sp.GetService<ILogger<AgentRuntime>>();
 
             return new AgentRuntime(
                 agent,
                 bus,
                 sessionManager,
-                workspace.GetSessionsPath(),
+                workspace,
+                memoryStore,
+                memoryWindow,
                 logger);
         });
 

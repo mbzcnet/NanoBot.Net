@@ -200,6 +200,9 @@ public static class ServiceCollectionExtensions
             var memoryStore = sp.GetService<IMemoryStore>();
             var loggerFactory = sp.GetService<ILoggerFactory>();
             var tools = sp.GetService<IReadOnlyList<AITool>>();
+            var agentConfig = sp.GetService<AgentConfig>();
+            var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
+            var maxInstructionChars = agentConfig?.Memory?.MaxInstructionChars ?? 0;
 
             return NanoBotAgentFactory.Create(
                 chatClient,
@@ -208,7 +211,9 @@ public static class ServiceCollectionExtensions
                 tools,
                 loggerFactory,
                 options,
-                memoryStore);
+                memoryStore,
+                memoryWindow,
+                maxInstructionChars);
         });
 
         services.AddSingleton<IAgentRuntime>(sp =>
@@ -217,13 +222,18 @@ public static class ServiceCollectionExtensions
             var bus = sp.GetRequiredService<IMessageBus>();
             var sessionManager = sp.GetRequiredService<ISessionManager>();
             var workspace = sp.GetRequiredService<IWorkspaceManager>();
+            var memoryStore = sp.GetService<IMemoryStore>();
+            var agentConfig = sp.GetService<AgentConfig>();
+            var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
 
             return new AgentRuntime(
                 agent,
                 bus,
                 sessionManager,
-                workspace.GetSessionsPath(),
+                workspace,
+                memoryStore,
+                memoryWindow,
                 logger);
         });
 

@@ -107,7 +107,7 @@ public class ChatClientFactory : IChatClientFactory
         var clientOptions = new OpenAI.OpenAIClientOptions 
         { 
             Endpoint = new Uri(resolvedApiBase),
-            NetworkTimeout = TimeSpan.FromMinutes(5)
+            NetworkTimeout = TimeSpan.FromSeconds(60)
         };
 
         var client = new OpenAI.OpenAIClient(
@@ -117,12 +117,16 @@ public class ChatClientFactory : IChatClientFactory
 
         var baseClient = client.GetChatClient(resolvedModel).AsIChatClient();
 
-        // Add function invocation middleware for tool support
+        _logger.LogInformation("[TIMING] Created base ChatClient for model {Model}", resolvedModel);
+
         IChatClient chatClient = new ChatClientBuilder(baseClient)
             .UseFunctionInvocation(loggerFactory: null)
             .Build();
 
+        _logger.LogInformation("[TIMING] Added FunctionInvocation middleware");
+
         var sanitizingClient = new SanitizingChatClient(chatClient, _logger);
+        _logger.LogInformation("[TIMING] Created sanitizing client");
 
         return new InterimTextRetryChatClient(sanitizingClient, _logger);
     }

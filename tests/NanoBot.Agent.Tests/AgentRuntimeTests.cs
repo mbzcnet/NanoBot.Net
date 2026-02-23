@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Memory;
 using NanoBot.Core.Workspace;
 using Xunit;
 
@@ -14,6 +15,7 @@ public class AgentRuntimeTests : IDisposable
     private readonly ChatClientAgent _agent;
     private readonly Mock<IMessageBus> _busMock;
     private readonly Mock<ISessionManager> _sessionManagerMock;
+    private readonly Mock<IWorkspaceManager> _workspaceMock;
     private readonly Mock<ILogger<AgentRuntime>> _loggerMock;
 
     public AgentRuntimeTests()
@@ -25,6 +27,8 @@ public class AgentRuntimeTests : IDisposable
         _agent = CreateAgent();
         _busMock = new Mock<IMessageBus>();
         _sessionManagerMock = new Mock<ISessionManager>();
+        _workspaceMock = new Mock<IWorkspaceManager>();
+        _workspaceMock.Setup(w => w.GetSessionsPath()).Returns(Path.Combine(_testDirectory, "sessions"));
         _loggerMock = new Mock<ILogger<AgentRuntime>>();
     }
 
@@ -40,21 +44,21 @@ public class AgentRuntimeTests : IDisposable
     public void Constructor_ThrowsOnNullAgent()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(null!, _busMock.Object, _sessionManagerMock.Object, _testDirectory));
+            new AgentRuntime(null!, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50));
     }
 
     [Fact]
     public void Constructor_ThrowsOnNullBus()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(_agent, null!, _sessionManagerMock.Object, _testDirectory));
+            new AgentRuntime(_agent, null!, _sessionManagerMock.Object, _workspaceMock.Object, null, 50));
     }
 
     [Fact]
     public void Constructor_ThrowsOnNullSessionManager()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(_agent, _busMock.Object, null!, _testDirectory));
+            new AgentRuntime(_agent, _busMock.Object, null!, _workspaceMock.Object, null, 50));
     }
 
     [Fact]
@@ -66,7 +70,10 @@ public class AgentRuntimeTests : IDisposable
             Directory.Delete(sessionsDir, true);
         }
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, sessionsDir);
+        var workspaceMock = new Mock<IWorkspaceManager>();
+        workspaceMock.Setup(w => w.GetSessionsPath()).Returns(sessionsDir);
+
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, workspaceMock.Object, null, 50);
 
         Assert.True(Directory.Exists(sessionsDir));
     }
@@ -78,7 +85,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory, _loggerMock.Object);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50, _loggerMock.Object);
 
         var response = await runtime.ProcessDirectAsync("Hello");
 
@@ -94,7 +101,7 @@ public class AgentRuntimeTests : IDisposable
             .Callback<string, CancellationToken>((key, _) => capturedKey = key)
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         await runtime.ProcessDirectAsync("Hello", "custom:key");
 
@@ -108,7 +115,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         await runtime.ProcessDirectAsync("Hello");
 
@@ -126,7 +133,7 @@ public class AgentRuntimeTests : IDisposable
                 return new InboundMessage { Channel = "test", Content = "test", SenderId = "user", ChatId = "chat1" };
             });
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         var runTask = runtime.RunAsync(cts.Token);
         await Task.Delay(100);
@@ -140,7 +147,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public void Dispose_StopsRuntime()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         runtime.Dispose();
 
@@ -150,7 +157,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         runtime.Dispose();
         runtime.Dispose();
@@ -183,7 +190,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         var cts = new CancellationTokenSource();
         var runTask = runtime.RunAsync(cts.Token);
@@ -197,7 +204,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public async Task ProcessDirectAsync_HandlesHelpCommand()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         var response = await runtime.ProcessDirectAsync("/help");
 
@@ -208,7 +215,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public async Task ProcessDirectAsync_HandlesNewCommand()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _testDirectory);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
 
         var response = await runtime.ProcessDirectAsync("/new");
 

@@ -20,13 +20,39 @@ public static class NanoBotAgentFactory
         IReadOnlyList<AITool>? tools = null,
         ILoggerFactory? loggerFactory = null,
         AgentOptions? options = null,
-        IMemoryStore? memoryStore = null)
+        IMemoryStore? memoryStore = null,
+        int memoryWindow = 50,
+        int maxInstructionChars = 0)
     {
         ArgumentNullException.ThrowIfNull(chatClient);
         ArgumentNullException.ThrowIfNull(workspace);
         ArgumentNullException.ThrowIfNull(skillsLoader);
 
         var instructions = BuildInstructions(workspace, options);
+
+        var providers = new List<ChatHistoryProvider>();
+
+        if (memoryStore != null)
+        {
+            providers.Add(new MemoryConsolidationChatHistoryProvider(
+                chatClient,
+                memoryStore,
+                workspace,
+                memoryWindow,
+                loggerFactory?.CreateLogger<MemoryConsolidationChatHistoryProvider>()));
+        }
+
+        var compositeProvider = new CompositeChatHistoryProvider(providers);
+
+        var aiContextProviders = new List<AIContextProvider>
+        {
+            new CompositeAIContextProvider(
+                workspace,
+                skillsLoader,
+                memoryStore,
+                loggerFactory,
+                maxInstructionChars)
+        };
 
         var agentOptions = new ChatClientAgentOptions
         {
@@ -37,23 +63,8 @@ public static class NanoBotAgentFactory
                 Instructions = instructions,
                 Tools = tools?.ToList()
             },
-            ChatHistoryProviderFactory = (context, ct) =>
-            {
-                var provider = new FileBackedChatHistoryProvider(
-                    workspace,
-                    options?.MaxHistoryEntries ?? 100,
-                    loggerFactory?.CreateLogger<FileBackedChatHistoryProvider>());
-                return new ValueTask<ChatHistoryProvider>(provider);
-            },
-            AIContextProviderFactory = (context, ct) =>
-            {
-                var provider = new CompositeAIContextProvider(
-                    workspace,
-                    skillsLoader,
-                    memoryStore,
-                    loggerFactory);
-                return new ValueTask<AIContextProvider>(provider);
-            }
+            ChatHistoryProvider = compositeProvider,
+            AIContextProviders = aiContextProviders
         };
 
         return new ChatClientAgent(chatClient, agentOptions, loggerFactory);
@@ -62,52 +73,18 @@ public static class NanoBotAgentFactory
     public static string BuildInstructions(IWorkspaceManager workspace, AgentOptions? options = null)
     {
         var sb = new StringBuilder();
-        var now = DateTime.Now;
-        var tz = TimeZoneInfo.Local;
         var workspacePath = workspace.GetWorkspacePath();
 
-        sb.AppendLine(GetIdentitySection(now, tz, workspacePath, options));
+        sb.AppendLine(GetIdentitySection(workspacePath, options));
 
-        var agentsPath = workspace.GetAgentsFile();
-        if (File.Exists(agentsPath))
-        {
-            try
-            {
-                var content = File.ReadAllText(agentsPath);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("## Agent Configuration");
-                    sb.AppendLine(content);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        var soulPath = workspace.GetSoulFile();
-        if (File.Exists(soulPath))
-        {
-            try
-            {
-                var content = File.ReadAllText(soulPath);
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("## Personality");
-                    sb.AppendLine(content);
-                }
-            }
-            catch
-            {
-            }
-        }
+        // Note: AGENTS.md, SOUL.md, USER.md, TOOLS.md are loaded by BootstrapContextProvider
+        // via the AIContextProvider pipeline. Do NOT load them here to avoid duplication
+        // in the system prompt (the framework concatenates all provider instructions).
 
         return sb.ToString();
     }
 
-    private static string GetIdentitySection(DateTime now, TimeZoneInfo tz, string workspacePath, AgentOptions? options)
+    private static string GetIdentitySection(string workspacePath, AgentOptions? options)
     {
         var name = options?.Name ?? "NanoBot";
         var runtime = GetRuntimeInfo();
@@ -120,9 +97,6 @@ You are {name}, a helpful AI assistant. You have access to tools that allow you 
 - Search the web and fetch web pages
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
-
-## Current Time
-{now:yyyy-MM-dd HH:mm (dddd)} ({tz.DisplayName})
 
 ## Runtime
 {runtime}
@@ -184,13 +158,18 @@ internal class CompositeAIContextProvider : AIContextProvider
     private readonly BootstrapContextProvider _bootstrapProvider;
     private readonly MemoryContextProvider? _memoryProvider;
     private readonly SkillsContextProvider _skillsProvider;
+    private readonly ILogger? _logger;
+    private readonly int _maxInstructionChars;
 
     public CompositeAIContextProvider(
         IWorkspaceManager workspace,
         ISkillsLoader skillsLoader,
         IMemoryStore? memoryStore,
-        ILoggerFactory? loggerFactory)
+        ILoggerFactory? loggerFactory,
+        int maxInstructionChars = 0)
     {
+        _logger = loggerFactory?.CreateLogger<CompositeAIContextProvider>();
+        _maxInstructionChars = maxInstructionChars;
         _bootstrapProvider = new BootstrapContextProvider(
             workspace,
             loggerFactory?.CreateLogger<BootstrapContextProvider>());
@@ -203,45 +182,78 @@ internal class CompositeAIContextProvider : AIContextProvider
             loggerFactory?.CreateLogger<SkillsContextProvider>());
     }
 
-    public override JsonElement Serialize(JsonSerializerOptions? options = null)
-    {
-        return JsonDocument.Parse("{}").RootElement.Clone();
-    }
-
-    protected override async ValueTask<AIContext> InvokingCoreAsync(
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var instructions = new StringBuilder();
 
+        var swBootstrap = System.Diagnostics.Stopwatch.StartNew();
         var bootstrapContext = await _bootstrapProvider.InvokingAsync(context, cancellationToken);
+        swBootstrap.Stop();
+        var bootstrapChars = bootstrapContext.Instructions?.Length ?? 0;
         if (!string.IsNullOrEmpty(bootstrapContext.Instructions))
         {
             instructions.AppendLine(bootstrapContext.Instructions);
         }
 
-        var memoryContext = await _memoryProvider.InvokingAsync(context, cancellationToken);
+        var swMemory = System.Diagnostics.Stopwatch.StartNew();
+        var memoryContext = _memoryProvider != null
+            ? await _memoryProvider.InvokingAsync(context, cancellationToken)
+            : new AIContext();
+        swMemory.Stop();
+        var memoryChars = memoryContext.Instructions?.Length ?? 0;
         if (!string.IsNullOrEmpty(memoryContext.Instructions))
         {
             instructions.AppendLine(memoryContext.Instructions);
         }
 
+        var swSkills = System.Diagnostics.Stopwatch.StartNew();
         var skillsContext = await _skillsProvider.InvokingAsync(context, cancellationToken);
+        swSkills.Stop();
+        var skillsChars = skillsContext.Instructions?.Length ?? 0;
         if (!string.IsNullOrEmpty(skillsContext.Instructions))
         {
             instructions.AppendLine(skillsContext.Instructions);
         }
 
+        // Append current time as dynamic context (after stable base instructions,
+        // so Ollama can cache the KV state for the prefix)
+        var now = DateTime.Now;
+        var tz = TimeZoneInfo.Local;
+        instructions.AppendLine($"\n## Current Time\n{now:yyyy-MM-dd HH:mm (dddd)} ({tz.DisplayName})");
+
+        sw.Stop();
+        _logger?.LogInformation(
+            "[CONTEXT] Bootstrap: {BootstrapChars} chars ({BootstrapMs}ms), Memory: {MemoryChars} chars ({MemoryMs}ms), Skills: {SkillsChars} chars ({SkillsMs}ms), Total context: {TotalChars} chars ({TotalMs}ms)",
+            bootstrapChars, swBootstrap.ElapsedMilliseconds,
+            memoryChars, swMemory.ElapsedMilliseconds,
+            skillsChars, swSkills.ElapsedMilliseconds,
+            instructions.Length, sw.ElapsedMilliseconds);
+
+        var result = instructions.ToString();
+        if (_maxInstructionChars > 0 && result.Length > _maxInstructionChars)
+        {
+            _logger?.LogWarning(
+                "[CONTEXT] Instructions truncated from {OriginalChars} to {MaxChars} chars. Set memory.maxInstructionChars in config to adjust.",
+                result.Length, _maxInstructionChars);
+            result = result[.._maxInstructionChars];
+        }
+
         return new AIContext
         {
-            Instructions = instructions.Length > 0 ? instructions.ToString() : null
+            Instructions = result.Length > 0 ? result : null
         };
     }
 
-    protected override async ValueTask InvokedCoreAsync(
+    protected override async ValueTask StoreAIContextAsync(
         InvokedContext context,
         CancellationToken cancellationToken)
     {
-        await _memoryProvider.InvokedAsync(context, cancellationToken);
+        if (_memoryProvider != null)
+        {
+            await _memoryProvider.InvokedAsync(context, cancellationToken);
+        }
     }
 }

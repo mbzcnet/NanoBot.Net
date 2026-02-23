@@ -29,11 +29,6 @@ public class MemoryConsolidationContextProvider : AIContextProvider
         _logger = logger;
     }
 
-    public override JsonElement Serialize(JsonSerializerOptions? jsonSerializerOptions = null)
-    {
-        return JsonSerializer.SerializeToElement(new { _memoryWindow }, jsonSerializerOptions);
-    }
-
     protected override ValueTask<AIContext> InvokingCoreAsync(InvokingContext context, CancellationToken cancellationToken = default)
     {
         return ValueTask.FromResult<AIContext>(new AIContext());

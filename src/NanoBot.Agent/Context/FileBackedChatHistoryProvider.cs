@@ -23,7 +23,7 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         _logger = logger;
     }
 
-    protected override async ValueTask<IEnumerable<ChatMessage>> InvokingCoreAsync(
+    protected override async ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
@@ -46,7 +46,7 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         }
     }
 
-    protected override async ValueTask InvokedCoreAsync(
+    protected override async ValueTask StoreChatHistoryAsync(
         InvokedContext context,
         CancellationToken cancellationToken)
     {
@@ -60,12 +60,6 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
 
         var sb = new StringBuilder();
 
-        foreach (var message in context.RequestMessages)
-        {
-            var text = message.Text ?? string.Empty;
-            sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {text}");
-        }
-
         if (context.ResponseMessages != null)
         {
             foreach (var message in context.ResponseMessages)
@@ -75,12 +69,10 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
             }
         }
 
-        await File.AppendAllTextAsync(historyPath, sb.ToString(), cancellationToken);
-    }
-
-    public override JsonElement Serialize(JsonSerializerOptions? jsonSerializerOptions = null)
-    {
-        return JsonSerializer.SerializeToElement(new { _maxHistoryEntries }, jsonSerializerOptions);
+        if (sb.Length > 0)
+        {
+            await File.AppendAllTextAsync(historyPath, sb.ToString(), cancellationToken);
+        }
     }
 
     private static IEnumerable<ChatMessage> ParseHistoryToMessages(IEnumerable<string> lines)

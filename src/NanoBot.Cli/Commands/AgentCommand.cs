@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -60,6 +61,12 @@ public class AgentCommand : ICliCommand
             getDefaultValue: () => false
         );
 
+        var streamingOption = new Option<bool>(
+            name: "--streaming",
+            description: "Enable streaming output",
+            getDefaultValue: () => true
+        );
+
         var command = new Command(Name, Description)
         {
             messageOption,
@@ -67,7 +74,8 @@ public class AgentCommand : ICliCommand
             configOption,
             markdownOption,
             logsOption,
-            skipCheckOption
+            skipCheckOption,
+            streamingOption
         };
 
         command.SetHandler(async (context) =>
@@ -78,8 +86,9 @@ public class AgentCommand : ICliCommand
             var markdown = context.ParseResult.GetValueForOption(markdownOption);
             var logs = context.ParseResult.GetValueForOption(logsOption);
             var skipCheck = context.ParseResult.GetValueForOption(skipCheckOption);
+            var streaming = context.ParseResult.GetValueForOption(streamingOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, cancellationToken);
+            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, streaming, cancellationToken);
         });
 
         return command;
@@ -92,6 +101,7 @@ public class AgentCommand : ICliCommand
         bool renderMarkdown,
         bool showLogs,
         bool skipCheck,
+        bool streaming,
         CancellationToken cancellationToken)
     {
         if (!skipCheck)
@@ -143,11 +153,11 @@ public class AgentCommand : ICliCommand
         {
             if (!string.IsNullOrEmpty(message))
             {
-                await RunSingleMessageAsync(runtime, message, sessionId, renderMarkdown, cancellationToken);
+                await RunSingleMessageAsync(runtime, message, sessionId, renderMarkdown, streaming, cancellationToken);
             }
             else
             {
-                await RunInteractiveAsync(runtime, sessionId, renderMarkdown, cancellationToken);
+                await RunInteractiveAsync(runtime, sessionId, renderMarkdown, streaming, cancellationToken);
             }
         }
         finally
@@ -220,18 +230,60 @@ public class AgentCommand : ICliCommand
         string message,
         string sessionId,
         bool renderMarkdown,
+        bool streaming,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine("🐈 nbot is thinking...\n");
+        if (streaming)
+        {
+            await RunStreamingAsync(runtime, message, sessionId, renderMarkdown, cancellationToken);
+        }
+        else
+        {
+            Console.WriteLine("🐈 nbot is thinking...\n");
+            var response = await runtime.ProcessDirectAsync(message, sessionId, cancellationToken: cancellationToken);
+            PrintAgentResponse(response, renderMarkdown);
+        }
+    }
 
-        var response = await runtime.ProcessDirectAsync(message, sessionId, cancellationToken: cancellationToken);
-        PrintAgentResponse(response, renderMarkdown);
+    private static async Task RunStreamingAsync(
+        IAgentRuntime runtime,
+        string message,
+        string sessionId,
+        bool renderMarkdown,
+        CancellationToken cancellationToken)
+    {
+        Console.Write("🐈 nbot");
+        Console.Out.Flush();
+
+        var fullResponse = new StringBuilder();
+        var isFirstChunk = true;
+
+        await foreach (var update in runtime.ProcessDirectStreamingAsync(message, sessionId, cancellationToken: cancellationToken))
+        {
+            var text = update.Text;
+            if (string.IsNullOrEmpty(text))
+                continue;
+
+            if (isFirstChunk)
+            {
+                Console.Write(" ");
+                isFirstChunk = false;
+            }
+
+            Console.Write(text);
+            Console.Out.Flush();
+            fullResponse.Append(text);
+        }
+
+        Console.WriteLine();
+        Console.WriteLine();
     }
 
     private static async Task RunInteractiveAsync(
         IAgentRuntime runtime,
         string sessionId,
         bool renderMarkdown,
+        bool streaming,
         CancellationToken cancellationToken)
     {
         Console.WriteLine("🐈 nbot Interactive mode (type 'exit' or Ctrl+C to quit)\n");
@@ -248,6 +300,7 @@ public class AgentCommand : ICliCommand
         while (!cts.Token.IsCancellationRequested)
         {
             Console.Write("You: ");
+            Console.Out.Flush();
             var input = Console.ReadLine();
 
             if (string.IsNullOrWhiteSpace(input))
@@ -264,10 +317,18 @@ public class AgentCommand : ICliCommand
             try
             {
                 Console.WriteLine();
-                Console.WriteLine("🐈 nbot is thinking...\n");
-
-                var response = await runtime.ProcessDirectAsync(input, sessionId, cancellationToken: cts.Token);
-                PrintAgentResponse(response, renderMarkdown);
+                if (streaming)
+                {
+                    await RunStreamingAsync(runtime, input, sessionId, renderMarkdown, cts.Token);
+                }
+                else
+                {
+                    Console.WriteLine("🐈 nbot is thinking...\n");
+                    Console.Out.Flush();
+                    var response = await runtime.ProcessDirectAsync(input, sessionId, cancellationToken: cts.Token);
+                    PrintAgentResponse(response, renderMarkdown);
+                }
+                Console.Out.Flush();
             }
             catch (OperationCanceledException)
             {

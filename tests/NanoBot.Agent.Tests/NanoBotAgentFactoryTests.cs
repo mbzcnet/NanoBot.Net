@@ -156,7 +156,7 @@ public class NanoBotAgentFactoryTests
             var instructions = NanoBotAgentFactory.BuildInstructions(workspaceMock.Object);
 
             Assert.Contains("NanoBot", instructions);
-            Assert.Contains("Current Time", instructions);
+            Assert.DoesNotContain("Current Time", instructions); // Moved to AIContextProvider
             Assert.Contains("Runtime", instructions);
             Assert.Contains("Workspace", instructions);
         }
@@ -194,8 +194,9 @@ public class NanoBotAgentFactoryTests
     }
 
     [Fact]
-    public void BuildInstructions_LoadsAgentsFile()
+    public void BuildInstructions_DoesNotLoadAgentsFile()
     {
+        // AGENTS.md is now loaded by BootstrapContextProvider to avoid duplication
         var tempDir = Path.Combine(Path.GetTempPath(), $"nanobot_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
@@ -208,8 +209,8 @@ public class NanoBotAgentFactoryTests
 
             var instructions = NanoBotAgentFactory.BuildInstructions(workspaceMock.Object);
 
-            Assert.Contains("Agent Configuration", instructions);
-            Assert.Contains("Be helpful and friendly", instructions);
+            Assert.DoesNotContain("Agent Configuration", instructions);
+            Assert.DoesNotContain("Be helpful and friendly", instructions);
         }
         finally
         {
@@ -221,8 +222,9 @@ public class NanoBotAgentFactoryTests
     }
 
     [Fact]
-    public void BuildInstructions_LoadsSoulFile()
+    public void BuildInstructions_DoesNotLoadSoulFile()
     {
+        // SOUL.md is now loaded by BootstrapContextProvider to avoid duplication
         var tempDir = Path.Combine(Path.GetTempPath(), $"nanobot_test_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
@@ -235,8 +237,8 @@ public class NanoBotAgentFactoryTests
 
             var instructions = NanoBotAgentFactory.BuildInstructions(workspaceMock.Object);
 
-            Assert.Contains("Personality", instructions);
-            Assert.Contains("I am a helpful assistant", instructions);
+            Assert.DoesNotContain("Personality", instructions);
+            Assert.DoesNotContain("I am a helpful assistant", instructions);
         }
         finally
         {

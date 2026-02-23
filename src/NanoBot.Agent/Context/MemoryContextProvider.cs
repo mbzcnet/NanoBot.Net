@@ -24,12 +24,7 @@ public class MemoryContextProvider : AIContextProvider
         _logger = logger;
     }
 
-    public override JsonElement Serialize(JsonSerializerOptions? options = null)
-    {
-        return JsonDocument.Parse("{}").RootElement.Clone();
-    }
-
-    protected override async ValueTask<AIContext> InvokingCoreAsync(
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
@@ -78,30 +73,9 @@ public class MemoryContextProvider : AIContextProvider
         };
     }
 
-    protected override async ValueTask InvokedCoreAsync(
+    protected override async ValueTask StoreAIContextAsync(
         InvokedContext context,
         CancellationToken cancellationToken)
     {
-        if (context.InvokeException is not null)
-        {
-            return;
-        }
-
-        if (_memoryStore != null)
-        {
-            try
-            {
-                await _memoryStore.UpdateAsync(
-                    context.RequestMessages,
-                    context.ResponseMessages ?? [],
-                    cancellationToken);
-
-                _logger?.LogDebug("Memory updated after agent invocation");
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to update memory after agent invocation");
-            }
-        }
     }
 }

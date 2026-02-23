@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace NanoBot.Providers;
 
@@ -35,14 +36,71 @@ public sealed class SanitizingChatClient : ISanitizingChatClient, IDisposable
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var messageList = chatMessages.ToList();
         var sanitized = MessageSanitizer.SanitizeMessages(messageList);
         _logger?.LogDebug("Sanitized {Count} messages for strict provider (streaming)", messageList.Count);
 
+        var totalChars = messageList.Sum(m => m.Text?.Length ?? 0);
+        var instructionsChars = options?.Instructions?.Length ?? 0;
+        _logger?.LogInformation("[DEBUG] Streaming request - {MsgCount} messages, {TotalChars} chars total, Instructions: {InstChars} chars",
+            messageList.Count, totalChars, instructionsChars);
+
+        var requestDir = Path.Combine(Path.GetTempPath(), "nanobot_requests");
+        Directory.CreateDirectory(requestDir);
+        var requestFile = Path.Combine(requestDir, $"req_{DateTime.Now:yyyyMMdd_HHmmss_fff}.txt");
+        
+        var requestContent = new StringBuilder();
+        requestContent.AppendLine($"=== Request at {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} ===");
+        requestContent.AppendLine($"Messages: {messageList.Count}, Total chars: {totalChars}, Instructions: {instructionsChars}");
+        requestContent.AppendLine();
+        
+        for (int i = 0; i < messageList.Count; i++)
+        {
+            var msg = messageList[i];
+            requestContent.AppendLine($"--- Message {i}: {msg.Role} ---");
+            requestContent.AppendLine(msg.Text ?? "(empty)");
+            requestContent.AppendLine();
+        }
+        
+        if (!string.IsNullOrEmpty(options?.Instructions))
+        {
+            requestContent.AppendLine("--- ChatOptions.Instructions ---");
+            requestContent.AppendLine(options.Instructions);
+            requestContent.AppendLine();
+        }
+        
+        await File.WriteAllTextAsync(requestFile, requestContent.ToString(), cancellationToken);
+        _logger?.LogInformation("[DEBUG] Request saved to: {RequestFile}", requestFile);
+
+        for (int i = 0; i < messageList.Count; i++)
+        {
+            var msg = messageList[i];
+            var preview = msg.Text?.Length > 100 ? msg.Text[..100] + "..." : msg.Text;
+            _logger?.LogInformation("[DEBUG] Message {Idx}: role={Role}, content={Content}",
+                i, msg.Role, preview);
+        }
+
+        if (!string.IsNullOrEmpty(options?.Instructions))
+        {
+            var instPreview = options.Instructions.Length > 200 ? options.Instructions[..200] + "..." : options.Instructions;
+            _logger?.LogInformation("[DEBUG] ChatOptions.Instructions (first 500 chars): {Inst}", instPreview);
+        }
+
+        _logger?.LogInformation("[TIMING] SanitizingChatClient.GetStreamingResponseAsync start");
+        var firstChunk = true;
         await foreach (var update in _inner.GetStreamingResponseAsync(sanitized, options, cancellationToken))
         {
+            if (firstChunk)
+            {
+                firstChunk = false;
+                sw.Stop();
+                _logger?.LogInformation("[TIMING] First chunk from inner client: {Ms}ms", sw.ElapsedMilliseconds);
+            }
             yield return update;
         }
+        sw.Stop();
+        _logger?.LogInformation("[TIMING] SanitizingChatClient.GetStreamingResponseAsync completed: {Ms}ms", sw.ElapsedMilliseconds);
     }
 
     public object? GetService(Type serviceType, object? key = null)

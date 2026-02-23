@@ -12,7 +12,13 @@ public class BootstrapContextProvider : AIContextProvider
     private readonly IWorkspaceManager _workspace;
     private readonly ILogger<BootstrapContextProvider>? _logger;
 
-    private static readonly string[] BootstrapFiles = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"];
+    // TOOLS.md is excluded: tool definitions are already sent via ChatOptions.Tools
+    // as structured JSON schemas. Including them again in natural language doubles the prompt size.
+    private static readonly string[] BootstrapFiles = ["AGENTS.md", "SOUL.md", "USER.md"];
+
+    private string? _cachedInstructions;
+    private DateTime _cacheTime;
+    private readonly TimeSpan _cacheDuration = TimeSpan.FromMinutes(5);
 
     public BootstrapContextProvider(
         IWorkspaceManager workspace,
@@ -22,15 +28,15 @@ public class BootstrapContextProvider : AIContextProvider
         _logger = logger;
     }
 
-    public override JsonElement Serialize(JsonSerializerOptions? options = null)
-    {
-        return JsonDocument.Parse("{}").RootElement.Clone();
-    }
-
-    protected override async ValueTask<AIContext> InvokingCoreAsync(
+    protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
+        if (_cacheTime + _cacheDuration > DateTime.UtcNow && _cachedInstructions != null)
+        {
+            return new AIContext { Instructions = _cachedInstructions };
+        }
+
         var instructions = new StringBuilder();
 
         foreach (var fileName in BootstrapFiles)
@@ -55,9 +61,12 @@ public class BootstrapContextProvider : AIContextProvider
             }
         }
 
+        _cachedInstructions = instructions.Length > 0 ? instructions.ToString() : null;
+        _cacheTime = DateTime.UtcNow;
+
         return new AIContext
         {
-            Instructions = instructions.Length > 0 ? instructions.ToString() : null
+            Instructions = _cachedInstructions
         };
     }
 
@@ -68,7 +77,6 @@ public class BootstrapContextProvider : AIContextProvider
             "AGENTS.md" => _workspace.GetAgentsFile(),
             "SOUL.md" => _workspace.GetSoulFile(),
             "USER.md" => _workspace.GetUserFile(),
-            "TOOLS.md" => _workspace.GetToolsFile(),
             _ => Path.Combine(_workspace.GetWorkspacePath(), fileName)
         };
     }
@@ -80,7 +88,6 @@ public class BootstrapContextProvider : AIContextProvider
             "AGENTS.md" => "Agent Configuration",
             "SOUL.md" => "Personality",
             "USER.md" => "User Profile",
-            "TOOLS.md" => "Available Tools",
             _ => fileName.Replace(".md", "")
         };
     }

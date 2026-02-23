@@ -24,14 +24,21 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var messageList = chatMessages.ToList();
+        var totalChars = messageList.Sum(m => m.Text?.Length ?? 0);
+        LogPromptSize(messageList, options, "GetResponseAsync");
+
         var hasToolCalls = false;
         var textOnlyRetried = false;
         ChatResponse? response = null;
 
         while (true)
         {
+            var reqSw = System.Diagnostics.Stopwatch.StartNew();
             response = await _inner.GetResponseAsync(messageList, options, cancellationToken);
+            reqSw.Stop();
+            _logger?.LogInformation("[TIMING] Inner GetResponseAsync completed in {Ms}ms", reqSw.ElapsedMilliseconds);
 
             var hasFunctionCalls = response.Messages.SelectMany(m => m.Contents)
                 .Any(c => c is FunctionCallContent);
@@ -45,8 +52,6 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
             var text = response.Messages.FirstOrDefault()?.Text;
             var cleanText = MessageSanitizer.StripThinkTags(text);
 
-            // Only retry for "thinking" models that output <think> tags before tool calls.
-            // Normal text-only responses (e.g. "Hello!") must not retry - that would double latency.
             var looksLikeThinkingModel = MessageSanitizer.ContainsThinkTags(text);
             if (!hasToolCalls && !textOnlyRetried && !string.IsNullOrEmpty(cleanText) && looksLikeThinkingModel)
             {
@@ -62,6 +67,8 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
             break;
         }
 
+        sw.Stop();
+        _logger?.LogInformation("[TIMING] InterimTextRetryChatClient.GetResponseAsync total: {Ms}ms", sw.ElapsedMilliseconds);
         return response;
     }
 
@@ -70,15 +77,49 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
         ChatOptions? options = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var update in _inner.GetStreamingResponseAsync(chatMessages, options, cancellationToken))
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var messageList = chatMessages.ToList();
+        var totalChars = messageList.Sum(m => m.Text?.Length ?? 0);
+        LogPromptSize(messageList, options, "GetStreamingResponseAsync");
+
+        var firstChunk = true;
+        await foreach (var update in _inner.GetStreamingResponseAsync(messageList, options, cancellationToken))
         {
+            if (firstChunk)
+            {
+                firstChunk = false;
+                sw.Stop();
+                _logger?.LogInformation("[TIMING] First chunk from inner GetStreamingResponseAsync: {Ms}ms, text: {Text}", sw.ElapsedMilliseconds, update.Text);
+            }
             yield return update;
         }
+        sw.Stop();
+        _logger?.LogInformation("[TIMING] InterimTextRetryChatClient.GetStreamingResponseAsync completed: {Ms}ms", sw.ElapsedMilliseconds);
     }
 
     public object? GetService(Type serviceType, object? key = null)
     {
         return _inner.GetService(serviceType, key);
+    }
+
+    private void LogPromptSize(List<ChatMessage> messages, ChatOptions? options, string method)
+    {
+        var messageChars = messages.Sum(m => m.Text?.Length ?? 0);
+        var instructionChars = options?.Instructions?.Length ?? 0;
+        var toolCount = options?.Tools?.Count ?? 0;
+        var totalChars = messageChars + instructionChars;
+
+        _logger?.LogInformation(
+            "[PROMPT] {Method}: {MsgCount} messages ({MsgChars} chars) + instructions ({InstrChars} chars) + {ToolCount} tools = ~{TotalChars} total chars",
+            method, messages.Count, messageChars, instructionChars, toolCount, totalChars);
+
+        // Log per-message breakdown for diagnosis
+        foreach (var msg in messages)
+        {
+            var len = msg.Text?.Length ?? 0;
+            var preview = msg.Text?.Length > 80 ? msg.Text[..80] + "..." : msg.Text;
+            _logger?.LogDebug("[PROMPT] {Role}: {Len} chars - {Preview}", msg.Role, len, preview);
+        }
     }
 
     public void Dispose()
