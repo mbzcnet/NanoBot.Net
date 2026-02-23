@@ -148,8 +148,8 @@ public class AgentOptions
     public string? Name { get; set; }
     public string? Description { get; set; }
     public int MaxHistoryEntries { get; set; } = 100;
-    public int MaxIterations { get; set; } = 20;
-    public float Temperature { get; set; } = 0.7f;
+    public int MaxIterations { get; set; } = 40;
+    public float Temperature { get; set; } = 0.1f;
     public int MaxTokens { get; set; } = 4096;
 }
 

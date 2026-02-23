@@ -2,6 +2,9 @@ namespace NanoBot.Core.Configuration;
 
 public class ChannelsConfig
 {
+    public bool SendProgress { get; set; } = true;
+    public bool SendToolHints { get; set; } = false;
+
     public TelegramConfig? Telegram { get; set; }
     public DiscordConfig? Discord { get; set; }
     public FeishuConfig? Feishu { get; set; }

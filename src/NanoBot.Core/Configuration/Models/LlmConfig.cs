@@ -10,7 +10,7 @@ public class LlmConfig
 
     public string? Provider { get; set; }
 
-    public double Temperature { get; set; } = 0.7;
+    public double Temperature { get; set; } = 0.1;
 
     public int MaxTokens { get; set; } = 4096;
 

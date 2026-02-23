@@ -85,7 +85,7 @@ public static class SpawnTool
                 ChatOptions = new ChatOptions
                 {
                     Instructions = instructions,
-                    Temperature = 0.7f,
+                    Temperature = 0.1f,
                     MaxOutputTokens = 4096
                 }
             },

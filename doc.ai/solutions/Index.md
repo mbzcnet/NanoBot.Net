@@ -8,16 +8,16 @@
 
 | 文档                                          | 内容                                                                                                | 开发者     |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------- | ---------- |
-| [Overview.md](./archive/Overview.md)             | **概述与架构**：项目目标、技术栈、层次架构、依赖关系                                          | 架构师     |
-| [Agent-Core.md](./archive/Agent-Core.md)         | **Agent 核心层**：IAgent、IAgentContext、IMemoryStore、ISessionManager                        | 开发者 A   |
-| [Tools.md](./archive/Tools.md)                   | **工具层**：ITool、IToolRegistry、内置工具、MCP 客户端                                        | 开发者 B   |
-| [Providers.md](./archive/Providers.md)           | **提供商层**：ILLMProvider、IProviderRegistry、ProviderSpec                                   | 开发者 C   |
-| [Channels.md](./archive/Channels.md)             | **通道层**：IChannel、IChannelManager、各通道实现方案                                         | 开发者 D   |
-| [Infrastructure.md](./archive/Infrastructure.md) | **基础设施层**：IMessageBus、ICronService、IHeartbeatService、ISkillsLoader、ISubagentManager | 开发者 E   |
-| [Configuration.md](./archive/Configuration.md)   | **配置管理层**：AgentConfig、各模块配置类、安全配置                                           | 开发者 F   |
-| [CLI.md](./archive/CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
-| [Installation.md](./archive/Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
-| [Testing.md](./archive/Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
+| [Overview.md](./design/Overview.md)             | **概述与架构**：项目目标、技术栈、层次架构、依赖关系                                          | 架构师     |
+| [Agent-Core.md](./design/Agent-Core.md)         | **Agent 核心层**：IAgent、IAgentContext、IMemoryStore、ISessionManager                        | 开发者 A   |
+| [Tools.md](./design/Tools.md)                   | **工具层**：ITool、IToolRegistry、内置工具、MCP 客户端                                        | 开发者 B   |
+| [Providers.md](./design/Providers.md)           | **提供商层**：ILLMProvider、IProviderRegistry、ProviderSpec                                   | 开发者 C   |
+| [Channels.md](./design/Channels.md)             | **通道层**：IChannel、IChannelManager、各通道实现方案                                         | 开发者 D   |
+| [Infrastructure.md](./design/Infrastructure.md) | **基础设施层**：IMessageBus、ICronService、IHeartbeatService、ISkillsLoader、ISubagentManager | 开发者 E   |
+| [Configuration.md](./design/Configuration.md)   | **配置管理层**：AgentConfig、各模块配置类、安全配置                                           | 开发者 F   |
+| [CLI.md](./design/CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
+| [Installation.md](./design/Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
+| [Testing.md](./design/Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
 
 ---
 
@@ -35,17 +35,17 @@
 
 **第一阶段（核心）**：
 
-- [Agent-Core.md](./Agent-Core.md) - Agent 循环、上下文、记忆
-- [Tools.md](./Tools.md) - 基础工具（文件、Shell、Web）
-- [Providers.md](./Providers.md) - 至少一个 LLM 提供商
-- [Configuration.md](./Configuration.md) - 配置加载
-- [CLI.md](./CLI.md) - onboard、agent 命令
+- [Agent-Core.md](./design/Agent-Core.md) - Agent 循环、上下文、记忆
+- [Tools.md](./design/Tools.md) - 基础工具（文件、Shell、Web）
+- [Providers.md](./design/Providers.md) - 至少一个 LLM 提供商
+- [Configuration.md](./design/Configuration.md) - 配置加载
+- [CLI.md](./design/CLI.md) - onboard、agent 命令
 
 **第二阶段（扩展）**：
 
-- [Channels.md](./Channels.md) - 多通道接入
-- [Infrastructure.md](./Infrastructure.md) - Cron、Heartbeat、MCP
-- [Installation.md](./Installation.md) - 安装与发布
+- [Channels.md](./design/Channels.md) - 多通道接入
+- [Infrastructure.md](./design/Infrastructure.md) - Cron、Heartbeat、MCP
+- [Installation.md](./design/Installation.md) - 安装与发布
 
 ---
 

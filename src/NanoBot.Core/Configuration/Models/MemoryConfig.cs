@@ -10,7 +10,7 @@ public class MemoryConfig
 
     public bool Enabled { get; set; } = true;
 
-    public int MemoryWindow { get; set; } = 50;
+    public int MemoryWindow { get; set; } = 100;
 
     /// <summary>
     /// Maximum total characters for system instructions (context providers output).
