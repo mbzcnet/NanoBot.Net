@@ -22,6 +22,14 @@ public class ConfigurationTests
     }
 
     [Fact]
+    public void WorkspaceConfig_DefaultPath_ShouldBeDotNbot()
+    {
+        var workspace = new WorkspaceConfig();
+
+        workspace.Path.Should().Be(".nbot");
+    }
+
+    [Fact]
     public void WorkspaceConfig_ShouldResolveHomePath()
     {
         var workspace = new WorkspaceConfig
@@ -33,6 +41,17 @@ public class ConfigurationTests
 
         resolvedPath.Should().NotContain("~");
         resolvedPath.Should().EndWith("test/workspace");
+    }
+
+    [Fact]
+    public void WorkspaceConfig_ShouldResolveRelativePathAgainstCurrentDirectory()
+    {
+        var workspace = new WorkspaceConfig { Path = ".nbot" };
+
+        var resolvedPath = workspace.GetResolvedPath();
+
+        resolvedPath.Should().EndWith(".nbot");
+        resolvedPath.Should().Be(Path.GetFullPath(".nbot"));
     }
 
     [Fact]
@@ -551,5 +570,46 @@ public class ConfigurationValidatorTests
         result.HasWarnings.Should().BeTrue();
         result.GetErrorMessage().Should().Contain("Error 1");
         result.GetWarningMessage().Should().Contain("Warning 1");
+    }
+
+    [Fact]
+    public void ConfigurationCheckResult_GetGuidanceMessage_ShouldRecommendOnboardWhenConfigMissing()
+    {
+        var result = new ConfigurationCheckResult { ConfigExists = false };
+
+        var message = result.GetGuidanceMessage();
+
+        message.Should().Contain("nbot onboard");
+        message.Should().NotContain("nbot configure");
+    }
+
+    [Fact]
+    public void ConfigurationCheckResult_GetGuidanceMessage_ShouldRecommendOnboardWhenLlmMissing()
+    {
+        var result = new ConfigurationCheckResult { ConfigExists = true, HasValidLlm = false };
+
+        var message = result.GetGuidanceMessage();
+
+        message.Should().Contain("nbot onboard");
+    }
+
+    [Fact]
+    public void ConfigurationCheckResult_GetGuidanceMessage_ShouldRecommendOnboardWhenApiKeyMissing()
+    {
+        var result = new ConfigurationCheckResult { ConfigExists = true, HasValidLlm = true, HasApiKey = false };
+
+        var message = result.GetGuidanceMessage();
+
+        message.Should().Contain("nbot onboard");
+    }
+
+    [Fact]
+    public void ConfigurationCheckResult_GetGuidanceMessage_ShouldReturnEmptyWhenReady()
+    {
+        var result = new ConfigurationCheckResult { ConfigExists = true, HasValidLlm = true, HasApiKey = true };
+
+        var message = result.GetGuidanceMessage();
+
+        message.Should().BeEmpty();
     }
 }

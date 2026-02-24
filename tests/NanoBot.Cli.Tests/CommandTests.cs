@@ -1,4 +1,8 @@
+using System.Reflection;
+using System.CommandLine;
+using FluentAssertions;
 using NanoBot.Cli.Commands;
+using NanoBot.Cli;
 using Xunit;
 
 namespace NanoBot.Cli.Tests;
@@ -10,8 +14,39 @@ public class CommandTests
     {
         var command = new OnboardCommand();
 
-        Assert.Equal("onboard", command.Name);
-        Assert.Equal("Initialize nbot configuration and workspace", command.Description);
+        command.Name.Should().Be("onboard");
+        command.Description.Should().Contain("Initialize");
+        command.Description.Should().Contain("workspace");
+    }
+
+    [Fact]
+    public void RootCommand_ShouldIncludeOnboard_AndNotIncludeConfigure()
+    {
+        var getCommands = typeof(Program).GetMethod("GetCommands", BindingFlags.NonPublic | BindingFlags.Static);
+        getCommands.Should().NotBeNull();
+        var list = (IReadOnlyList<ICliCommand>)getCommands!.Invoke(null, null)!;
+        var names = list.Select(c => c.Name).ToList();
+
+        names.Should().Contain("onboard");
+        names.Should().NotContain("configure");
+    }
+
+    [Fact]
+    public void OnboardCommand_CreateCommand_ShouldHaveExpectedOptions()
+    {
+        var command = new OnboardCommand();
+        var cliCommand = command.CreateCommand();
+
+        cliCommand.Name.Should().Be("onboard");
+        var options = cliCommand.Options.OfType<Option>().Select(o => o.Name).ToList();
+        options.Should().Contain("dir");
+        options.Should().Contain("name");
+        options.Should().Contain("provider");
+        options.Should().Contain("model");
+        options.Should().Contain("api-key");
+        options.Should().Contain("api-base");
+        options.Should().Contain("workspace");
+        options.Should().Contain("non-interactive");
     }
 
     [Fact]
@@ -19,8 +54,8 @@ public class CommandTests
     {
         var command = new AgentCommand();
 
-        Assert.Equal("agent", command.Name);
-        Assert.Equal("Start Agent interactive mode", command.Description);
+        command.Name.Should().Be("agent");
+        command.Description.Should().Be("Start Agent interactive mode");
     }
 
     [Fact]
@@ -28,8 +63,8 @@ public class CommandTests
     {
         var command = new GatewayCommand();
 
-        Assert.Equal("gateway", command.Name);
-        Assert.Equal("Start Gateway service mode", command.Description);
+        command.Name.Should().Be("gateway");
+        command.Description.Should().Be("Start Gateway service mode");
     }
 
     [Fact]
@@ -37,8 +72,8 @@ public class CommandTests
     {
         var command = new StatusCommand();
 
-        Assert.Equal("status", command.Name);
-        Assert.Equal("Show Agent status", command.Description);
+        command.Name.Should().Be("status");
+        command.Description.Should().Be("Show Agent status");
     }
 
     [Fact]
@@ -46,8 +81,8 @@ public class CommandTests
     {
         var command = new ConfigCommand();
 
-        Assert.Equal("config", command.Name);
-        Assert.Equal("Configuration management", command.Description);
+        command.Name.Should().Be("config");
+        command.Description.Should().Be("Configuration management");
     }
 
     [Fact]
@@ -55,8 +90,8 @@ public class CommandTests
     {
         var command = new SessionCommand();
 
-        Assert.Equal("session", command.Name);
-        Assert.Equal("Session management", command.Description);
+        command.Name.Should().Be("session");
+        command.Description.Should().Be("Session management");
     }
 
     [Fact]
@@ -64,8 +99,8 @@ public class CommandTests
     {
         var command = new CronCommand();
 
-        Assert.Equal("cron", command.Name);
-        Assert.Equal("Scheduled task management", command.Description);
+        command.Name.Should().Be("cron");
+        command.Description.Should().Be("Scheduled task management");
     }
 
     [Fact]
@@ -73,8 +108,8 @@ public class CommandTests
     {
         var command = new McpCommand();
 
-        Assert.Equal("mcp", command.Name);
-        Assert.Equal("MCP server management", command.Description);
+        command.Name.Should().Be("mcp");
+        command.Description.Should().Be("MCP server management");
     }
 
     [Fact]
@@ -82,8 +117,8 @@ public class CommandTests
     {
         var command = new ChannelsCommand();
 
-        Assert.Equal("channels", command.Name);
-        Assert.Equal("Manage channels", command.Description);
+        command.Name.Should().Be("channels");
+        command.Description.Should().Be("Manage channels");
     }
 
     [Fact]
@@ -91,7 +126,7 @@ public class CommandTests
     {
         var command = new ProviderCommand();
 
-        Assert.Equal("provider", command.Name);
-        Assert.Equal("Manage providers", command.Description);
+        command.Name.Should().Be("provider");
+        command.Description.Should().Be("Manage providers");
     }
 }

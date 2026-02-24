@@ -187,15 +187,12 @@ public class AgentCommand : ICliCommand
         }
 
         Console.WriteLine();
-        Console.WriteLine("Run the configuration wizard to get started:");
+        Console.WriteLine("Run onboarding to create or update your configuration:");
         Console.WriteLine();
-        Console.WriteLine("  nbot configure");
+        Console.WriteLine("  nbot onboard");
         Console.WriteLine();
-        Console.WriteLine("Or set up manually:");
-        Console.WriteLine("  nbot configure --provider openai --model gpt-4o-mini --api-key YOUR_KEY");
-        Console.WriteLine();
-        Console.WriteLine("For non-interactive setup:");
-        Console.WriteLine("  nbot configure --non-interactive --provider openai --api-key YOUR_KEY");
+        Console.WriteLine("Or with options (non-interactive):");
+        Console.WriteLine("  nbot onboard --non-interactive --provider openai --model gpt-4o-mini --api-key YOUR_KEY");
     }
 
     private static async Task<AgentConfig> LoadConfigAsync(string? configPath, CancellationToken cancellationToken)

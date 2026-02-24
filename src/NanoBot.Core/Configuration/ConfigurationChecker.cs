@@ -15,17 +15,17 @@ public class ConfigurationCheckResult
     {
         if (!ConfigExists)
         {
-            return "Configuration file not found. Run 'nbot configure' to set up your configuration.";
+            return "Configuration file not found. Run 'nbot onboard' to create your configuration.";
         }
 
         if (!HasValidLlm)
         {
-            return "LLM model is not configured. Run 'nbot configure' to set up your LLM provider.";
+            return "LLM model is not configured. Run 'nbot onboard' to set up your LLM provider.";
         }
 
         if (!HasApiKey)
         {
-            return "API key is not configured. Run 'nbot configure' to set up your API key.";
+            return "API key is not configured. Run 'nbot onboard' to set up your API key.";
         }
 
         return string.Empty;

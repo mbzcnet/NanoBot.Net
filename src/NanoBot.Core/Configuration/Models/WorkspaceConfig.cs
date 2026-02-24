@@ -2,7 +2,7 @@ namespace NanoBot.Core.Configuration;
 
 public class WorkspaceConfig
 {
-    public string Path { get; set; } = "~/.nanobot/workspace";
+    public string Path { get; set; } = ".nbot";
 
     public string GetResolvedPath()
     {
