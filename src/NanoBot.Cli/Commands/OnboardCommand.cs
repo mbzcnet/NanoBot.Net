@@ -177,34 +177,41 @@ public class OnboardCommand : ICliCommand
         string? apiBase,
         string? workspace)
     {
+        var profileName = config.Llm.DefaultProfile ?? "default";
+        if (!config.Llm.Profiles.ContainsKey(profileName))
+        {
+            config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
+        }
+        var profile = config.Llm.Profiles[profileName];
+        
         if (!string.IsNullOrEmpty(provider))
         {
-            config.Llm.Provider = provider.ToLowerInvariant();
+            profile.Provider = provider.ToLowerInvariant();
         }
 
         if (!string.IsNullOrEmpty(model))
         {
-            config.Llm.Model = model;
+            profile.Model = model;
         }
-        else if (!string.IsNullOrEmpty(config.Llm.Provider) &&
-                 ConfigurationChecker.ProviderDefaultModels.TryGetValue(config.Llm.Provider, out var defaultModel))
+        else if (!string.IsNullOrEmpty(profile.Provider) &&
+                 ConfigurationChecker.ProviderDefaultModels.TryGetValue(profile.Provider, out var defaultModel))
         {
-            config.Llm.Model = defaultModel;
+            profile.Model = defaultModel;
         }
 
         if (!string.IsNullOrEmpty(apiKey))
         {
-            config.Llm.ApiKey = apiKey;
+            profile.ApiKey = apiKey;
         }
 
         if (!string.IsNullOrEmpty(apiBase))
         {
-            config.Llm.ApiBase = apiBase;
+            profile.ApiBase = apiBase;
         }
-        else if (!string.IsNullOrEmpty(config.Llm.Provider) &&
-                 ConfigurationChecker.ProviderApiBases.TryGetValue(config.Llm.Provider, out var defaultApiBase))
+        else if (!string.IsNullOrEmpty(profile.Provider) &&
+                 ConfigurationChecker.ProviderApiBases.TryGetValue(profile.Provider, out var defaultApiBase))
         {
-            config.Llm.ApiBase = defaultApiBase;
+            profile.ApiBase = defaultApiBase;
         }
 
         if (!string.IsNullOrEmpty(workspace))
@@ -279,14 +286,21 @@ public class OnboardCommand : ICliCommand
     {
         Console.WriteLine("=== LLM Configuration ===\n");
 
-        var provider = await PromptProviderAsync(config.Llm.Provider);
+        var profileName = config.Llm.DefaultProfile ?? "default";
+        if (!config.Llm.Profiles.ContainsKey(profileName))
+        {
+            config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
+        }
+        var profile = config.Llm.Profiles[profileName];
+        
+        var provider = await PromptProviderAsync(profile.Provider);
         if (provider == null)
         {
             Console.WriteLine("Cancelled.");
             return;
         }
 
-        config.Llm.Provider = provider;
+        profile.Provider = provider;
 
         var defaultModel = ConfigurationChecker.ProviderDefaultModels.TryGetValue(provider, out var dm)
             ? dm
@@ -295,18 +309,18 @@ public class OnboardCommand : ICliCommand
         Console.WriteLine($"\nDefault model for {provider}: {defaultModel}");
         Console.Write($"Model [{defaultModel}]: ");
         var modelInput = Console.ReadLine()?.Trim();
-        config.Llm.Model = string.IsNullOrWhiteSpace(modelInput) ? defaultModel : modelInput;
+        profile.Model = string.IsNullOrWhiteSpace(modelInput) ? defaultModel : modelInput;
 
         if (provider != "ollama")
         {
             var apiKey = await PromptApiKeyAsync(provider);
             if (apiKey != null)
             {
-                config.Llm.ApiKey = apiKey;
+                profile.ApiKey = apiKey;
             }
         }
 
-        var defaultApiBase = config.Llm.ApiBase;
+        var defaultApiBase = profile.ApiBase;
         if (string.IsNullOrEmpty(defaultApiBase) &&
             ConfigurationChecker.ProviderApiBases.TryGetValue(provider, out var ab))
         {
@@ -320,13 +334,13 @@ public class OnboardCommand : ICliCommand
         Console.WriteLine("\nAPI URL (optional, for third-party or proxy). Press Enter for default.");
         Console.Write($"API URL [{defaultApiBase}]: ");
         var urlInput = Console.ReadLine()?.Trim();
-        config.Llm.ApiBase = string.IsNullOrWhiteSpace(urlInput) ? defaultApiBase : urlInput;
+        profile.ApiBase = string.IsNullOrWhiteSpace(urlInput) ? defaultApiBase : urlInput;
 
         Console.WriteLine($"\n✓ LLM configured:");
-        Console.WriteLine($"  Provider: {config.Llm.Provider}");
-        Console.WriteLine($"  Model: {config.Llm.Model}");
-        Console.WriteLine($"  API Key: {(string.IsNullOrEmpty(config.Llm.ApiKey) ? "(using environment variable)" : MaskApiKey(config.Llm.ApiKey))}");
-        Console.WriteLine($"  API URL: {MaskApiUrl(config.Llm.ApiBase)}");
+        Console.WriteLine($"  Provider: {profile.Provider}");
+        Console.WriteLine($"  Model: {profile.Model}");
+        Console.WriteLine($"  API Key: {(string.IsNullOrEmpty(profile.ApiKey) ? "(using environment variable)" : MaskApiKey(profile.ApiKey))}");
+        Console.WriteLine($"  API URL: {MaskApiUrl(profile.ApiBase)}");
     }
 
     private async Task<string?> PromptProviderAsync(string? currentProvider)
@@ -471,9 +485,12 @@ public class OnboardCommand : ICliCommand
         Console.WriteLine("  • Single message: nbot agent -m \"Hello!\"");
         Console.WriteLine("  • View config: nbot config --list");
 
-        if (string.IsNullOrEmpty(config.Llm.ApiKey) && config.Llm.Provider != "ollama")
+        var profileName = config.Llm.DefaultProfile ?? "default";
+        var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
+        
+        if (profile != null && string.IsNullOrEmpty(profile.ApiKey) && profile.Provider != "ollama")
         {
-            var envKey = ConfigurationChecker.ProviderEnvKeys.TryGetValue(config.Llm.Provider ?? "", out var key)
+            var envKey = ConfigurationChecker.ProviderEnvKeys.TryGetValue(profile.Provider ?? "", out var key)
                 ? key
                 : "API_KEY";
             Console.WriteLine($"\nNote: Set {envKey} environment variable or add apiKey to config file.");

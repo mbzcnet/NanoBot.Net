@@ -115,15 +115,23 @@ public class ConfigCommand : ICliCommand
         Console.WriteLine($"Workspace: {config.Workspace.Path}");
 
         Console.WriteLine("\nLLM:");
-        Console.WriteLine($"  Provider: {config.Llm.Provider}");
-        Console.WriteLine($"  Model: {config.Llm.Model}");
-        if (!string.IsNullOrEmpty(config.Llm.ApiKey))
+        Console.WriteLine($"  Default Profile: {config.Llm.DefaultProfile}");
+        
+        foreach (var (profileName, profile) in config.Llm.Profiles)
         {
-            Console.WriteLine($"  API Key: {MaskApiKey(config.Llm.ApiKey)}");
-        }
-        if (!string.IsNullOrEmpty(config.Llm.ApiBase))
-        {
-            Console.WriteLine($"  API Base: {config.Llm.ApiBase}");
+            Console.WriteLine($"\n  Profile [{profileName}]:");
+            Console.WriteLine($"    Provider: {profile.Provider}");
+            Console.WriteLine($"    Model: {profile.Model}");
+            if (!string.IsNullOrEmpty(profile.ApiKey))
+            {
+                Console.WriteLine($"    API Key: {MaskApiKey(profile.ApiKey)}");
+            }
+            if (!string.IsNullOrEmpty(profile.ApiBase))
+            {
+                Console.WriteLine($"    API Base: {profile.ApiBase}");
+            }
+            Console.WriteLine($"    Temperature: {profile.Temperature}");
+            Console.WriteLine($"    MaxTokens: {profile.MaxTokens}");
         }
 
         Console.WriteLine("\nChannels:");
@@ -189,22 +197,104 @@ public class ConfigCommand : ICliCommand
 
     private static string? GetConfigValueByKey(AgentConfig config, string key)
     {
+        if (key.StartsWith("llm.profiles.", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = key.Split('.', 4);
+            if (parts.Length >= 4)
+            {
+                var profileName = parts[2];
+                var field = parts[3].ToLowerInvariant();
+                
+                if (config.Llm.Profiles.TryGetValue(profileName, out var profile))
+                {
+                    return field switch
+                    {
+                        "provider" => profile.Provider,
+                        "model" => profile.Model,
+                        "apikey" => profile.ApiKey,
+                        "apibase" => profile.ApiBase,
+                        "temperature" => profile.Temperature.ToString(),
+                        "maxtokens" => profile.MaxTokens.ToString(),
+                        _ => null
+                    };
+                }
+            }
+            return null;
+        }
+
+        if (key.StartsWith("llm.", StringComparison.OrdinalIgnoreCase))
+        {
+            var field = key[4..].ToLowerInvariant();
+            return field switch
+            {
+                "defaultprofile" => config.Llm.DefaultProfile,
+                "provider" => GetDefaultProfile(config)?.Provider,
+                "model" => GetDefaultProfile(config)?.Model,
+                "apikey" => GetDefaultProfile(config)?.ApiKey,
+                "apibase" => GetDefaultProfile(config)?.ApiBase,
+                "temperature" => GetDefaultProfile(config)?.Temperature.ToString(),
+                "maxtokens" => GetDefaultProfile(config)?.MaxTokens.ToString(),
+                _ => null
+            };
+        }
+
         return key.ToLowerInvariant() switch
         {
             "name" => config.Name,
             "workspace.path" => config.Workspace.Path,
-            "llm.provider" => config.Llm.Provider,
-            "llm.model" => config.Llm.Model,
-            "llm.apikey" => config.Llm.ApiKey,
-            "llm.apibase" => config.Llm.ApiBase,
-            "llm.temperature" => config.Llm.Temperature.ToString(),
-            "llm.maxtokens" => config.Llm.MaxTokens.ToString(),
             _ => null
         };
     }
 
+    private static LlmProfile? GetDefaultProfile(AgentConfig config)
+    {
+        var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
+        return config.Llm.Profiles.GetValueOrDefault(profileName);
+    }
+
     private static void SetConfigValueByKey(AgentConfig config, string key, string value)
     {
+        if (key.StartsWith("llm.profiles.", StringComparison.OrdinalIgnoreCase))
+        {
+            var parts = key.Split('.', 4);
+            if (parts.Length >= 4)
+            {
+                var profileName = parts[2];
+                var field = parts[3].ToLowerInvariant();
+                
+                if (!config.Llm.Profiles.ContainsKey(profileName))
+                {
+                    config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
+                }
+                
+                var profile = config.Llm.Profiles[profileName];
+                switch (field)
+                {
+                    case "provider":
+                        profile.Provider = value;
+                        break;
+                    case "model":
+                        profile.Model = value;
+                        break;
+                    case "apikey":
+                        profile.ApiKey = value;
+                        break;
+                    case "apibase":
+                        profile.ApiBase = value;
+                        break;
+                    case "temperature":
+                        if (float.TryParse(value, out var temp))
+                            profile.Temperature = temp;
+                        break;
+                    case "maxtokens":
+                        if (int.TryParse(value, out var maxTokens))
+                            profile.MaxTokens = maxTokens;
+                        break;
+                }
+            }
+            return;
+        }
+
         switch (key.ToLowerInvariant())
         {
             case "name":
@@ -213,31 +303,40 @@ public class ConfigCommand : ICliCommand
             case "workspace.path":
                 config.Workspace.Path = value;
                 break;
+            case "llm.defaultprofile":
+                config.Llm.DefaultProfile = value;
+                break;
             case "llm.provider":
-                config.Llm.Provider = value;
+                EnsureDefaultProfile(config).Provider = value;
                 break;
             case "llm.model":
-                config.Llm.Model = value;
+                EnsureDefaultProfile(config).Model = value;
                 break;
             case "llm.apikey":
-                config.Llm.ApiKey = value;
+                EnsureDefaultProfile(config).ApiKey = value;
                 break;
             case "llm.apibase":
-                config.Llm.ApiBase = value;
+                EnsureDefaultProfile(config).ApiBase = value;
                 break;
             case "llm.temperature":
                 if (float.TryParse(value, out var temp))
-                {
-                    config.Llm.Temperature = temp;
-                }
+                    EnsureDefaultProfile(config).Temperature = temp;
                 break;
             case "llm.maxtokens":
                 if (int.TryParse(value, out var maxTokens))
-                {
-                    config.Llm.MaxTokens = maxTokens;
-                }
+                    EnsureDefaultProfile(config).MaxTokens = maxTokens;
                 break;
         }
+    }
+
+    private static LlmProfile EnsureDefaultProfile(AgentConfig config)
+    {
+        var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
+        if (!config.Llm.Profiles.ContainsKey(profileName))
+        {
+            config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
+        }
+        return config.Llm.Profiles[profileName];
     }
 
     private static string MaskApiKey(string apiKey)

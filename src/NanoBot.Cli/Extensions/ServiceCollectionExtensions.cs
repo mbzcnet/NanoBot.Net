@@ -293,34 +293,37 @@ public static class ServiceCollectionExtensions
     {
         var llm = new LlmConfig();
         
+        var defaultProfile = new LlmProfile();
+
         var model = configuration["llm:model"] ?? configuration["llm:Model"];
         if (!string.IsNullOrEmpty(model))
-            llm.Model = model;
+            defaultProfile.Model = model;
 
         var apiKey = configuration["llm:api_key"] ?? configuration["llm:ApiKey"] ?? configuration["llm:apiKey"];
         if (!string.IsNullOrEmpty(apiKey))
-            llm.ApiKey = apiKey;
+            defaultProfile.ApiKey = apiKey;
 
         var apiBase = configuration["llm:api_base"] ?? configuration["llm:ApiBase"] ?? configuration["llm:apiBase"];
         if (!string.IsNullOrEmpty(apiBase))
-            llm.ApiBase = apiBase;
+            defaultProfile.ApiBase = apiBase;
 
         var provider = configuration["llm:provider"] ?? configuration["llm:Provider"];
         if (!string.IsNullOrEmpty(provider))
-            llm.Provider = provider;
+            defaultProfile.Provider = provider;
 
         var temperatureStr = configuration["llm:temperature"] ?? configuration["llm:Temperature"];
         if (double.TryParse(temperatureStr, out var temperature))
-            llm.Temperature = temperature;
+            defaultProfile.Temperature = temperature;
 
         var maxTokensStr = configuration["llm:max_tokens"] ?? configuration["llm:MaxTokens"];
         if (int.TryParse(maxTokensStr, out var maxTokens))
-            llm.MaxTokens = maxTokens;
+            defaultProfile.MaxTokens = maxTokens;
 
         var systemPrompt = configuration["llm:system_prompt"] ?? configuration["llm:SystemPrompt"];
         if (!string.IsNullOrEmpty(systemPrompt))
-            llm.SystemPrompt = systemPrompt;
+            defaultProfile.SystemPrompt = systemPrompt;
 
+        llm.Profiles["default"] = defaultProfile;
         return llm;
     }
 

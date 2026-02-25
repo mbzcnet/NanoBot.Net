@@ -4,11 +4,17 @@
     "Path": "~/.nanobot/workspace"
   },
   "Llm": {
-    "Model": "gpt-4o-mini",
-    "Provider": "openai",
-    "ApiKey": "${OPENAI_API_KEY}",
-    "Temperature": 0.7,
-    "MaxTokens": 4096
+    "DefaultProfile": "default",
+    "Profiles": {
+      "default": {
+        "Provider": "openai",
+        "Model": "gpt-4o-mini",
+        "ApiKey": "${OPENAI_API_KEY}",
+        "ApiBase": "https://api.openai.com/v1",
+        "Temperature": 0.7,
+        "MaxTokens": 4096
+      }
+    }
   },
   "Channels": {
     "Telegram": {

@@ -81,8 +81,14 @@ public class ChatClientFactory : IChatClientFactory
 
     public IChatClient CreateChatClient(LlmConfig config)
     {
-        var provider = config.Provider ?? "openai";
-        return CreateChatClient(provider, config.Model, config.ApiKey, config.ApiBase);
+        var profileName = string.IsNullOrEmpty(config.DefaultProfile) ? "default" : config.DefaultProfile;
+        if (!config.Profiles.TryGetValue(profileName, out var profile))
+        {
+            throw new InvalidOperationException($"LLM profile '{profileName}' not found in configuration");
+        }
+        
+        var provider = profile.Provider ?? "openai";
+        return CreateChatClient(provider, profile.Model, profile.ApiKey, profile.ApiBase);
     }
 
     public IChatClient CreateChatClient(string provider, string model, string? apiKey = null, string? apiBase = null)

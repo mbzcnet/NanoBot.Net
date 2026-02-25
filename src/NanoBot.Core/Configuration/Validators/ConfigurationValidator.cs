@@ -54,34 +54,43 @@ public static class ConfigurationValidator
 
     private static void ValidateLlm(AgentConfig config, List<string> errors, List<string> warnings)
     {
-        if (string.IsNullOrWhiteSpace(config.Llm.Model))
+        var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
+        
+        if (!config.Llm.Profiles.TryGetValue(profileName, out var profile))
         {
-            errors.Add("LLM model is required");
+            errors.Add($"LLM profile '{profileName}' not found in configuration");
+            return;
         }
 
-        if (string.IsNullOrWhiteSpace(config.Llm.ApiKey) && 
-            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")) &&
-            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")) &&
-            string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENROUTER_API_KEY")))
+        if (string.IsNullOrWhiteSpace(profile.Model))
         {
-            warnings.Add("No API key configured. Set apiKey in config or via environment variable");
+            errors.Add($"LLM model is required in profile '{profileName}'");
         }
 
-        if (config.Llm.Temperature < 0 || config.Llm.Temperature > 2)
+        var apiKey = profile.ApiKey ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY") 
+            ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
+            ?? Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+        
+        if (string.IsNullOrWhiteSpace(apiKey) && profile.Provider != "ollama")
         {
-            warnings.Add($"Temperature {config.Llm.Temperature} is outside typical range [0, 2]");
+            warnings.Add($"No API key configured for profile '{profileName}'. Set apiKey in config or via environment variable");
         }
 
-        if (config.Llm.MaxTokens <= 0)
+        if (profile.Temperature < 0 || profile.Temperature > 2)
+        {
+            warnings.Add($"Temperature {profile.Temperature} is outside typical range [0, 2]");
+        }
+
+        if (profile.MaxTokens <= 0)
         {
             errors.Add("MaxTokens must be greater than 0");
         }
 
-        if (!string.IsNullOrWhiteSpace(config.Llm.ApiBase))
+        if (!string.IsNullOrWhiteSpace(profile.ApiBase))
         {
-            if (!Uri.TryCreate(config.Llm.ApiBase, UriKind.Absolute, out _))
+            if (!Uri.TryCreate(profile.ApiBase, UriKind.Absolute, out _))
             {
-                errors.Add($"Invalid API base URL: {config.Llm.ApiBase}");
+                errors.Add($"Invalid API base URL: {profile.ApiBase}");
             }
         }
     }

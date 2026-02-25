@@ -170,6 +170,53 @@ Environment variables are supported with `NBOT_` prefix:
 - `NBOT_AGENT_LLM_MODEL`
 - etc.
 
+### Multiple LLM Profiles
+
+NanoBot.Net supports multiple LLM profiles, allowing you to switch between different providers or models easily.
+
+```json
+{
+  "Llm": {
+    "DefaultProfile": "default",
+    "Profiles": {
+      "default": {
+        "Provider": "openai",
+        "Model": "gpt-4o-mini",
+        "ApiKey": "${OPENAI_API_KEY}",
+        "ApiBase": "https://api.openai.com/v1"
+      },
+      "claude": {
+        "Provider": "anthropic",
+        "Model": "claude-3-5-sonnet-20241022",
+        "ApiKey": "${ANTHROPIC_API_KEY}",
+        "ApiBase": "https://api.anthropic.com/v1"
+      },
+      "ollama": {
+        "Provider": "ollama",
+        "Model": "llama3.2",
+        "ApiBase": "http://localhost:11434/v1"
+      }
+    }
+  }
+}
+```
+
+#### Managing Profiles via CLI
+
+```bash
+# View all profiles
+nbot config --list
+
+# Get specific profile field
+nbot config --get llm.profiles.default.model
+
+# Set profile field
+nbot config --set llm.profiles.claude.provider=anthropic
+
+# Change default profile
+nbot config --set llm.defaultprofile=claude
+```
+
 ### Providers
 
 | Provider | Purpose | Get API Key |
@@ -188,11 +235,14 @@ Environment variables are supported with `NBOT_` prefix:
 
 ```json
 {
-  "Agent": {
-    "Llm": {
-      "Provider": "openrouter",
-      "Model": "anthropic/claude-opus-4-5",
-      "ApiKey": "sk-or-v1-xxx"
+  "Llm": {
+    "DefaultProfile": "default",
+    "Profiles": {
+      "default": {
+        "Provider": "openrouter",
+        "Model": "anthropic/claude-opus-4-5",
+        "ApiKey": "sk-or-v1-xxx"
+      }
     }
   }
 }
@@ -205,12 +255,15 @@ Environment variables are supported with `NBOT_` prefix:
 
 ```json
 {
-  "Agent": {
-    "Llm": {
-      "Provider": "custom",
-      "Model": "your-model-name",
-      "ApiKey": "your-api-key",
-      "ApiBase": "https://api.your-provider.com/v1"
+  "Llm": {
+    "DefaultProfile": "default",
+    "Profiles": {
+      "default": {
+        "Provider": "openai",
+        "Model": "your-model-name",
+        "ApiKey": "your-api-key",
+        "ApiBase": "https://api.your-provider.com/v1"
+      }
     }
   }
 }
@@ -225,11 +278,14 @@ For local servers that don't require a key, set `ApiKey` to any non-empty string
 
 ```json
 {
-  "Agent": {
-    "Llm": {
-      "Provider": "ollama",
-      "Model": "llama3.1",
-      "ApiBase": "http://localhost:11434/v1"
+  "Llm": {
+    "DefaultProfile": "default",
+    "Profiles": {
+      "default": {
+        "Provider": "ollama",
+        "Model": "llama3.1",
+        "ApiBase": "http://localhost:11434/v1"
+      }
     }
   }
 }

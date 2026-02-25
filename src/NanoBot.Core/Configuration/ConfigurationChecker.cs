@@ -128,9 +128,12 @@ public static class ConfigurationChecker
             };
         }
 
-        var hasModel = !string.IsNullOrWhiteSpace(config.Llm.Model);
-        var hasProvider = !string.IsNullOrWhiteSpace(config.Llm.Provider);
-        var hasApiKey = CheckApiKey(config);
+        var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
+        var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
+        
+        var hasModel = profile != null && !string.IsNullOrWhiteSpace(profile.Model);
+        var hasProvider = profile != null && !string.IsNullOrWhiteSpace(profile.Provider);
+        var hasApiKey = CheckApiKey(config, profileName);
 
         if (!hasModel)
         {
@@ -158,16 +161,21 @@ public static class ConfigurationChecker
         };
     }
 
-    private static bool CheckApiKey(AgentConfig config)
+    private static bool CheckApiKey(AgentConfig config, string profileName)
     {
-        // Ollama and other local providers don't require an API key
-        var provider = config.Llm.Provider?.ToLowerInvariant() ?? "";
+        var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
+        if (profile == null)
+        {
+            return false;
+        }
+        
+        var provider = profile.Provider?.ToLowerInvariant() ?? "";
         if (provider == "ollama")
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(config.Llm.ApiKey))
+        if (!string.IsNullOrWhiteSpace(profile.ApiKey))
         {
             return true;
         }

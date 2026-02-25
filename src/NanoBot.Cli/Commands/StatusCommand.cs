@@ -48,6 +48,9 @@ public class StatusCommand : ICliCommand
         var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath, cancellationToken);
         var workspacePath = config.Workspace.GetResolvedPath();
         var configFilePath = GetConfigPath(configPath);
+        
+        var profileName = config.Llm.DefaultProfile ?? "default";
+        var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
 
         if (outputJson)
         {
@@ -58,8 +61,9 @@ public class StatusCommand : ICliCommand
                 workspace_path = workspacePath,
                 workspace_exists = Directory.Exists(workspacePath),
                 agent_name = config.Name,
-                llm_provider = config.Llm.Provider,
-                llm_model = config.Llm.Model,
+                llm_provider = profile?.Provider,
+                llm_model = profile?.Model,
+                llm_default_profile = profileName,
                 channels = new
                 {
                     telegram = config.Channels.Telegram?.Enabled ?? false,
@@ -87,8 +91,9 @@ public class StatusCommand : ICliCommand
             if (File.Exists(configFilePath))
             {
                 Console.WriteLine($"\nAgent Name: {config.Name}");
-                Console.WriteLine($"LLM Provider: {config.Llm.Provider}");
-                Console.WriteLine($"LLM Model: {config.Llm.Model}");
+                Console.WriteLine($"LLM Provider: {profile?.Provider ?? "(not set)"}");
+                Console.WriteLine($"LLM Model: {profile?.Model ?? "(not set)"}");
+                Console.WriteLine($"LLM Default Profile: {profileName}");
 
                 Console.WriteLine("\nChannels:");
 
