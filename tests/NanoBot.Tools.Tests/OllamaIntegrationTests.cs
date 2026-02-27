@@ -19,10 +19,17 @@ public class OllamaIntegrationTests : IDisposable
     {
         var config = new LlmConfig
         {
-            Provider = "ollama",
-            Model = "lfm2.5-thinking:latest",
-            ApiKey = "local-no-key",
-            ApiBase = "http://127.0.0.1:11434/v1"
+            DefaultProfile = "default",
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new LlmProfile
+                {
+                    Provider = "ollama",
+                    Model = "lfm2.5-thinking:latest",
+                    ApiKey = "local-no-key",
+                    ApiBase = "http://127.0.0.1:11434/v1"
+                }
+            }
         };
 
         var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Warning));

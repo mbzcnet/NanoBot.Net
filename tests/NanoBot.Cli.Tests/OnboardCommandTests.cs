@@ -104,10 +104,11 @@ public class OnboardCommandTests
             var configPath = Path.Combine(tempDir, ".nbot", "config.json");
             File.Exists(configPath).Should().BeTrue();
             var config = await ConfigurationLoader.LoadAsync(configPath);
-            config.Llm.Provider.Should().Be("openai");
-            config.Llm.Model.Should().Be("gpt-4o-mini");
-            config.Llm.ApiKey.Should().Be("test-key-12345");
-            config.Llm.ApiBase.Should().Be("https://custom.example.com/v1");
+            var profile = config.Llm.Profiles["default"];
+            profile.Provider.Should().Be("openai");
+            profile.Model.Should().Be("gpt-4o-mini");
+            profile.ApiKey.Should().Be("test-key-12345");
+            profile.ApiBase.Should().Be("https://custom.example.com/v1");
         }
         finally
         {

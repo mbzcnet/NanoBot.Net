@@ -50,9 +50,16 @@ public class ServiceCollectionTests
 
         var config = new LlmConfig
         {
-            Provider = "openai",
-            Model = "gpt-4o",
-            ApiKey = "test-key"
+            DefaultProfile = "default",
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new LlmProfile
+                {
+                    Provider = "openai",
+                    Model = "gpt-4o",
+                    ApiKey = "test-key"
+                }
+            }
         };
 
         services.AddMicrosoftAgentsAI(config);
@@ -197,9 +204,9 @@ public class ServiceCollectionTests
         {
             ["Agent:Name"] = "TestAgent",
             ["Agent:Workspace:Path"] = "/tmp/test-workspace",
-            ["Agent:Llm:Provider"] = "openai",
-            ["Agent:Llm:Model"] = "gpt-4o",
-            ["Agent:Llm:ApiKey"] = "test-api-key"
+            ["Agent:Llm:Profiles:default:Provider"] = "openai",
+            ["Agent:Llm:Profiles:default:Model"] = "gpt-4o",
+            ["Agent:Llm:Profiles:default:ApiKey"] = "test-api-key"
         };
 
         return new ConfigurationBuilder()

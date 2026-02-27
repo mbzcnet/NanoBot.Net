@@ -93,9 +93,46 @@ public static class ConfigurationChecker
         return Path.Combine(homeDir, ".nbot", "config.json");
     }
 
+    public static string? ResolveExistingConfigPath(string? configPath = null)
+    {
+        if (!string.IsNullOrWhiteSpace(configPath) && File.Exists(configPath))
+        {
+            return configPath;
+        }
+
+        foreach (var path in EnumerateDefaultConfigPaths())
+        {
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateDefaultConfigPaths()
+    {
+        var cwd = Directory.GetCurrentDirectory();
+        var dir = new DirectoryInfo(cwd);
+        var maxHops = 12;
+
+        for (var i = 0; i < maxHops && dir != null; i++)
+        {
+            yield return Path.Combine(dir.FullName, ".nbot", "config.json");
+            yield return Path.Combine(dir.FullName, "config.json");
+            yield return Path.Combine(dir.FullName, "agent.json");
+            dir = dir.Parent;
+        }
+
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        yield return Path.Combine(homeDir, ".nbot", "config.json");
+        yield return Path.Combine(homeDir, ".nanobot", "config.json");
+    }
+
     public static async Task<ConfigurationCheckResult> CheckAsync(string? configPath = null, CancellationToken cancellationToken = default)
     {
-        var path = configPath ?? GetDefaultConfigPath();
+        var path = ResolveExistingConfigPath(configPath) ?? (configPath ?? GetDefaultConfigPath());
         var missingFields = new List<string>();
         var warnings = new List<string>();
 

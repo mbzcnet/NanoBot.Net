@@ -104,9 +104,11 @@ public class AgentCommand : ICliCommand
         bool streaming,
         CancellationToken cancellationToken)
     {
+        var resolvedConfigPath = ConfigurationChecker.ResolveExistingConfigPath(configPath) ?? configPath;
+
         if (!skipCheck)
         {
-            var checkResult = await ConfigurationChecker.CheckAsync(configPath, cancellationToken);
+            var checkResult = await ConfigurationChecker.CheckAsync(resolvedConfigPath, cancellationToken);
             if (!checkResult.IsReady)
             {
                 PrintConfigurationGuidance(checkResult);
@@ -114,10 +116,10 @@ public class AgentCommand : ICliCommand
             }
         }
 
-        var config = await LoadConfigAsync(configPath, cancellationToken);
+        var config = await LoadConfigAsync(resolvedConfigPath, cancellationToken);
 
         var services = new ServiceCollection();
-        var configuration = BuildConfiguration(configPath);
+        var configuration = BuildConfiguration(resolvedConfigPath);
 
         // Configure NLog - load from executable directory for correct path when running from any cwd
         var nlogPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
@@ -236,7 +238,7 @@ public class AgentCommand : ICliCommand
         }
         else
         {
-            Console.WriteLine("🐈 nbot is thinking...\n");
+            Console.WriteLine("🐈 NBot is thinking...\n");
             var response = await runtime.ProcessDirectAsync(message, sessionId, cancellationToken: cancellationToken);
             PrintAgentResponse(response, renderMarkdown);
         }
@@ -249,7 +251,7 @@ public class AgentCommand : ICliCommand
         bool renderMarkdown,
         CancellationToken cancellationToken)
     {
-        Console.Write("🐈 nbot");
+        Console.Write("🐈 NBot：");
         Console.Out.Flush();
 
         var fullResponse = new StringBuilder();
@@ -283,7 +285,7 @@ public class AgentCommand : ICliCommand
         bool streaming,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine("🐈 nbot Interactive mode (type 'exit' or Ctrl+C to quit)\n");
+        Console.WriteLine("🐈 NBot Interactive mode (type 'exit' or Ctrl+C to quit)\n");
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -320,7 +322,7 @@ public class AgentCommand : ICliCommand
                 }
                 else
                 {
-                    Console.WriteLine("🐈 nbot is thinking...\n");
+                    Console.WriteLine("🐈 NBot is thinking...\n");
                     Console.Out.Flush();
                     var response = await runtime.ProcessDirectAsync(input, sessionId, cancellationToken: cts.Token);
                     PrintAgentResponse(response, renderMarkdown);
@@ -341,16 +343,18 @@ public class AgentCommand : ICliCommand
     private static void PrintAgentResponse(string response, bool renderMarkdown)
     {
         Console.WriteLine();
-        Console.WriteLine("🐈 nbot");
-
         if (renderMarkdown)
         {
-            PrintMarkdown(response);
+            Console.WriteLine("🐈 NBot：");
         }
         else
         {
-            Console.WriteLine(response);
+            Console.WriteLine($"🐈 NBot： {response}");
+            Console.WriteLine();
+            return;
         }
+
+        PrintMarkdown(response);
 
         Console.WriteLine();
     }

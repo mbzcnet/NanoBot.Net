@@ -60,10 +60,17 @@ public class ChatClientFactoryTests
     {
         var config = new LlmConfig
         {
-            Provider = "ollama",
-            Model = "llama3.2",
-            ApiBase = "http://localhost:11434/v1",
-            ApiKey = "ollama"
+            DefaultProfile = "default",
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new LlmProfile
+                {
+                    Provider = "ollama",
+                    Model = "llama3.2",
+                    ApiBase = "http://localhost:11434/v1",
+                    ApiKey = "ollama"
+                }
+            }
         };
 
         var client = _factory.CreateChatClient(config);
@@ -90,9 +97,16 @@ public class ChatClientFactoryTests
     {
         var config = new LlmConfig
         {
-            Provider = null,
-            Model = "gpt-4o",
-            ApiKey = "test-key"
+            DefaultProfile = "default",
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new LlmProfile
+                {
+                    Provider = null,
+                    Model = "gpt-4o",
+                    ApiKey = "test-key"
+                }
+            }
         };
         var client = _factory.CreateChatClient(config);
         Assert.NotNull(client);

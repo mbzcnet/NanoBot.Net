@@ -35,7 +35,9 @@ public static class ServiceCollectionExtensions
     {
         services.AddSingleton(configuration);
 
-        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>() ?? new AgentConfig();
+        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>()
+            ?? configuration.Get<AgentConfig>()
+            ?? new AgentConfig();
         services.AddSingleton(agentConfig);
 
         services.AddSingleton(agentConfig.Workspace);
@@ -245,33 +247,35 @@ public static class ServiceCollectionExtensions
         IConfiguration configuration,
         AgentOptions? agentOptions = null)
     {
-        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>();
+        var agentConfig = configuration.GetSection("Agent").Get<AgentConfig>()
+            ?? configuration.Get<AgentConfig>();
+
         if (agentConfig == null)
         {
             var llmSection = configuration.GetSection("llm");
-            var llmConfig = llmSection.Exists() 
-                ? BindLlmConfig(configuration) 
+            var llmConfig = llmSection.Exists()
+                ? BindLlmConfig(configuration)
                 : new LlmConfig();
 
             agentConfig = new AgentConfig
             {
                 Name = configuration["Name"] ?? configuration["name"] ?? "NanoBot",
-                Workspace = configuration.GetSection("Workspace").Get<WorkspaceConfig>() 
-                    ?? configuration.GetSection("workspace").Get<WorkspaceConfig>() 
+                Workspace = configuration.GetSection("Workspace").Get<WorkspaceConfig>()
+                    ?? configuration.GetSection("workspace").Get<WorkspaceConfig>()
                     ?? new WorkspaceConfig(),
                 Llm = llmConfig,
-                Channels = configuration.GetSection("Channels").Get<ChannelsConfig>() 
-                    ?? configuration.GetSection("channels").Get<ChannelsConfig>() 
+                Channels = configuration.GetSection("Channels").Get<ChannelsConfig>()
+                    ?? configuration.GetSection("channels").Get<ChannelsConfig>()
                     ?? new ChannelsConfig(),
-                Mcp = configuration.GetSection("Mcp").Get<McpConfig>() 
+                Mcp = configuration.GetSection("Mcp").Get<McpConfig>()
                     ?? configuration.GetSection("mcp").Get<McpConfig>(),
-                Security = configuration.GetSection("Security").Get<SecurityConfig>() 
-                    ?? configuration.GetSection("security").Get<SecurityConfig>() 
+                Security = configuration.GetSection("Security").Get<SecurityConfig>()
+                    ?? configuration.GetSection("security").Get<SecurityConfig>()
                     ?? new SecurityConfig(),
-                Memory = configuration.GetSection("Memory").Get<MemoryConfig>() 
-                    ?? configuration.GetSection("memory").Get<MemoryConfig>() 
+                Memory = configuration.GetSection("Memory").Get<MemoryConfig>()
+                    ?? configuration.GetSection("memory").Get<MemoryConfig>()
                     ?? new MemoryConfig(),
-                Heartbeat = configuration.GetSection("Heartbeat").Get<HeartbeatConfig>() 
+                Heartbeat = configuration.GetSection("Heartbeat").Get<HeartbeatConfig>()
                     ?? configuration.GetSection("heartbeat").Get<HeartbeatConfig>()
             };
         }

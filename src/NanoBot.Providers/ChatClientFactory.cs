@@ -98,7 +98,9 @@ public class ChatClientFactory : IChatClientFactory
             throw new NotSupportedException($"Provider '{provider}' is not supported. Supported providers: {string.Join(", ", ProviderSpecs.Keys)}");
         }
 
-        var resolvedApiKey = apiKey ?? Environment.GetEnvironmentVariable(spec.EnvKey) ?? "";
+        var resolvedApiKey = string.IsNullOrWhiteSpace(apiKey)
+            ? (Environment.GetEnvironmentVariable(spec.EnvKey) ?? "")
+            : apiKey;
         var resolvedApiBase = apiBase ?? spec.DefaultApiBase;
 
         _logger.LogInformation("Creating ChatClient for provider {Provider} with model {Model}", provider, model);
@@ -108,6 +110,12 @@ public class ChatClientFactory : IChatClientFactory
         if (spec.IsLocal && string.IsNullOrEmpty(resolvedApiKey))
         {
             resolvedApiKey = "local-no-key";
+        }
+
+        if (!spec.IsLocal && string.IsNullOrWhiteSpace(resolvedApiKey))
+        {
+            throw new InvalidOperationException(
+                $"Missing API key for provider '{provider}'. Set it in config (llm.profiles.default.api_key/apiKey/ApiKey) or via environment variable '{spec.EnvKey}'.");
         }
 
         var clientOptions = new OpenAI.OpenAIClientOptions 

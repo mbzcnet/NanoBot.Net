@@ -21,6 +21,60 @@ public class ConfigurationTests
         config.Heartbeat.Should().BeNull();
     }
 
+public class ConfigurationCheckerTests : IDisposable
+{
+    private readonly List<string> _tempDirs = new();
+    private readonly string _originalCwd;
+
+    public ConfigurationCheckerTests()
+    {
+        _originalCwd = Directory.GetCurrentDirectory();
+    }
+
+    public void Dispose()
+    {
+        Directory.SetCurrentDirectory(_originalCwd);
+        foreach (var dir in _tempDirs)
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void ResolveExistingConfigPath_ShouldFindProjectDotNbotConfigByWalkingUp()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"nbot_cfg_{Guid.NewGuid():N}");
+        var child = Path.Combine(root, "a", "b", "c");
+        Directory.CreateDirectory(child);
+        _tempDirs.Add(root);
+
+        var cfgDir = Path.Combine(root, ".nbot");
+        Directory.CreateDirectory(cfgDir);
+        var cfgPath = Path.Combine(cfgDir, "config.json");
+        File.WriteAllText(cfgPath, "{}");
+
+        Directory.SetCurrentDirectory(child);
+
+        var resolved = ConfigurationChecker.ResolveExistingConfigPath(null);
+        resolved.Should().NotBeNull();
+        NormalizePath(resolved!).Should().Be(NormalizePath(cfgPath));
+    }
+
+    private static string NormalizePath(string path)
+    {
+        var full = Path.GetFullPath(path);
+        const string privatePrefix = "/private";
+        if (full.StartsWith(privatePrefix + "/", StringComparison.Ordinal))
+        {
+            return full[privatePrefix.Length..];
+        }
+        return full;
+    }
+}
+
     [Fact]
     public void WorkspaceConfig_DefaultPath_ShouldBeDotNbot()
     {
@@ -77,13 +131,26 @@ public class ConfigurationTests
     {
         var llm = new LlmConfig();
 
-        llm.Model.Should().BeEmpty();
-        llm.Temperature.Should().Be(0.7);
-        llm.MaxTokens.Should().Be(4096);
-        llm.ApiKey.Should().BeNull();
-        llm.ApiBase.Should().BeNull();
-        llm.Provider.Should().BeNull();
-        llm.SystemPrompt.Should().BeNull();
+        llm.DefaultProfile.Should().Be("default");
+        llm.Profiles.Should().NotBeNull();
+        llm.Profiles.Should().ContainKey("default");
+        llm.Profiles["default"].Temperature.Should().Be(0.1);
+        llm.Profiles["default"].MaxTokens.Should().Be(4096);
+    }
+
+    [Fact]
+    public void LlmProfile_ShouldHaveDefaultValues()
+    {
+        var profile = new LlmProfile();
+
+        profile.Name.Should().Be("default");
+        profile.Model.Should().BeEmpty();
+        profile.ApiKey.Should().BeNull();
+        profile.ApiBase.Should().BeNull();
+        profile.Provider.Should().BeNull();
+        profile.Temperature.Should().Be(0.1);
+        profile.MaxTokens.Should().Be(4096);
+        profile.SystemPrompt.Should().BeNull();
     }
 
     [Fact]
@@ -326,28 +393,109 @@ public class ConfigurationLoaderTests : IDisposable
     [Fact]
     public async Task LoadAsync_ShouldLoadValidConfig()
     {
-        var json = "{\"name\":\"TestBot\",\"workspace\":{\"path\":\"/tmp/test-workspace\"},\"llm\":{\"model\":\"gpt-4\",\"api_key\":\"test-key\",\"temperature\":0.5,\"max_tokens\":2048}}";
+        var json = "{\"name\":\"TestBot\",\"workspace\":{\"path\":\"/tmp/test-workspace\"},\"llm\":{\"profiles\":{\"default\":{\"model\":\"gpt-4\",\"api_key\":\"test-key\",\"temperature\":0.5,\"max_tokens\":2048}}}}";
 
         var configPath = CreateTempConfigFile(json);
         var config = await ConfigurationLoader.LoadAsync(configPath);
 
         config.Name.Should().Be("TestBot");
         config.Workspace.Path.Should().Be("/tmp/test-workspace");
-        config.Llm.Model.Should().Be("gpt-4");
-        config.Llm.Temperature.Should().Be(0.5);
-        config.Llm.MaxTokens.Should().Be(2048);
+        config.Llm.Profiles["default"].Model.Should().Be("gpt-4");
+        config.Llm.Profiles["default"].Temperature.Should().Be(0.5);
+        config.Llm.Profiles["default"].MaxTokens.Should().Be(2048);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ShouldNotMisclassifySnakeCaseConfigWithChannelsAsNanobotConfig()
+    {
+        var json = "{\"name\":\"TestBot\",\"llm\":{\"default_profile\":\"default\",\"profiles\":{\"default\":{\"provider\":\"openai\",\"model\":\"qwen-plus\",\"api_key\":\"test-key\",\"api_base\":\"https://dashscope.aliyuncs.com/compatible-mode/v1\",\"temperature\":0.5,\"max_tokens\":64096}}},\"channels\":{\"telegram\":{\"enabled\":false,\"token\":\"x\"}}}";
+
+        var configPath = CreateTempConfigFile(json);
+        var config = await ConfigurationLoader.LoadAsync(configPath);
+
+        config.Llm.DefaultProfile.Should().Be("default");
+        config.Llm.Profiles["default"].Model.Should().Be("qwen-plus");
+        config.Llm.Profiles["default"].ApiKey.Should().Be("test-key");
+    }
+
+    [Fact]
+    public async Task LoadAsync_ShouldLoadPascalCaseConfig()
+    {
+        var json = "{\"Name\":\"TestBot\",\"Workspace\":{\"Path\":\"/tmp/test-workspace\"},\"Llm\":{\"DefaultProfile\":\"default\",\"Profiles\":{\"default\":{\"Provider\":\"openai\",\"Model\":\"gpt-4o-mini\",\"ApiKey\":\"test-key\",\"ApiBase\":\"https://api.openai.com/v1\"}}}}";
+
+        var configPath = CreateTempConfigFile(json);
+        var config = await ConfigurationLoader.LoadAsync(configPath);
+
+        config.Name.Should().Be("TestBot");
+        config.Workspace.Path.Should().Be("/tmp/test-workspace");
+        config.Llm.DefaultProfile.Should().Be("default");
+        config.Llm.Profiles["default"].Provider.Should().Be("openai");
+        config.Llm.Profiles["default"].Model.Should().Be("gpt-4o-mini");
+        config.Llm.Profiles["default"].ApiKey.Should().Be("test-key");
+        config.Llm.Profiles["default"].ApiBase.Should().Be("https://api.openai.com/v1");
+    }
+
+    [Fact]
+    public async Task LoadAsync_ShouldLoadNanobotConfigShape()
+    {
+        var json = "{\"agents\":{\"defaults\":{\"workspace\":\"/tmp/test-workspace\",\"model\":\"openai/gpt-4o-mini\",\"temperature\":0.6,\"max_tokens\":1234}},\"providers\":{\"openai\":{\"api_key\":\"test-key\",\"api_base\":\"https://api.openai.com/v1\"}}}";
+
+        var configPath = CreateTempConfigFile(json);
+        var config = await ConfigurationLoader.LoadAsync(configPath);
+
+        config.Workspace.Path.Should().Be("/tmp/test-workspace");
+        config.Llm.Profiles["default"].Model.Should().Be("openai/gpt-4o-mini");
+        config.Llm.Profiles["default"].Provider.Should().Be("openai");
+        config.Llm.Profiles["default"].ApiKey.Should().Be("test-key");
+        config.Llm.Profiles["default"].ApiBase.Should().Be("https://api.openai.com/v1");
+        config.Llm.Profiles["default"].Temperature.Should().Be(0.6);
+        config.Llm.Profiles["default"].MaxTokens.Should().Be(1234);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ShouldLoadNanobotCamelCaseConfigShape()
+    {
+        var json = "{\"agents\":{\"defaults\":{\"workspace\":\"/tmp/test-workspace\",\"model\":\"openai/gpt-4o-mini\",\"temperature\":0.6,\"maxTokens\":1234}},\"providers\":{\"openai\":{\"apiKey\":\"test-key\",\"apiBase\":\"https://api.openai.com/v1\"}}}";
+
+        var configPath = CreateTempConfigFile(json);
+        var config = await ConfigurationLoader.LoadAsync(configPath);
+
+        config.Workspace.Path.Should().Be("/tmp/test-workspace");
+        config.Llm.Profiles["default"].Model.Should().Be("openai/gpt-4o-mini");
+        config.Llm.Profiles["default"].Provider.Should().Be("openai");
+        config.Llm.Profiles["default"].ApiKey.Should().Be("test-key");
+        config.Llm.Profiles["default"].ApiBase.Should().Be("https://api.openai.com/v1");
+        config.Llm.Profiles["default"].Temperature.Should().Be(0.6);
+        config.Llm.Profiles["default"].MaxTokens.Should().Be(1234);
+    }
+
+    [Fact]
+    public async Task LoadAsync_ShouldLoadMixedCaseConfig()
+    {
+        var json = "{\"llm\":{\"DefaultProfile\":\"default\",\"profiles\":{\"default\":{\"Model\":\"qwen-plus\",\"ApiKey\":\"test-key\",\"ApiBase\":\"https://dashscope.aliyuncs.com/compatible-mode/v1\",\"Provider\":\"openai\",\"Temperature\":0.5,\"MaxTokens\":64096}}}}";
+
+        var configPath = CreateTempConfigFile(json);
+        var config = await ConfigurationLoader.LoadAsync(configPath);
+
+        config.Llm.DefaultProfile.Should().Be("default");
+        config.Llm.Profiles["default"].Model.Should().Be("qwen-plus");
+        config.Llm.Profiles["default"].ApiKey.Should().Be("test-key");
+        config.Llm.Profiles["default"].ApiBase.Should().Be("https://dashscope.aliyuncs.com/compatible-mode/v1");
+        config.Llm.Profiles["default"].Provider.Should().Be("openai");
+        config.Llm.Profiles["default"].Temperature.Should().Be(0.5);
+        config.Llm.Profiles["default"].MaxTokens.Should().Be(64096);
     }
 
     [Fact]
     public void Load_ShouldLoadValidConfig()
     {
-        var json = "{\"name\":\"SyncBot\",\"llm\":{\"model\":\"claude-3\"}}";
+        var json = "{\"name\":\"SyncBot\",\"llm\":{\"profiles\":{\"default\":{\"model\":\"claude-3\"}}}}";
 
         var configPath = CreateTempConfigFile(json);
         var config = ConfigurationLoader.Load(configPath);
 
         config.Name.Should().Be("SyncBot");
-        config.Llm.Model.Should().Be("claude-3");
+        config.Llm.Profiles["default"].Model.Should().Be("claude-3");
     }
 
     [Fact]
@@ -388,7 +536,13 @@ public class ConfigurationLoaderTests : IDisposable
         var config = new AgentConfig
         {
             Name = "SaveTestBot",
-            Llm = new LlmConfig { Model = "test-model" }
+            Llm = new LlmConfig
+            {
+                Profiles = new Dictionary<string, LlmProfile>
+                {
+                    ["default"] = new LlmProfile { Model = "test-model" }
+                }
+            }
         };
 
         var tempPath = Path.Combine(Path.GetTempPath(), $"save_test_{Guid.NewGuid()}.json");
@@ -405,13 +559,31 @@ public class ConfigurationLoaderTests : IDisposable
 
 public class ConfigurationValidatorTests
 {
+    private static LlmConfig CreateLlmConfig(string? provider = null, string? model = null, string? apiKey = null, double? temperature = null, int? maxTokens = null)
+    {
+        return new LlmConfig
+        {
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new LlmProfile
+                {
+                    Provider = provider ?? "openai",
+                    Model = model ?? "gpt-4",
+                    ApiKey = apiKey,
+                    Temperature = temperature ?? 0.7,
+                    MaxTokens = maxTokens ?? 4096
+                }
+            }
+        };
+    }
+
     [Fact]
     public void Validate_ShouldReturnErrorsForInvalidConfig()
     {
         var config = new AgentConfig
         {
             Name = "",
-            Llm = new LlmConfig { Model = "" }
+            Llm = CreateLlmConfig(model: "")
         };
 
         var result = ConfigurationValidator.Validate(config);
@@ -426,7 +598,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4" }
+            Llm = CreateLlmConfig(apiKey: null)
         };
 
         var result = ConfigurationValidator.Validate(config);
@@ -442,11 +614,7 @@ public class ConfigurationValidatorTests
         {
             Name = "ValidBot",
             Workspace = new WorkspaceConfig { Path = "/tmp/workspace" },
-            Llm = new LlmConfig 
-            { 
-                Model = "gpt-4",
-                ApiKey = "test-key"
-            }
+            Llm = CreateLlmConfig(apiKey: "test-key")
         };
 
         var result = ConfigurationValidator.Validate(config);
@@ -460,7 +628,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key" },
+            Llm = CreateLlmConfig(apiKey: "key"),
             Security = new SecurityConfig { RestrictToWorkspace = false }
         };
 
@@ -475,7 +643,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key" },
+            Llm = CreateLlmConfig(apiKey: "key"),
             Channels = new ChannelsConfig
             {
                 Telegram = new TelegramConfig { Enabled = true, Token = "" }
@@ -493,7 +661,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key" },
+            Llm = CreateLlmConfig(apiKey: "key"),
             Channels = new ChannelsConfig
             {
                 Discord = new DiscordConfig { Enabled = true, Token = "" }
@@ -511,7 +679,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key" },
+            Llm = CreateLlmConfig(apiKey: "key"),
             Channels = new ChannelsConfig
             {
                 Slack = new SlackConfig 
@@ -535,7 +703,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key", Temperature = 3.0 }
+            Llm = CreateLlmConfig(apiKey: "key", temperature: 3.0)
         };
 
         var result = ConfigurationValidator.Validate(config);
@@ -549,7 +717,7 @@ public class ConfigurationValidatorTests
         var config = new AgentConfig
         {
             Name = "TestBot",
-            Llm = new LlmConfig { Model = "gpt-4", ApiKey = "key", MaxTokens = 0 }
+            Llm = CreateLlmConfig(apiKey: "key", maxTokens: 0)
         };
 
         var result = ConfigurationValidator.Validate(config);
