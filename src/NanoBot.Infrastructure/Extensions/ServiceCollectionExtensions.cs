@@ -7,8 +7,10 @@ using NanoBot.Core.Cron;
 using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Bus;
+using NanoBot.Infrastructure.Browser;
 using NanoBot.Infrastructure.Cron;
 using NanoBot.Infrastructure.Heartbeat;
 using NanoBot.Infrastructure.Resources;
@@ -128,6 +130,8 @@ public static class ServiceCollectionExtensions
         services.AddHeartbeatServices(heartbeatConfig);
         services.AddSkillsServices();
         services.AddSubagentServices();
+        services.AddSingleton<IPlaywrightSessionManager, PlaywrightSessionManager>();
+        services.AddSingleton<IBrowserService, BrowserService>();
 
         return services;
     }

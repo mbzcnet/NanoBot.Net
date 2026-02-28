@@ -4,6 +4,8 @@
 
 **核心框架**：本方案基于 **Microsoft.Agents.AI** 框架进行设计，**直接使用框架提供的核心抽象**，避免重复造轮子。
 
+> **品牌演进说明**：项目正在从 NanoBot.Net 重命名为 **UBot**，以体现产品能力已超出移植范围。详见 [UBot 重命名方案](../update/20260228-Rename-NanoBotNet-to-UBot.md)。
+
 参考文档：
 - 本仓库 [README.md](../../README.md)
 - [Temp/nanobot/README.md](../../Temp/nanobot/README.md)

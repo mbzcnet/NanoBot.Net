@@ -27,28 +27,65 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         InvokingContext context,
         CancellationToken cancellationToken)
     {
-        var historyPath = _workspace.GetHistoryFile();
-
-        if (!File.Exists(historyPath))
+        if (context.Session == null)
         {
             return [];
         }
 
-        try
+        // Try to get messages from session state
+        if (context.Session.StateBag.TryGetValue<List<ChatMessage>>(StateKey, out var messages) && messages != null)
         {
-            var lines = await File.ReadAllLinesAsync(historyPath, cancellationToken);
-            return ParseHistoryToMessages(lines.TakeLast(_maxHistoryEntries * 2));
+            _logger?.LogDebug("Loaded {Count} messages from session state", messages.Count);
+            return messages;
         }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to read history file: {HistoryPath}", historyPath);
-            return [];
-        }
+
+        _logger?.LogDebug("No messages found in session state");
+        return [];
     }
 
     protected override async ValueTask StoreChatHistoryAsync(
         InvokedContext context,
         CancellationToken cancellationToken)
+    {
+        if (context.Session == null)
+        {
+            return;
+        }
+
+        // Get existing messages from session state and create a new list
+        var allMessages = new List<ChatMessage>();
+        
+        if (context.Session.StateBag.TryGetValue<List<ChatMessage>>(StateKey, out var existing) && existing != null)
+        {
+            allMessages.AddRange(existing);
+        }
+
+        // Add request messages (these are the new user messages, already filtered by base class)
+        allMessages.AddRange(context.RequestMessages);
+
+        // Add response messages
+        if (context.ResponseMessages != null)
+        {
+            allMessages.AddRange(context.ResponseMessages);
+        }
+
+        // Keep only the last N messages
+        if (allMessages.Count > _maxHistoryEntries)
+        {
+            var toRemove = allMessages.Count - _maxHistoryEntries;
+            allMessages.RemoveRange(0, toRemove);
+            _logger?.LogDebug("Trimmed {Count} old messages, keeping {Remaining}", toRemove, allMessages.Count);
+        }
+
+        // Store back to session state
+        context.Session.StateBag.SetValue(StateKey, allMessages);
+        _logger?.LogDebug("Stored {Count} messages to session state", allMessages.Count);
+
+        // Also append to history file for logging
+        await AppendToHistoryFileAsync(context, cancellationToken);
+    }
+
+    private async ValueTask AppendToHistoryFileAsync(InvokedContext context, CancellationToken cancellationToken)
     {
         var historyPath = _workspace.GetHistoryFile();
         var directory = Path.GetDirectoryName(historyPath);
@@ -59,6 +96,12 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         }
 
         var sb = new StringBuilder();
+
+        foreach (var message in context.RequestMessages)
+        {
+            var text = message.Text ?? string.Empty;
+            sb.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm}] {message.Role.ToString().ToLowerInvariant()}: {text}");
+        }
 
         if (context.ResponseMessages != null)
         {

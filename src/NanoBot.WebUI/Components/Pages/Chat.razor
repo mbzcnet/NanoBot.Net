@@ -1,0 +1,449 @@
+@page "/chat/{SessionId}"
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ISessionService SessionService
+@inject IAgentService AgentService
+@inject ILogger<Chat> Logger
+@inject IWebHostEnvironment WebHostEnvironment
+@inject IJSRuntime JSRuntime
+@using NanoBot.WebUI.Services
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@rendermode InteractiveServer
+
+<PageTitle>NanoBot - 聊天</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="chat-container">
+    <MudPaper Elevation="0" Class="d-flex flex-column nb-chat-shell" Style="height: calc(100vh - 120px);">
+        
+        @* 消息列表区域 *@
+        <div class="flex-grow-1 overflow-auto" style="min-height: 0;" @ref="_messagesContainerRef">
+            <MudPaper Elevation="0" Class="pa-4 nb-chat-stream">
+                @if (_messages == null || !_messages.Any())
+                {
+                    <div class="nb-chat-empty">
+                        <MudIcon Icon="@Icons.Material.Outlined.AutoAwesome" Size="Size.Medium" Class="mb-2" />
+                        <MudText Typo="Typo.h6">开始对话吧</MudText>
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">提出一个目标，NanoBot 会逐步完成。</MudText>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var message in _messages)
+                    {
+                        <div class="@GetMessageClass(message.Role)">
+                            <MudPaper Elevation="0" Class="pa-3 mb-3 nb-message-bubble" Style="@GetMessageStyle(message.Role)">
+                                <div class="d-flex align-center mb-2">
+                                    <MudIcon Icon="@GetMessageIcon(message.Role)" Size="Size.Small" Class="mr-2" />
+                                    <MudText Typo="Typo.subtitle2">@GetMessageSender(message.Role)</MudText>
+                                    <MudSpacer />
+                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                                        @message.Timestamp.ToString("HH:mm:ss")
+                                    </MudText>
+                                </div>
+                                <MarkdownRenderer Content="@message.Content" />
+                            </MudPaper>
+                        </div>
+                    }
+                }
+
+                @if (_isGenerating)
+                {
+                    <div class="message-assistant">
+                        <MudPaper Elevation="0" Class="pa-3 mb-3 nb-message-bubble">
+                            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                                AI 正在思考...
+                            </MudText>
+                        </MudPaper>
+                    </div>
+                }
+
+                <div @ref="_messagesEndRef"></div>
+            </MudPaper>
+        </div>
+        
+        @* 输入区域 *@
+        <div @ref="_inputAreaRef">
+            <MudPaper Elevation="0" Class="pa-3 mt-2 nb-composer nb-composer-floating">
+                <div class="nb-composer-row">
+                    <div class="nb-input-shell">
+                        <div class="nb-composer-topbar">
+                            <label for="chat-image-upload" class="@($"nb-attach-btn{(_isGenerating ? " disabled" : string.Empty)}")">
+                                <MudIcon Icon="@Icons.Material.Filled.Attachment" Size="Size.Small" />
+                            </label>
+                        </div>
+                        <InputFile id="chat-image-upload"
+                                   OnChange="HandleImageSelected"
+                                   accept="image/*"
+                                   disabled="@_isGenerating"
+                                   class="nb-hidden-file-input"
+                                   style="display:none" />
+
+                        <MudTextField @bind-Value="_inputMessage"
+                                      Placeholder="给 NanoBot 发送消息..."
+                                      Variant="Variant.Outlined"
+                                      Lines="2"
+                                      Class="nb-composer-input"
+                                      Disabled="@_isGenerating"
+                                      OnKeyDown="HandleKeyDown"
+                                      Immediate="true" />
+
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   Class="nb-send-fab"
+                                   OnClick="SendMessage"
+                                   Disabled="@((string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl)) || _isGenerating)">
+                            <MudIcon Icon="@Icons.Material.Rounded.NorthEast" Size="Size.Small" />
+                        </MudButton>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_attachedImageUrl))
+                {
+                    <div class="nb-composer-meta">
+                        <div class="d-flex align-center gap-2">
+                            <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">
+                                已附加图片
+                            </MudChip>
+                            <MudButton Variant="Variant.Text"
+                                       Color="Color.Error"
+                                       StartIcon="@Icons.Material.Filled.Close"
+                                       OnClick="RemoveAttachedImage"
+                                       Class="px-1">
+                                移除
+                            </MudButton>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(_attachedImageUrl))
+                {
+                    <MudPaper Elevation="0" Class="pa-2 mt-2 nb-attach-preview">
+                        <img src="@_attachedImageUrl" alt="preview" style="max-width: 180px; max-height: 180px; border-radius: 8px;" />
+                    </MudPaper>
+                }
+
+                @if (_isGenerating)
+                {
+                    <div class="d-flex justify-end mt-2">
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.Stop"
+                                   OnClick="StopGeneration"
+                                   Size="Size.Small">
+                            停止
+                        </MudButton>
+                    </div>
+                }
+            </MudPaper>
+        </div>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    [Parameter]
+    public string SessionId { get; set; } = string.Empty;
+
+    private List<ChatMessage> _messages = new();
+    private string _inputMessage = string.Empty;
+    private bool _isGenerating = false;
+    private ElementReference _messagesContainerRef;
+    private ElementReference _messagesEndRef;
+    private ElementReference _inputAreaRef;
+    private CancellationTokenSource? _cancellationTokenSource;
+    private string? _attachedImageUrl;
+    private DotNetObjectReference<Chat>? _dotNetRef;
+    private bool _pasteRegistered;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cancellationTokenSource = new CancellationTokenSource();
+        await LoadMessages();
+    }
+    
+    public async ValueTask DisposeAsync()
+    {
+        _cancellationTokenSource?.Dispose();
+        _dotNetRef?.Dispose();
+
+        if (_pasteRegistered)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("nanoBotChatImage.detachPasteHandler", _inputAreaRef);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JSRuntime.InvokeVoidAsync("nanoBotChatImage.attachPasteHandler", _inputAreaRef, _dotNetRef);
+            _pasteRegistered = true;
+            await ScrollToBottom();
+        }
+    }
+
+    private async Task LoadMessages()
+    {
+        var messages = await SessionService.GetMessagesAsync(SessionId);
+        _messages = messages.Select(m => new ChatMessage
+        {
+            Role = m.Role,
+            Content = m.Content,
+            Timestamp = m.Timestamp
+        }).ToList();
+    }
+
+    private async Task SendMessage()
+    {
+        if (string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl))
+            return;
+
+        var textPart = _inputMessage.Trim();
+        var imagePart = string.IsNullOrWhiteSpace(_attachedImageUrl) ? string.Empty : $"\n\n![图片]({_attachedImageUrl})";
+        var userContent = $"{textPart}{imagePart}".Trim();
+        _inputMessage = string.Empty;
+        _attachedImageUrl = null;
+
+        // 添加用户消息到 UI
+        _messages.Add(new ChatMessage
+        {
+            Role = "user",
+            Content = userContent,
+            Timestamp = DateTime.Now
+        });
+
+        _isGenerating = true;
+        StateHasChanged();
+        await Task.Yield();
+        await ScrollToBottom();
+
+        try
+        {
+            Logger.LogInformation("Sending message to Agent for session {SessionId}", SessionId);
+            
+            // 使用流式响应
+            var assistantMessage = new ChatMessage
+            {
+                Role = "assistant",
+                Content = string.Empty,
+                Timestamp = DateTime.Now
+            };
+            _messages.Add(assistantMessage);
+            
+            await foreach (var chunk in AgentService.SendMessageStreamingAsync(SessionId, userContent, _cancellationTokenSource?.Token ?? default))
+            {
+                assistantMessage.Content += chunk.Content;
+                StateHasChanged();
+                await Task.Yield();
+                await ScrollToBottom();
+                
+                if (chunk.IsComplete)
+                {
+                    Logger.LogInformation("Message complete for session {SessionId}", SessionId);
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogInformation("Message generation cancelled for session {SessionId}", SessionId);
+            Snackbar.Add("已停止生成", Severity.Info);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error sending message for session {SessionId}", SessionId);
+            Snackbar.Add($"发送失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+            await Task.Yield();
+            await ScrollToBottom();
+        }
+    }
+
+    private async Task HandleImageSelected(InputFileChangeEventArgs e)
+    {
+        try
+        {
+            var file = e.File;
+            if (file is null)
+            {
+                return;
+            }
+
+            if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                Snackbar.Add("仅支持图片文件", Severity.Warning);
+                return;
+            }
+
+            await using var readStream = file.OpenReadStream(10 * 1024 * 1024);
+            _attachedImageUrl = await SaveImageFromStreamAsync(readStream, Path.GetExtension(file.Name));
+            Snackbar.Add("图片已添加", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to handle image upload for session {SessionId}", SessionId);
+            Snackbar.Add($"图片上传失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private Task RemoveAttachedImage()
+    {
+        _attachedImageUrl = null;
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task HandlePastedImageDataUrl(string dataUrl, string contentType)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl) || !dataUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            var commaIndex = dataUrl.IndexOf(',');
+            if (commaIndex < 0)
+            {
+                return;
+            }
+
+            var base64 = dataUrl[(commaIndex + 1)..];
+            var bytes = Convert.FromBase64String(base64);
+            await using var stream = new MemoryStream(bytes);
+
+            var ext = GetExtensionFromContentType(contentType);
+            _attachedImageUrl = await SaveImageFromStreamAsync(stream, ext);
+            Snackbar.Add("已粘贴图片", Severity.Success);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to handle pasted image for session {SessionId}", SessionId);
+            Snackbar.Add($"粘贴图片失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task<string> SaveImageFromStreamAsync(Stream sourceStream, string? extension)
+    {
+        var ext = string.IsNullOrWhiteSpace(extension) ? ".png" : extension;
+        var uploadsRoot = Path.Combine(WebHostEnvironment.WebRootPath, "uploads", SessionId);
+        Directory.CreateDirectory(uploadsRoot);
+
+        var fileName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}{ext}";
+        var filePath = Path.Combine(uploadsRoot, fileName);
+
+        await using var writeStream = File.Create(filePath);
+        if (sourceStream.CanSeek)
+        {
+            sourceStream.Position = 0;
+        }
+
+        await sourceStream.CopyToAsync(writeStream);
+        return $"/uploads/{SessionId}/{fileName}";
+    }
+
+    private static string GetExtensionFromContentType(string contentType)
+    {
+        return contentType?.ToLowerInvariant() switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" => ".jpg",
+            "image/jpg" => ".jpg",
+            "image/webp" => ".webp",
+            "image/gif" => ".gif",
+            "image/bmp" => ".bmp",
+            _ => ".png"
+        };
+    }
+
+    private void StopGeneration()
+    {
+        Logger.LogInformation("Stopping generation for session {SessionId}", SessionId);
+        AgentService.StopGeneration(SessionId);
+        _cancellationTokenSource?.Cancel();
+        _isGenerating = false;
+        Snackbar.Add("已停止生成", Severity.Info);
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendMessage();
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("nanoBotChatImage.scrollToBottom", _messagesContainerRef);
+        }
+        catch
+        {
+            // ignore scrolling errors
+        }
+    }
+
+    private string GetMessageClass(string role)
+    {
+        return role?.ToLowerInvariant() switch
+        {
+            "user" => "message-user",
+            "system" => "message-system",
+            _ => "message-assistant"
+        };
+    }
+
+    private string GetMessageStyle(string role)
+    {
+        return role?.ToLowerInvariant() switch
+        {
+            "user" => "max-width: min(70%, 760px); line-height: 1.55;",
+            "system" => "max-width: min(86%, 920px); line-height: 1.5;",
+            _ => "max-width: min(74%, 820px); line-height: 1.55;"
+        };
+    }
+
+    private string GetMessageIcon(string role)
+    {
+        return role?.ToLowerInvariant() switch
+        {
+            "user" => Icons.Material.Filled.Person,
+            "system" => Icons.Material.Filled.Info,
+            _ => Icons.Material.Filled.SmartToy
+        };
+    }
+
+    private string GetMessageSender(string role)
+    {
+        return role?.ToLowerInvariant() switch
+        {
+            "user" => "您",
+            "system" => "系统提示",
+            _ => "AI 助手"
+        };
+    }
+
+    private class ChatMessage
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
+    }
+}

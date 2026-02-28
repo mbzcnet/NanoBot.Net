@@ -1,0 +1,39 @@
+@using NanoBot.Core.Configuration
+@using MudBlazor
+@rendermode InteractiveServer
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Add" Class="mr-1" /> 新建 LLM Profile
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="ProfileName"
+                      Label="Profile 名称"
+                      Variant="Variant.Outlined"
+                      HelperText="输入新 Profile 的名称"
+                      Immediate="true"
+                      AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">取消</MudButton>
+        <MudButton Color="Color.Primary" 
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@string.IsNullOrWhiteSpace(ProfileName)">
+            创建
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] 
+    public MudBlazor.IDialogReference? MudDialog { get; set; }
+
+    public string ProfileName { get; set; } = string.Empty;
+
+    void Cancel() => MudDialog?.Close();
+    
+    void Submit() => MudDialog?.Close(MudBlazor.DialogResult.Ok(ProfileName));
+}

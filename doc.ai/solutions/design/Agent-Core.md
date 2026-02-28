@@ -4,6 +4,13 @@
 
 **核心原则**：直接使用 `ChatClientAgent` 和 `AIContextProvider`，**不重新实现 Agent 循环**。
 
+> **最近更新**（2026-02-27 同步）：
+> - 模型临时文本后工具调用重试机制
+> - 内存整合重复任务防护（`_consolidating` 集合）
+> - 流式中间进度报告（`IProgressReporter`）
+> - 默认温度参数调整为 0.1
+> - Heartbeat 两阶段决策机制
+
 ---
 
 ## 设计原则

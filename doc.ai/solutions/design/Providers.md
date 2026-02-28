@@ -4,6 +4,12 @@
 
 **核心原则**：直接使用 `Microsoft.Agents.AI` 框架提供的 `ChatClientAgent`，无需自行封装 `IChatClient`。
 
+> **最近更新**（2026-02-27 同步）：
+> - **消息清理机制**：`SanitizingChatClient` 过滤空内容，防止 API 400 错误
+> - **空 reasoning_content 标准化**：在 provider 级别将空的 `reasoning_content` 标准化为 null
+> - **Anthropic Prompt Caching**：支持 `cache_control` 进行提示缓存
+> - **新增 Provider**：VolcEngine、SiliconFlow
+
 ---
 
 ## 设计原则

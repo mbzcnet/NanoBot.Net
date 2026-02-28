@@ -13,7 +13,7 @@ public class CompositeChatHistoryProvider : ChatHistoryProvider
         _providers = providers ?? throw new ArgumentNullException(nameof(providers));
     }
 
-    protected override async ValueTask<IEnumerable<ChatMessage>> InvokingCoreAsync(
+    protected override async ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
@@ -21,20 +21,42 @@ public class CompositeChatHistoryProvider : ChatHistoryProvider
 
         foreach (var provider in _providers)
         {
-            var messages = await provider.InvokingAsync(context, cancellationToken);
-            allMessages.AddRange(messages);
+            // Call the protected method through reflection to get only history messages
+            var provideMethod = provider.GetType().GetMethod("ProvideChatHistoryAsync", 
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            if (provideMethod != null)
+            {
+                var task = provideMethod.Invoke(provider, new object[] { context, cancellationToken });
+                if (task is ValueTask<IEnumerable<ChatMessage>> valueTask)
+                {
+                    var messages = await valueTask;
+                    allMessages.AddRange(messages);
+                }
+            }
         }
 
         return allMessages;
     }
 
-    protected override async ValueTask InvokedCoreAsync(
+    protected override async ValueTask StoreChatHistoryAsync(
         InvokedContext context,
         CancellationToken cancellationToken)
     {
         foreach (var provider in _providers)
         {
-            await provider.InvokedAsync(context, cancellationToken);
+            // Call the protected method through reflection
+            var storeMethod = provider.GetType().GetMethod("StoreChatHistoryAsync",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            
+            if (storeMethod != null)
+            {
+                var task = storeMethod.Invoke(provider, new object[] { context, cancellationToken });
+                if (task is ValueTask valueTask)
+                {
+                    await valueTask;
+                }
+            }
         }
     }
 }

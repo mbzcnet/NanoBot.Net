@@ -154,6 +154,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         sw.Restart();
         var userMessage = new ChatMessage(ChatRole.User, content);
+        userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
+        _logger?.LogInformation("[DEBUG] Created user message with content length: {Length}, source type: External", content.Length);
         _logger?.LogInformation("[TIMING] Create user message: {ElapsedMs}ms", sw.ElapsedMilliseconds);
 
         sw.Restart();
@@ -174,9 +176,9 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 _logger?.LogInformation("[TIMING] Subsequent chunk: {ElapsedMs}ms, text: {Text}", swInner.ElapsedMilliseconds, update.Text?.Length > 50 ? update.Text[..50] + "..." : update.Text);
             }
             
-            // Check for tool calls and send tool hint if text is empty
+            // Check for tool calls and always send tool hint for visibility
             var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
-            if (functionCalls.Any() && string.IsNullOrWhiteSpace(update.Text))
+            if (functionCalls.Any())
             {
                 var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
                 if (!string.IsNullOrEmpty(toolHint))
@@ -185,7 +187,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     var toolHintUpdate = new AgentResponseUpdate
                     {
                         Role = ChatRole.Assistant,
-                        Contents = { new TextContent(toolHint) }
+                        Contents = { new TextContent(toolHint) },
+                        AdditionalProperties = new()
                     };
                     toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
                     yield return toolHintUpdate;
@@ -243,6 +246,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         var session = await _sessionManager.GetOrCreateSessionAsync(sessionKey, cancellationToken);
 
         var userMessage = new ChatMessage(ChatRole.User, msg.Content);
+        userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
 
         if (msg.Media != null && msg.Media.Count > 0)
         {

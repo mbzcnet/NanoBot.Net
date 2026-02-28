@@ -13,3 +13,9 @@ This file documents non-obvious constraints and usage patterns.
 ## cron — Scheduled Reminders
 
 - Please refer to cron skill for usage.
+
+## browser — Web Browsing
+
+- Use `browser` for real webpage interaction (open, navigate, snapshot, act, content).
+- Recommended flow: `open/navigate -> snapshot -> act -> content`.
+- Prefer `browser` over `web_fetch` when the task requires clicking, waiting, scrolling, or reading dynamic content.

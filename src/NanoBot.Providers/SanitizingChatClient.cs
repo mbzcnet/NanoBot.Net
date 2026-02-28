@@ -70,6 +70,17 @@ public sealed class SanitizingChatClient : ISanitizingChatClient, IDisposable
             requestContent.AppendLine();
         }
         
+        requestContent.AppendLine("--- ChatOptions.Tools ---");
+        if (options?.Tools is { Count: > 0 })
+        {
+            requestContent.AppendLine($"{options.Tools.Count} tools provided");
+        }
+        else
+        {
+            requestContent.AppendLine("(No tools provided)");
+        }
+        requestContent.AppendLine();
+        
         await File.WriteAllTextAsync(requestFile, requestContent.ToString(), cancellationToken);
         _logger?.LogInformation("[DEBUG] Request saved to: {RequestFile}", requestFile);
 

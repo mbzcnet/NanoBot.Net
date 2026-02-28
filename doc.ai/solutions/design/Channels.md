@@ -4,6 +4,12 @@
 
 **依赖关系**：通道层依赖于基础设施层（Bus、Config）。
 
+> **最近更新**（2026-02-27 同步）：
+> - **Discord 通道修复**：typing 循环错误处理，避免无限重试
+> - **Telegram 通道增强**：`reply-to-message` 配置、`/help` ACL 绕过
+> - **Feishu 多媒体发送**：支持图片、音频、文件发送
+> - **Channel 配置分离**：`send_progress` 和 `send_tool_hints` 独立配置
+
 ---
 
 ## 模块概览
@@ -473,6 +479,9 @@ public class TelegramConfig
     public string Token { get; set; } = "";  // Bot Token from @BotFather
     public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
     public string? Proxy { get; set; }  // HTTP/SOCKS5 proxy URL
+    
+    /// <summary>是否回复原消息（新增）</summary>
+    public bool ReplyToMessage { get; set; } = false;
 }
 ```
 

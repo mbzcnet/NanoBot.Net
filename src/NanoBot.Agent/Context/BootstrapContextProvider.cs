@@ -12,9 +12,7 @@ public class BootstrapContextProvider : AIContextProvider
     private readonly IWorkspaceManager _workspace;
     private readonly ILogger<BootstrapContextProvider>? _logger;
 
-    // TOOLS.md is excluded: tool definitions are already sent via ChatOptions.Tools
-    // as structured JSON schemas. Including them again in natural language doubles the prompt size.
-    private static readonly string[] BootstrapFiles = ["AGENTS.md", "SOUL.md", "USER.md"];
+    private static readonly string[] BootstrapFiles = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"];
 
     private string? _cachedInstructions;
     private DateTime _cacheTime;
@@ -77,6 +75,7 @@ public class BootstrapContextProvider : AIContextProvider
             "AGENTS.md" => _workspace.GetAgentsFile(),
             "SOUL.md" => _workspace.GetSoulFile(),
             "USER.md" => _workspace.GetUserFile(),
+            "TOOLS.md" => _workspace.GetToolsFile(),
             _ => Path.Combine(_workspace.GetWorkspacePath(), fileName)
         };
     }
@@ -88,6 +87,7 @@ public class BootstrapContextProvider : AIContextProvider
             "AGENTS.md" => "Agent Configuration",
             "SOUL.md" => "Personality",
             "USER.md" => "User Profile",
+            "TOOLS.md" => "Tools Guide",
             _ => fileName.Replace(".md", "")
         };
     }

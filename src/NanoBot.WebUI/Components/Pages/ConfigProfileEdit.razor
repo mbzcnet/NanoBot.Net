@@ -1,0 +1,176 @@
+@page "/config/profiles/edit/{ProfileName}"
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ILogger<ConfigProfileEdit> Logger
+@using NanoBot.Core.Configuration
+@using NanoBot.Cli.Services
+@rendermode InteractiveServer
+
+<PageTitle>NanoBot - 编辑 LLM Profile</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4 nb-profile-form-page">
+    <MudBreadcrumbs Items="_breadcrumbItems" Class="nb-page-breadcrumb" />
+    
+    <MudText Typo="Typo.h4" Class="mb-4">编辑 LLM Profile: @ProfileName</MudText>
+    
+    @if (_isLoading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_profile == null)
+    {
+        <MudAlert Severity="Severity.Error">Profile 不存在</MudAlert>
+    }
+    else
+    {
+        <MudPaper Elevation="0" Class="pa-4 nb-profile-form-card">
+            <MudForm @ref="_form" @bind-IsValid="@_isFormValid">
+                <MudSelect @bind-Value="_profile.Provider"
+                           Label="Provider"
+                           Required="true"
+                           Variant="Variant.Outlined"
+                           Class="mb-4">
+                    <MudSelectItem Value="@("openai")">OpenAI</MudSelectItem>
+                    <MudSelectItem Value="@("anthropic")">Anthropic</MudSelectItem>
+                    <MudSelectItem Value="@("deepseek")">DeepSeek</MudSelectItem>
+                </MudSelect>
+                
+                <MudTextField @bind-Value="_profile.Model"
+                              Label="模型名称"
+                              Required="true"
+                              RequiredError="请输入模型名称"
+                              Variant="Variant.Outlined"
+                              HelperText="如: gpt-4, claude-3-opus, deepseek-chat"
+                              Class="mb-4" />
+                
+                <MudTextField @bind-Value="_profile.ApiKey"
+                              Label="API Key"
+                              InputType="InputType.Password"
+                              Variant="Variant.Outlined"
+                              HelperText="API 密钥（敏感信息）"
+                              Class="mb-4" />
+                
+                <MudTextField @bind-Value="_profile.ApiBase"
+                              Label="API Base URL"
+                              Variant="Variant.Outlined"
+                              HelperText="API 服务地址"
+                              Class="mb-4" />
+                
+                <MudNumericField @bind-Value="_profile.Temperature"
+                                 Label="Temperature"
+                                 Min="0.0"
+                                 Max="2.0"
+                                 Step="0.1"
+                                 Variant="Variant.Outlined"
+                                 HelperText="控制回复的随机性 (0-2)"
+                                 Class="mb-4" />
+                
+                <MudNumericField @bind-Value="_profile.MaxTokens"
+                                 Label="最大 Token 数"
+                                 Min="1"
+                                 Max="128000"
+                                 Variant="Variant.Outlined"
+                                 HelperText="单次回复的最大长度"
+                                 Class="mb-4" />
+                
+                <div class="d-flex justify-end gap-2 mt-4">
+                    <MudButton Variant="Variant.Outlined"
+                               Class="nb-config-outline-btn"
+                               OnClick="Cancel">
+                        取消
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               Class="nb-config-primary-btn"
+                               OnClick="SaveProfile"
+                               Disabled="@(!_isFormValid)">
+                        保存
+                    </MudButton>
+                </div>
+            </MudForm>
+        </MudPaper>
+    }
+</MudContainer>
+
+@code {
+    [Parameter]
+    public string ProfileName { get; set; } = string.Empty;
+    
+    private AgentConfig? _config;
+    private LlmProfile? _profile;
+    private bool _isLoading = true;
+    private bool _isFormValid = false;
+    private MudForm? _form;
+    private List<BreadcrumbItem> _breadcrumbItems = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbItems = new List<BreadcrumbItem>
+        {
+            new BreadcrumbItem("配置", href: "/config"),
+            new BreadcrumbItem("LLM Profiles", href: "/config/profiles"),
+            new BreadcrumbItem(ProfileName, href: null, disabled: true)
+        };
+        
+        await LoadConfig();
+    }
+
+    private async Task LoadConfig()
+    {
+        _isLoading = true;
+        try
+        {
+            var configPath = GetConfigPath();
+            if (File.Exists(configPath))
+            {
+                _config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+                _profile = _config.Llm.Profiles.GetValueOrDefault(ProfileName);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load config");
+            Snackbar.Add($"加载配置失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveProfile()
+    {
+        if (_config == null || _profile == null)
+        {
+            return;
+        }
+        
+        try
+        {
+            _config.Llm.Profiles[ProfileName] = _profile;
+            
+            var configPath = GetConfigPath();
+            await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
+            
+            Snackbar.Add($"Profile '{ProfileName}' 已保存", Severity.Success);
+            NavigationManager.NavigateTo("/config/profiles");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save profile");
+            Snackbar.Add($"保存 Profile 失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void Cancel()
+    {
+        NavigationManager.NavigateTo("/config/profiles");
+    }
+
+    private string GetConfigPath()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(homeDir, ".nbot", "config.json");
+    }
+}

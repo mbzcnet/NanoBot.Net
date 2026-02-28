@@ -1,0 +1,189 @@
+@page "/config/profiles"
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ILogger<ConfigProfiles> Logger
+@using NanoBot.Core.Configuration
+@using NanoBot.Cli.Services
+@rendermode InteractiveServer
+
+<PageTitle>NanoBot - LLM Profile 管理</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4 nb-profiles-page">
+    <MudBreadcrumbs Items="_breadcrumbItems" Class="nb-page-breadcrumb" />
+    
+    <div class="d-flex justify-space-between align-center mb-4">
+        <MudText Typo="Typo.h4">LLM Profile 管理</MudText>
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   Class="nb-config-primary-btn"
+                   Href="/config/profiles/new">
+            新建 Profile
+        </MudButton>
+    </div>
+    
+    @if (_isLoading)
+    {
+        <MudProgressCircular Indeterminate="true" />
+    }
+    else if (_config == null)
+    {
+        <MudAlert Severity="Severity.Error">无法加载配置文件</MudAlert>
+    }
+    else
+    {
+        <MudGrid>
+            @foreach (var profile in _config.Llm.Profiles)
+            {
+                <MudItem xs="12" md="6" lg="4">
+                    <MudCard Class="nb-profile-card">
+                        <MudCardHeader>
+                            <CardHeaderContent>
+                                <div class="d-flex align-center">
+                                    <MudText Typo="Typo.h6">@profile.Key</MudText>
+                                    @if (profile.Key == _config.Llm.DefaultProfile)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ml-2">默认</MudChip>
+                                    }
+                                </div>
+                            </CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                <strong>Provider:</strong> @profile.Value.Provider
+                            </MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                <strong>Model:</strong> @profile.Value.Model
+                            </MudText>
+                            <MudText Typo="Typo.body2" Class="mb-2">
+                                <strong>Temperature:</strong> @profile.Value.Temperature
+                            </MudText>
+                            <MudText Typo="Typo.body2">
+                                <strong>Max Tokens:</strong> @profile.Value.MaxTokens
+                            </MudText>
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudButton Size="Size.Small" 
+                                       Color="Color.Primary"
+                                       Href="@($"/config/profiles/edit/{profile.Key}")">
+                                编辑
+                            </MudButton>
+                            @if (profile.Key != _config.Llm.DefaultProfile)
+                            {
+                                <MudButton Size="Size.Small"
+                                           Color="Color.Secondary"
+                                           OnClick="@(() => SetDefaultProfile(profile.Key))">
+                                    设为默认
+                                </MudButton>
+                                @if (_config.Llm.Profiles.Count > 1)
+                                {
+                                    <MudButton Size="Size.Small"
+                                               Color="Color.Error"
+                                               OnClick="@(() => DeleteProfile(profile.Key))">
+                                        删除
+                                    </MudButton>
+                                }
+                            }
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+</MudContainer>
+
+@code {
+    private AgentConfig? _config;
+    private bool _isLoading = true;
+    private List<BreadcrumbItem> _breadcrumbItems = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _breadcrumbItems = new List<BreadcrumbItem>
+        {
+            new BreadcrumbItem("配置", href: "/config"),
+            new BreadcrumbItem("LLM Profiles", href: null, disabled: true)
+        };
+        
+        await LoadConfig();
+    }
+
+    private async Task LoadConfig()
+    {
+        _isLoading = true;
+        try
+        {
+            var configPath = GetConfigPath();
+            if (File.Exists(configPath))
+            {
+                _config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load config");
+            Snackbar.Add($"加载配置失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SetDefaultProfile(string profileName)
+    {
+        if (_config == null) return;
+        
+        try
+        {
+            _config.Llm.DefaultProfile = profileName;
+            await SaveConfig();
+            Snackbar.Add($"已将 '{profileName}' 设为默认 Profile", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set default profile");
+            Snackbar.Add($"设置默认 Profile 失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteProfile(string profileName)
+    {
+        if (_config == null) return;
+        
+        try
+        {
+            _config.Llm.Profiles.Remove(profileName);
+            await SaveConfig();
+            Snackbar.Add($"Profile '{profileName}' 已删除", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete profile");
+            Snackbar.Add($"删除 Profile 失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveConfig()
+    {
+        if (_config == null) return;
+        
+        try
+        {
+            var configPath = GetConfigPath();
+            await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save config");
+            throw;
+        }
+    }
+
+    private string GetConfigPath()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(homeDir, ".nbot", "config.json");
+    }
+}

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools.Browser;
 using NanoBot.Tools.Mcp;
 
 namespace NanoBot.Tools;
@@ -21,6 +22,7 @@ public static class ToolProvider
         var messageBus = services.GetService<IMessageBus>();
         var cronService = services.GetService<ICronService>();
         var subagentManager = services.GetService<ISubagentManager>();
+        var browserService = services.GetService<IBrowserService>();
         var httpClientFactory = services.GetService<IHttpClientFactory>();
         var mcpClient = services.GetService<IMcpClient>();
         var httpClient = httpClientFactory?.CreateClient("Tools");
@@ -34,6 +36,7 @@ public static class ToolProvider
 
         tools.Add(BuiltIn.WebTools.CreateWebSearchTool(httpClient));
         tools.Add(BuiltIn.WebTools.CreateWebFetchTool(httpClient));
+        tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService));
 
         tools.Add(BuiltIn.MessageTools.CreateMessageTool(messageBus, defaultChannel, defaultChatId));
         tools.Add(BuiltIn.CronTools.CreateCronTool(cronService, defaultChannel, defaultChatId));

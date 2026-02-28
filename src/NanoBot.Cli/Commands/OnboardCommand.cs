@@ -1,5 +1,6 @@
 using System.CommandLine;
 using NanoBot.Core.Configuration;
+using NanoBot.Cli.Services;
 
 namespace NanoBot.Cli.Commands;
 
@@ -225,7 +226,7 @@ public class OnboardCommand : ICliCommand
         string configPath,
         CancellationToken cancellationToken)
     {
-        var sections = new List<string> { "LLM", "Workspace", "Done" };
+        var sections = new List<string> { "LLM Profiles", "Workspace", "Done" };
         var currentIndex = 0;
 
         while (currentIndex < sections.Count - 1)
@@ -256,8 +257,8 @@ public class OnboardCommand : ICliCommand
 
                 switch (selectedSection)
                 {
-                    case "LLM":
-                        await ConfigureLlmSectionAsync(config, cancellationToken);
+                    case "LLM Profiles":
+                        await ConfigureLlmProfilesAsync(config, cancellationToken);
                         break;
                     case "Workspace":
                         ConfigureWorkspaceSection(config);
@@ -282,157 +283,71 @@ public class OnboardCommand : ICliCommand
         await SaveAndFinishAsync(config, configPath, cancellationToken);
     }
 
-    private async Task ConfigureLlmSectionAsync(AgentConfig config, CancellationToken cancellationToken)
+    private async Task ConfigureLlmProfilesAsync(AgentConfig config, CancellationToken cancellationToken)
     {
-        Console.WriteLine("=== LLM Configuration ===\n");
+        Console.WriteLine("=== LLM Profile Configuration ===\n");
+        Console.WriteLine("You can configure multiple LLM profiles for different use cases.\n");
 
-        var profileName = config.Llm.DefaultProfile ?? "default";
-        if (!config.Llm.Profiles.ContainsKey(profileName))
+        var service = new LlmProfileConfigService();
+
+        var hasDefaultProfile = config.Llm.Profiles.Count > 0;
+        if (!hasDefaultProfile)
         {
-            config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
-        }
-        var profile = config.Llm.Profiles[profileName];
-        
-        var provider = await PromptProviderAsync(profile.Provider);
-        if (provider == null)
-        {
-            Console.WriteLine("Cancelled.");
-            return;
+            Console.WriteLine("No profiles configured yet. Let's create the default profile.\n");
+            var profileName = config.Llm.DefaultProfile ?? "default";
+            await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
         }
 
-        profile.Provider = provider;
-
-        var defaultModel = ConfigurationChecker.ProviderDefaultModels.TryGetValue(provider, out var dm)
-            ? dm
-            : "gpt-4o-mini";
-
-        Console.WriteLine($"\nDefault model for {provider}: {defaultModel}");
-        Console.Write($"Model [{defaultModel}]: ");
-        var modelInput = Console.ReadLine()?.Trim();
-        profile.Model = string.IsNullOrWhiteSpace(modelInput) ? defaultModel : modelInput;
-
-        if (provider != "ollama")
+        Console.Write("\nConfigure additional profiles? [y/N]: ");
+        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (response == "y" || response == "yes")
         {
-            var apiKey = await PromptApiKeyAsync(provider);
-            if (apiKey != null)
+            while (true)
             {
-                profile.ApiKey = apiKey;
-            }
-        }
-
-        var defaultApiBase = profile.ApiBase;
-        if (string.IsNullOrEmpty(defaultApiBase) &&
-            ConfigurationChecker.ProviderApiBases.TryGetValue(provider, out var ab))
-        {
-            defaultApiBase = ab;
-        }
-        if (string.IsNullOrEmpty(defaultApiBase))
-        {
-            defaultApiBase = "https://api.openai.com/v1";
-        }
-
-        Console.WriteLine("\nAPI URL (optional, for third-party or proxy). Press Enter for default.");
-        Console.Write($"API URL [{defaultApiBase}]: ");
-        var urlInput = Console.ReadLine()?.Trim();
-        profile.ApiBase = string.IsNullOrWhiteSpace(urlInput) ? defaultApiBase : urlInput;
-
-        Console.WriteLine($"\n✓ LLM configured:");
-        Console.WriteLine($"  Provider: {profile.Provider}");
-        Console.WriteLine($"  Model: {profile.Model}");
-        Console.WriteLine($"  API Key: {(string.IsNullOrEmpty(profile.ApiKey) ? "(using environment variable)" : MaskApiKey(profile.ApiKey))}");
-        Console.WriteLine($"  API URL: {MaskApiUrl(profile.ApiBase)}");
-    }
-
-    private async Task<string?> PromptProviderAsync(string? currentProvider)
-    {
-        var providers = ConfigurationChecker.SupportedProviders.ToList();
-        var currentIndex = 0;
-
-        if (!string.IsNullOrEmpty(currentProvider))
-        {
-            var existingIndex = providers.FindIndex(p => p.Equals(currentProvider, StringComparison.OrdinalIgnoreCase));
-            if (existingIndex >= 0)
-            {
-                currentIndex = existingIndex;
-            }
-        }
-
-        Console.WriteLine("Select LLM provider:");
-
-        while (true)
-        {
-            for (var i = 0; i < providers.Count; i++)
-            {
-                var marker = i == currentIndex ? ">" : " ";
-                var hint = ConfigurationChecker.ProviderDefaultModels.TryGetValue(providers[i], out var model)
-                    ? $" (default: {model})"
-                    : "";
-                Console.WriteLine($"  {marker} [{i + 1}] {providers[i]}{hint}");
-            }
-
-            var key = Console.ReadKey(true);
-
-            if (key.Key == ConsoleKey.UpArrow && currentIndex > 0)
-            {
-                currentIndex--;
-            }
-            else if (key.Key == ConsoleKey.DownArrow && currentIndex < providers.Count - 1)
-            {
-                currentIndex++;
-            }
-            else if (key.Key == ConsoleKey.Enter)
-            {
-                Console.WriteLine($"\nSelected: {providers[currentIndex]}\n");
-                return providers[currentIndex];
-            }
-            else if (key.Key == ConsoleKey.Escape)
-            {
-                return null;
-            }
-            else if (char.IsDigit(key.KeyChar))
-            {
-                var index = key.KeyChar - '1';
-                if (index >= 0 && index < providers.Count)
+                Console.Write("\nEnter profile name (or press Enter to finish): ");
+                var profileName = Console.ReadLine()?.Trim();
+                if (string.IsNullOrWhiteSpace(profileName))
                 {
-                    Console.WriteLine($"\nSelected: {providers[index]}\n");
-                    return providers[index];
+                    break;
+                }
+
+                if (config.Llm.Profiles.ContainsKey(profileName))
+                {
+                    Console.WriteLine($"Profile '{profileName}' already exists. Editing...");
+                }
+
+                await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
+
+                Console.Write("\nAdd another profile? [y/N]: ");
+                var addMore = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (addMore != "y" && addMore != "yes")
+                {
+                    break;
                 }
             }
         }
-    }
 
-    private async Task<string?> PromptApiKeyAsync(string provider)
-    {
-        var envKey = ConfigurationChecker.ProviderEnvKeys.TryGetValue(provider, out var key) ? key : null;
-        var existingEnvValue = envKey != null ? Environment.GetEnvironmentVariable(envKey) : null;
-
-        if (!string.IsNullOrEmpty(existingEnvValue))
+        if (config.Llm.Profiles.Count > 1)
         {
-            Console.WriteLine($"\nFound {envKey} in environment.");
-            Console.Write("Use environment variable? [Y/n]: ");
-            var useEnv = Console.ReadLine()?.Trim().ToLowerInvariant();
-            if (useEnv != "n" && useEnv != "no")
+            Console.WriteLine("\nAvailable profiles:");
+            foreach (var profileName in config.Llm.Profiles.Keys)
             {
-                return null;
+                var profile = config.Llm.Profiles[profileName];
+                var isDefault = profileName == (config.Llm.DefaultProfile ?? "default");
+                var marker = isDefault ? "*" : " ";
+                Console.WriteLine($"  {marker} {profileName} ({profile.Provider}/{profile.Model})");
+            }
+
+            Console.Write($"\nSet default profile [{config.Llm.DefaultProfile ?? "default"}]: ");
+            var defaultInput = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(defaultInput) && config.Llm.Profiles.ContainsKey(defaultInput))
+            {
+                config.Llm.DefaultProfile = defaultInput;
+                Console.WriteLine($"✓ Default profile set to '{defaultInput}'");
             }
         }
-
-        if (ConfigurationChecker.ProviderKeyUrls.TryGetValue(provider, out var keyUrl))
-        {
-            Console.WriteLine($"\nGet your API key at: {keyUrl}");
-        }
-
-        Console.Write("\nAPI Key: ");
-        var apiKey = ReadLineMasked();
-
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            Console.WriteLine("No API key entered. You can set it later via environment variable or config file.");
-            return null;
-        }
-
-        return apiKey;
     }
+
 
     private void ConfigureWorkspaceSection(AgentConfig config)
     {
@@ -513,57 +428,6 @@ public class OnboardCommand : ICliCommand
             return Path.Combine(homeDir, path[2..]);
         }
         return Path.GetFullPath(path);
-    }
-
-    private static string MaskApiKey(string apiKey)
-    {
-        if (string.IsNullOrEmpty(apiKey) || apiKey.Length < 8)
-        {
-            return "***";
-        }
-        return $"{apiKey[..4]}...{apiKey[^4..]}";
-    }
-
-    private static string MaskApiUrl(string? apiUrl)
-    {
-        if (string.IsNullOrEmpty(apiUrl))
-        {
-            return "(default)";
-        }
-        try
-        {
-            var uri = new Uri(apiUrl);
-            return uri.Host + (string.IsNullOrEmpty(uri.PathAndQuery) || uri.PathAndQuery == "/" ? "" : uri.PathAndQuery);
-        }
-        catch
-        {
-            return apiUrl.Length > 40 ? apiUrl[..40] + "..." : apiUrl;
-        }
-    }
-
-    private static string ReadLineMasked()
-    {
-        var result = new System.Text.StringBuilder();
-        while (true)
-        {
-            var key = Console.ReadKey(true);
-            if (key.Key == ConsoleKey.Enter)
-            {
-                Console.WriteLine();
-                break;
-            }
-            if (key.Key == ConsoleKey.Backspace && result.Length > 0)
-            {
-                result.Remove(result.Length - 1, 1);
-                Console.Write("\b \b");
-            }
-            else if (!char.IsControl(key.KeyChar))
-            {
-                result.Append(key.KeyChar);
-                Console.Write("*");
-            }
-        }
-        return result.ToString();
     }
 
     private static async Task CreateWorkspaceTemplatesAsync(string workspacePath, CancellationToken cancellationToken)

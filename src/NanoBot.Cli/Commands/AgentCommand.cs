@@ -263,6 +263,20 @@ public class AgentCommand : ICliCommand
             if (string.IsNullOrEmpty(text))
                 continue;
 
+            // Check if this is a tool hint
+            var isToolHint = update.AdditionalProperties?.ContainsKey("_tool_hint") == true;
+            
+            if (isToolHint)
+            {
+                // Tool hint: output on its own line with color/formatting
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.DarkGray;
+                Console.Write(text);
+                Console.ResetColor();
+                Console.WriteLine();
+                continue;
+            }
+
             if (isFirstChunk)
             {
                 Console.Write(" ");

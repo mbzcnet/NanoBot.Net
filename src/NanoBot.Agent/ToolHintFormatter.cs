@@ -7,14 +7,14 @@ public static class ToolHintFormatter
     private const int MaxArgumentLength = 40;
 
     /// <summary>
-    /// Format tool calls as concise hints, e.g. 'web_search("query"), read_file("path")'
+    /// Format tool calls as concise hints with icon and newline
     /// </summary>
     /// <param name="toolCalls">The function call contents to format</param>
     /// <returns>Formatted tool hint string</returns>
     public static string FormatToolHint(IEnumerable<FunctionCallContent> toolCalls)
     {
         var hints = toolCalls.Select(FormatSingleToolCall);
-        return string.Join(", ", hints);
+        return $"\n🔧 {string.Join(", ", hints)}\n";
     }
 
     private static string FormatSingleToolCall(FunctionCallContent toolCall)

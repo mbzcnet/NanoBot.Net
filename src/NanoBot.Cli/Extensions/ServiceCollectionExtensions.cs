@@ -13,8 +13,10 @@ using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Bus;
+using NanoBot.Infrastructure.Browser;
 using NanoBot.Infrastructure.Cron;
 using NanoBot.Infrastructure.Heartbeat;
 using NanoBot.Infrastructure.Memory;
@@ -119,6 +121,8 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<IMessageBus, MessageBus>();
+        services.AddSingleton<IPlaywrightSessionManager, PlaywrightSessionManager>();
+        services.AddSingleton<IBrowserService, BrowserService>();
 
         return services;
     }

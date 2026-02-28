@@ -30,7 +30,13 @@ public static class NanoBotAgentFactory
 
         var instructions = BuildInstructions(workspace, options);
 
-        var providers = new List<ChatHistoryProvider>();
+        var providers = new List<ChatHistoryProvider>
+        {
+            new FileBackedChatHistoryProvider(
+                workspace,
+                options?.MaxHistoryEntries ?? 100,
+                loggerFactory?.CreateLogger<FileBackedChatHistoryProvider>())
+        };
 
         var compositeProvider = new CompositeChatHistoryProvider(providers);
 
@@ -85,6 +91,7 @@ You are {name}, a helpful AI assistant. You have access to tools that allow you 
 - Read, write, and edit files
 - Execute shell commands
 - Search the web and fetch web pages
+- Control a real browser tab (open, navigate, snapshot, act, content)
 - Send messages to users on chat channels
 - Spawn subagents for complex background tasks
 
@@ -176,6 +183,18 @@ internal class CompositeAIContextProvider : AIContextProvider
         InvokingContext context,
         CancellationToken cancellationToken)
     {
+        var inputMessages = context.AIContext.Messages?.ToList();
+        var inputMessageCount = inputMessages?.Count ?? 0;
+        _logger?.LogInformation("[DEBUG] CompositeAIContextProvider.ProvideAIContextAsync - Input messages: {Count}", inputMessageCount);
+        if (inputMessages != null)
+        {
+            foreach (var msg in inputMessages)
+            {
+                var preview = msg.Text?.Length > 50 ? msg.Text[..50] + "..." : msg.Text;
+                _logger?.LogInformation("[DEBUG]   - Message: role={Role}, text={Text}", msg.Role, preview);
+            }
+        }
+        
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var instructions = new StringBuilder();
 
@@ -233,7 +252,10 @@ internal class CompositeAIContextProvider : AIContextProvider
 
         return new AIContext
         {
-            Instructions = result.Length > 0 ? result : null
+            Instructions = result.Length > 0 ? result : null,
+            // Don't return Messages or Tools - the base class will merge them automatically
+            Messages = null,
+            Tools = null
         };
     }
 

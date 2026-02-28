@@ -42,6 +42,7 @@ public static class Program
         {
             new OnboardCommand(),
             new AgentCommand(),
+            new WebUICommand(),
             new GatewayCommand(),
             new StatusCommand(),
             new ConfigCommand(),

@@ -1,0 +1,101 @@
+﻿@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+@implements IDisposable
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout Class="nb-layout">
+    <MudAppBar Elevation="0" Class="nb-topbar">
+        <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
+                       Color="Color.Inherit"
+                       Edge="Edge.Start"
+                       OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6" Style="cursor: pointer;" @onclick="NavigateToHome">NanoBot</MudText>
+        <MudSpacer />
+        <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" OnClick="NavigateToConfig" />
+    </MudAppBar>
+    
+    <MudDrawer Open="@_drawerOpen"
+               OpenChanged="@((bool val) => _drawerOpen = val)"
+               Elevation="2"
+               ClipMode="DrawerClipMode.Always"
+               Variant="DrawerVariant.Persistent"
+               Class="nb-sidebar">
+        <MudDrawerHeader>
+            <MudText Typo="Typo.h6">@(_isSettingsSection ? "设置" : "会话")</MudText>
+        </MudDrawerHeader>
+
+        @if (_isSettingsSection)
+        {
+            <MudNavMenu>
+                <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
+                    系统配置
+                </MudNavLink>
+                <MudNavLink Href="/config/profiles" Icon="@Icons.Material.Filled.Tune" Match="NavLinkMatch.Prefix">
+                    LLM Profiles
+                </MudNavLink>
+                <MudDivider Class="my-2" />
+                <MudNavLink Href="/" Icon="@Icons.Material.Filled.Chat" Match="NavLinkMatch.All">
+                    返回会话
+                </MudNavLink>
+            </MudNavMenu>
+        }
+        else
+        {
+            <NavMenu />
+        }
+    </MudDrawer>
+    
+    <MudMainContent Class="nb-main">
+        <MudContainer MaxWidth="MaxWidth.False" Class="nb-page-shell">
+            @Body
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private bool _isSettingsSection;
+
+    protected override void OnInitialized()
+    {
+        UpdateSectionByRoute(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void ToggleDrawer()
+    {
+        _drawerOpen = !_drawerOpen;
+    }
+
+    private void NavigateToConfig()
+    {
+        NavigationManager.NavigateTo("/config");
+    }
+
+    private void NavigateToHome()
+    {
+        NavigationManager.NavigateTo("/");
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        UpdateSectionByRoute(e.Location);
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateSectionByRoute(string absoluteUri)
+    {
+        var path = new Uri(absoluteUri).AbsolutePath;
+        _isSettingsSection = path.StartsWith("/config", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

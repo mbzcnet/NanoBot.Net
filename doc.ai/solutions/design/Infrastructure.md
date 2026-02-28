@@ -4,6 +4,12 @@
 
 **核心原则**：仅实现 Microsoft.Agents.AI 框架**未提供**的功能，包括消息总线、通道适配、定时任务、心跳服务等 nanobot 特有机制。
 
+> **最近更新**（2026-02-27 同步）：
+> - **Heartbeat 两阶段机制**：从 "HEARTBEAT_OK token" 改为结构化决策（`HeartbeatDecision`）+ 执行
+> - **Memory/History 双层文件**：`MEMORY.md`（长期事实）+ `HISTORY.md`（追加式事件日志）
+> - **Sessions JSONL 格式**：append-only、`last_consolidated`、legacy 迁移
+> - **模板目录重构**：`workspace/` -> `templates/`
+
 ---
 
 ## 设计原则

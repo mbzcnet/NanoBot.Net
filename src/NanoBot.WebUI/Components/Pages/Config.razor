@@ -1,0 +1,354 @@
+@page "/config"
+@inject ISnackbar Snackbar
+@inject ILogger<Config> Logger
+@using NanoBot.Core.Configuration
+@using NanoBot.Cli.Services
+@rendermode InteractiveServer
+
+<PageTitle>NanoBot - 配置</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4 nb-config-page">
+    <MudText Typo="Typo.h4" Class="mb-4 nb-config-title">系统配置</MudText>
+    
+    @if (_isLoading)
+    {
+        <div class="nb-config-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Class="mt-2">正在加载配置...</MudText>
+        </div>
+    }
+    else if (_config == null)
+    {
+        <MudAlert Severity="Severity.Warning" Class="nb-config-alert">
+            <MudText Typo="Typo.h6">配置文件未找到</MudText>
+            <MudText Class="mt-2">配置文件路径：<code>@_configPath</code></MudText>
+            <MudText Class="mt-2">请先运行以下命令初始化配置：</MudText>
+            <MudPaper Class="pa-2 mt-2 nb-code-callout" Elevation="0">
+                <code>nbot onboard</code>
+            </MudPaper>
+            <MudButton Variant="Variant.Filled" 
+                       Color="Color.Primary" 
+                       Class="mt-4 nb-config-primary-btn"
+                       OnClick="CreateDefaultConfig">
+                创建默认配置
+            </MudButton>
+        </MudAlert>
+    }
+    else
+    {
+        var defaultProfile = GetDefaultProfile();
+
+        <MudTabs Rounded="true" Elevation="0" ApplyEffectsToContainer="true" Class="nb-config-tabs">
+            <MudTabPanel Text="概览" Icon="@Icons.Material.Filled.Dashboard">
+                <MudPaper Elevation="0" Class="pa-4 mb-4 nb-config-card">
+                    <div class="d-flex justify-space-between align-center mb-4 flex-wrap" style="gap: 8px;">
+                        <MudText Typo="Typo.h5">LLM 概览</MudText>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <MudButton Variant="Variant.Outlined"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Tune"
+                                       Class="nb-config-outline-btn"
+                                       Href="/config/profiles">
+                                管理 Profiles
+                            </MudButton>
+                            <MudButton Variant="Variant.Filled"
+                                       Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.Add"
+                                       Class="nb-config-primary-btn"
+                                       Href="/config/profiles/new">
+                                新建 Profile
+                            </MudButton>
+                        </div>
+                    </div>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-1">默认 Profile</MudText>
+                            <MudText Typo="Typo.subtitle1">
+                                <strong>@_config.Llm.DefaultProfile</strong>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Success" Class="ml-2">默认</MudChip>
+                            </MudText>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-1">Profile 总数</MudText>
+                            <MudText Typo="Typo.subtitle1"><strong>@_config.Llm.Profiles.Count</strong></MudText>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-1">默认 Provider</MudText>
+                            <MudText Typo="Typo.subtitle1">@(defaultProfile?.Provider ?? "-")</MudText>
+                        </MudItem>
+                        <MudItem xs="12" md="6">
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-1">默认模型</MudText>
+                            <MudText Typo="Typo.subtitle1">@(defaultProfile?.Model ?? "-")</MudText>
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudDivider Class="my-2" />
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2">快速切换默认 LLM</MudText>
+                            <div class="d-flex gap-2 flex-wrap align-center">
+                                <MudSelect T="string"
+                                           Label="默认 Profile"
+                                           Variant="Variant.Outlined"
+                                           Dense="true"
+                                           Value="@_selectedDefaultProfile"
+                                           ValueChanged="OnDefaultProfileChanged"
+                                           Class="nb-config-select"
+                                           Style="min-width: 220px;">
+                                    @foreach (var profileName in _config.Llm.Profiles.Keys)
+                                    {
+                                        <MudSelectItem T="string" Value="@profileName">@profileName</MudSelectItem>
+                                    }
+                                </MudSelect>
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Secondary"
+                                           StartIcon="@Icons.Material.Filled.Star"
+                                           Class="nb-config-outline-btn"
+                                           OnClick="ApplyDefaultProfileAsync"
+                                           Disabled="@(_selectedDefaultProfile == _config.Llm.DefaultProfile)">
+                                    设为默认
+                                </MudButton>
+                            </div>
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="基础" Icon="@Icons.Material.Filled.Build">
+                <MudPaper Elevation="0" Class="pa-4 mb-4 nb-config-card">
+                    <MudText Typo="Typo.h5" Class="mb-4">Agent 基础配置</MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12">
+                            <MudTextField @bind-Value="_config.Name"
+                                          Label="Agent 名称"
+                                          Variant="Variant.Outlined"
+                                          HelperText="设置 AI 助手的名称" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField @bind-Value="_config.Workspace.Path"
+                                          Label="工作空间路径"
+                                          Variant="Variant.Outlined"
+                                          HelperText="Agent 的工作目录" />
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="my-4" />
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   Class="nb-config-primary-btn"
+                                   OnClick="SaveConfig">
+                            保存基础配置
+                        </MudButton>
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Info"
+                                   StartIcon="@Icons.Material.Filled.Refresh"
+                                   Class="nb-config-outline-btn"
+                                   OnClick="ReloadConfig">
+                            重新加载
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="系统信息" Icon="@Icons.Material.Filled.Info">
+                <MudPaper Elevation="0" Class="pa-4 nb-config-card">
+                    <MudText Typo="Typo.h5" Class="mb-4">系统信息</MudText>
+
+                    <MudSimpleTable Dense="true" Class="nb-config-table">
+                        <tbody>
+                            <tr>
+                                <td><strong>配置文件路径</strong></td>
+                                <td><code>@_configPath</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>工作空间路径</strong></td>
+                                <td><code>@GetResolvedWorkspacePath()</code></td>
+                            </tr>
+                        </tbody>
+                    </MudSimpleTable>
+                </MudPaper>
+            </MudTabPanel>
+        </MudTabs>
+    }
+</MudContainer>
+
+@code {
+    private AgentConfig? _config;
+    private string _configPath = string.Empty;
+    private bool _isLoading = true;
+    private string _selectedDefaultProfile = string.Empty;
+    
+
+    protected override void OnInitialized()
+    {
+        _ = LoadConfigAsync();
+    }
+
+    private async Task LoadConfigAsync()
+    {
+        await Task.Delay(100);
+        await LoadConfig();
+    }
+
+    private async Task LoadConfig()
+    {
+        _isLoading = true;
+        StateHasChanged();
+        
+        try
+        {
+            _configPath = GetConfigPath();
+            
+            if (File.Exists(_configPath))
+            {
+                _config = await Task.Run(async () => 
+                    await ConfigurationLoader.LoadAsync(_configPath, CancellationToken.None));
+                _selectedDefaultProfile = _config.Llm.DefaultProfile;
+            }
+            else
+            {
+                _config = null;
+                _selectedDefaultProfile = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"配置加载错误: {ex}");
+            await InvokeAsync(() => Snackbar.Add($"加载配置失败: {ex.Message}", Severity.Error));
+            _config = null;
+        }
+        finally
+        {
+            _isLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SaveConfig()
+    {
+        if (_config == null) return;
+        
+        try
+        {
+            var configDir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+            {
+                Directory.CreateDirectory(configDir);
+            }
+            
+            await ConfigurationLoader.SaveAsync(_configPath, _config, CancellationToken.None);
+            _selectedDefaultProfile = _config.Llm.DefaultProfile;
+            
+            Snackbar.Add("配置已保存", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存配置失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ReloadConfig()
+    {
+        await LoadConfig();
+        Snackbar.Add("配置已重新加载", Severity.Info);
+    }
+
+    private async Task CreateDefaultConfig()
+    {
+        try
+        {
+            var configDir = Path.GetDirectoryName(_configPath);
+            if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+            {
+                Directory.CreateDirectory(configDir);
+            }
+            
+            _config = new AgentConfig
+            {
+                Name = "NanoBot",
+                Workspace = new WorkspaceConfig { Path = ".nbot" },
+                Llm = new LlmConfig
+                {
+                    DefaultProfile = "default",
+                    Profiles = new Dictionary<string, LlmProfile>
+                    {
+                        ["default"] = new LlmProfile
+                        {
+                            Name = "default",
+                            Provider = "openai",
+                            Model = "gpt-4o-mini",
+                            Temperature = 0.7f,
+                            MaxTokens = 4000
+                        }
+                    }
+                }
+            };
+            
+            await ConfigurationLoader.SaveAsync(_configPath, _config, CancellationToken.None);
+            _selectedDefaultProfile = _config.Llm.DefaultProfile;
+            
+            Snackbar.Add("默认配置已创建", Severity.Success);
+            _isLoading = false;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"创建配置失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+
+    private static string GetConfigPath()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(homeDir, ".nbot", "config.json");
+    }
+
+    private string GetResolvedWorkspacePath()
+    {
+        if (_config == null) return string.Empty;
+        
+        var path = _config.Workspace.Path;
+        if (path.StartsWith("~/"))
+        {
+            var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.Combine(homeDir, path[2..]);
+        }
+        return Path.GetFullPath(path);
+    }
+
+    private LlmProfile? GetDefaultProfile()
+    {
+        if (_config?.Llm == null || string.IsNullOrWhiteSpace(_config.Llm.DefaultProfile))
+        {
+            return null;
+        }
+
+        return _config.Llm.Profiles.GetValueOrDefault(_config.Llm.DefaultProfile);
+    }
+
+    private Task OnDefaultProfileChanged(string value)
+    {
+        _selectedDefaultProfile = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyDefaultProfileAsync()
+    {
+        if (_config == null || string.IsNullOrWhiteSpace(_selectedDefaultProfile))
+        {
+            return;
+        }
+
+        if (!_config.Llm.Profiles.ContainsKey(_selectedDefaultProfile))
+        {
+            Snackbar.Add("目标 Profile 不存在", Severity.Warning);
+            return;
+        }
+
+        _config.Llm.DefaultProfile = _selectedDefaultProfile;
+        await SaveConfig();
+    }
+}

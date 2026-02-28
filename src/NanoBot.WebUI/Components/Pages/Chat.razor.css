@@ -1,0 +1,15 @@
+.chat-container {
+    height: 100%;
+}
+
+.message-user {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.message-assistant {
+    display: flex;
+    justify-content: flex-start;
+    margin-bottom: 8px;
+}

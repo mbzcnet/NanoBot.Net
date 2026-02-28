@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text.Json;
 using NanoBot.Core.Configuration;
+using NanoBot.Cli.Services;
 
 namespace NanoBot.Cli.Commands;
 
@@ -36,12 +37,20 @@ public class ConfigCommand : ICliCommand
         );
         configOption.AddAlias("-c");
 
+        var interactiveOption = new Option<bool>(
+            name: "--interactive",
+            description: "Interactive LLM profile management",
+            getDefaultValue: () => false
+        );
+        interactiveOption.AddAlias("-i");
+
         var command = new Command(Name, Description)
         {
             listOption,
             getOption,
             setOption,
-            configOption
+            configOption,
+            interactiveOption
         };
 
         command.SetHandler(async (context) =>
@@ -50,8 +59,9 @@ public class ConfigCommand : ICliCommand
             var get = context.ParseResult.GetValueForOption(getOption);
             var set = context.ParseResult.GetValueForOption(setOption);
             var configPath = context.ParseResult.GetValueForOption(configOption);
+            var interactive = context.ParseResult.GetValueForOption(interactiveOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteConfigAsync(list, get, set, configPath, cancellationToken);
+            await ExecuteConfigAsync(list, get, set, configPath, interactive, cancellationToken);
         });
 
         return command;
@@ -62,9 +72,16 @@ public class ConfigCommand : ICliCommand
         string? get,
         string[]? set,
         string? configPath,
+        bool interactive,
         CancellationToken cancellationToken)
     {
         var configFilePath = GetConfigPath(configPath);
+
+        if (interactive)
+        {
+            await RunInteractiveLlmManagementAsync(configFilePath, cancellationToken);
+            return;
+        }
 
         if (set != null && set.Length > 0)
         {
@@ -85,6 +102,20 @@ public class ConfigCommand : ICliCommand
         }
 
         await ListConfigAsync(configFilePath, cancellationToken);
+    }
+
+    private async Task RunInteractiveLlmManagementAsync(string configPath, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(configPath))
+        {
+            Console.WriteLine($"Config file not found: {configPath}");
+            Console.WriteLine("Run 'nbot onboard' to create a configuration.");
+            return;
+        }
+
+        var config = await ConfigurationLoader.LoadAsync(configPath, cancellationToken);
+        var service = new LlmProfileConfigService();
+        await service.ManageProfilesInteractiveAsync(config, configPath, cancellationToken);
     }
 
     private static string GetConfigPath(string? configPath)

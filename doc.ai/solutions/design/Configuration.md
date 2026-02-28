@@ -4,6 +4,11 @@
 
 **依赖关系**：配置管理层是所有其他层的基础，提供统一的配置加载和管理能力。
 
+> **最近更新**（2026-02-27 同步）：
+> - 默认温度参数从 0.7 调整为 **0.1**（更确定的输出）
+> - MCP 工具超时配置（`ToolTimeout` 属性，默认 30 秒）
+> - Channel `send_progress` 和 `send_tool_hints` 分离配置
+
 ---
 
 ## 模块概览
@@ -134,8 +139,8 @@ public class LlmConfig
     /// <summary>提供商名称</summary>
     public string? Provider { get; set; }
 
-    /// <summary>温度参数</summary>
-    public double Temperature { get; set; } = 0.7;
+    /// <summary>温度参数（默认 0.1，更确定的输出）</summary>
+    public double Temperature { get; set; } = 0.1;
 
     /// <summary>最大 Token 数</summary>
     public int MaxTokens { get; set; } = 4096;
@@ -258,6 +263,30 @@ public class McpConfig
 {
     /// <summary>MCP 服务器配置字典</summary>
     public Dictionary<string, McpServerConfig> Servers { get; set; } = new();
+}
+
+/// <summary>
+/// MCP 服务器配置
+/// </summary>
+public class McpServerConfig
+{
+    /// <summary>启动命令</summary>
+    public string Command { get; set; } = string.Empty;
+    
+    /// <summary>命令参数</summary>
+    public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
+    
+    /// <summary>环境变量</summary>
+    public Dictionary<string, string> Env { get; set; } = new();
+    
+    /// <summary>工作目录</summary>
+    public string? Cwd { get; set; }
+    
+    /// <summary>工具调用超时（秒，默认 30）</summary>
+    public int ToolTimeout { get; set; } = 30;
+    
+    /// <summary>HTTP 自定义 Headers（用于 HTTP 传输）</summary>
+    public Dictionary<string, string>? Headers { get; set; }
 }
 ```
 

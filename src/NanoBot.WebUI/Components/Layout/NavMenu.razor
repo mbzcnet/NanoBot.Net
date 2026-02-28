@@ -1,0 +1,99 @@
+@inject NavigationManager NavigationManager
+@inject ISessionService SessionService
+@inject ISnackbar Snackbar
+@inject ILogger<NavMenu> Logger
+@using NanoBot.WebUI.Services
+@implements IDisposable
+@rendermode InteractiveServer
+
+<MudNavMenu Class="nb-navmenu">
+    <div class="nb-new-session-wrap">
+        <MudButton Variant="Variant.Filled" 
+                   Color="Color.Primary" 
+                   StartIcon="@Icons.Material.Filled.Add"
+                   FullWidth="true"
+                   Class="nb-new-session-btn"
+                   OnClick="CreateNewSession">
+            新建会话
+        </MudButton>
+    </div>
+    
+    <MudDivider Class="my-2" />
+    
+    <MudText Typo="Typo.caption" Class="px-4 py-2 mud-text-secondary nb-session-title">最近会话</MudText>
+    
+    @if (_sessions == null || !_sessions.Any())
+    {
+        <MudText Typo="Typo.body2" Class="px-4 py-2 mud-text-secondary">
+            暂无会话
+        </MudText>
+    }
+    else
+    {
+        @foreach (var session in _sessions)
+        {
+            <MudNavLink Href="@($"/chat/{session.Id}")" 
+                        Icon="@Icons.Material.Filled.Chat"
+                        Match="NavLinkMatch.All">
+                <div class="d-flex align-center justify-space-between" style="width: 100%;">
+                    <MudText Typo="Typo.body2" Style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        @session.Title
+                    </MudText>
+                </div>
+            </MudNavLink>
+        }
+    }
+</MudNavMenu>
+
+@code {
+    private List<SessionInfo>? _sessions;
+    private System.Threading.Timer? _refreshTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSessions();
+        
+        // 定期刷新会话列表
+        _refreshTimer = new System.Threading.Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                await LoadSessions();
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+    }
+
+    private async Task LoadSessions()
+    {
+        _sessions = await SessionService.GetSessionsAsync();
+    }
+
+    private async Task CreateNewSession()
+    {
+        try
+        {
+            Logger.LogInformation("Creating new session...");
+            var session = await SessionService.CreateSessionAsync();
+            Logger.LogInformation("Session created: {SessionId}", session.Id);
+            
+            await LoadSessions();
+            StateHasChanged();
+            
+            Logger.LogInformation("Navigating to /chat/{SessionId}", session.Id);
+            NavigationManager.NavigateTo($"/chat/{session.Id}", forceLoad: false);
+            
+            Snackbar.Add("新会话已创建", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create new session");
+            Snackbar.Add($"创建会话失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+}
