@@ -31,11 +31,21 @@ public class FeishuChannel : ChannelBase
         ["sticker"] = "[sticker]"
     };
 
+    private static readonly HashSet<string> ImageExtensions = new() { ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".tiff", ".tif" };
+    private static readonly HashSet<string> AudioExtensions = new() { ".opus" };
+    private readonly string _mediaDirectory;
+
     public FeishuChannel(FeishuConfig config, IMessageBus bus, ILogger<FeishuChannel> logger)
         : base(bus, logger)
     {
         _config = config;
         _httpClient = new HttpClient();
+        _mediaDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nanobot", "media");
+        
+        if (!Directory.Exists(_mediaDirectory))
+        {
+            Directory.CreateDirectory(_mediaDirectory);
+        }
     }
 
     public override async Task StartAsync(CancellationToken cancellationToken = default)
@@ -188,14 +198,32 @@ public class FeishuChannel : ChannelBase
         var chatType = message.GetProperty("chat_type").GetString() ?? "";
         var msgType = message.GetProperty("msg_type").GetString() ?? "";
 
-        var content = msgType switch
-        {
-            "text" => ExtractTextContent(message),
-            "post" => ExtractPostContent(message),
-            _ => MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]")
-        };
+        string content;
+        var mediaPaths = new List<string>();
 
-        if (string.IsNullOrEmpty(content))
+        if (msgType == "text")
+        {
+            content = ExtractTextContent(message);
+        }
+        else if (msgType == "post")
+        {
+            content = ExtractPostContent(message);
+        }
+        else if (msgType == "image" || msgType == "audio" || msgType == "file" || msgType == "media")
+        {
+            var (filePath, contentText) = await DownloadAndSaveMediaAsync(msgType, message, messageId, cancellationToken);
+            if (filePath != null)
+            {
+                mediaPaths.Add(filePath);
+            }
+            content = contentText;
+        }
+        else
+        {
+            content = MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]");
+        }
+
+        if (string.IsNullOrEmpty(content) && mediaPaths.Count == 0)
             return;
 
         var replyTo = chatType == "group" ? chatId : senderId;
@@ -204,7 +232,7 @@ public class FeishuChannel : ChannelBase
             senderId,
             replyTo,
             content,
-            Array.Empty<string>(),
+            mediaPaths,
             new Dictionary<string, object>
             {
                 ["message_id"] = messageId,
@@ -277,6 +305,105 @@ public class FeishuChannel : ChannelBase
                     }
                 }
             }
+        }
+    }
+
+    private async Task<(string? FilePath, string ContentText)> DownloadAndSaveMediaAsync(
+        string msgType,
+        JsonElement message,
+        string messageId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var contentStr = message.GetProperty("content").GetString() ?? "{}";
+            var contentJson = JsonSerializer.Deserialize<JsonElement>(contentStr);
+
+            string? fileKey = null;
+            string resourceType = msgType;
+
+            if (msgType == "image")
+            {
+                fileKey = contentJson.TryGetProperty("image_key", out var imgKey) ? imgKey.GetString() : null;
+            }
+            else if (msgType == "audio" || msgType == "file" || msgType == "media")
+            {
+                fileKey = contentJson.TryGetProperty("file_key", out var fKey) ? fKey.GetString() : null;
+            }
+
+            if (string.IsNullOrEmpty(fileKey))
+            {
+                return (null, MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]"));
+            }
+
+            var (fileData, fileName) = await DownloadFileAsync(messageId, fileKey, resourceType, cancellationToken);
+
+            if (fileData == null)
+            {
+                return (null, MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]"));
+            }
+
+            if (string.IsNullOrEmpty(fileName))
+            {
+                var ext = msgType switch
+                {
+                    "image" => ".jpg",
+                    "audio" => ".opus",
+                    "media" => ".mp4",
+                    _ => ""
+                };
+                fileName = $"{fileKey[..Math.Min(16, fileKey.Length)]}{ext}";
+            }
+
+            var filePath = Path.Combine(_mediaDirectory, fileName);
+            await File.WriteAllBytesAsync(filePath, fileData, cancellationToken);
+
+            _logger.LogDebug("Downloaded {MsgType} to {FilePath}", msgType, filePath);
+
+            return (filePath, MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]"));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading {MsgType}", msgType);
+            return (null, MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]"));
+        }
+    }
+
+    private async Task<(byte[]? FileData, string? FileName)> DownloadFileAsync(
+        string messageId,
+        string fileKey,
+        string resourceType,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(_accessToken))
+        {
+            _logger.LogWarning("Feishu access token not available for file download");
+            return (null, null);
+        }
+
+        try
+        {
+            var url = $"https://open.feishu.cn/open-apis/im/v1/messages/{messageId}/resources/{fileKey}?type={resourceType}";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Authorization", $"Bearer {_accessToken}");
+
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to download {ResourceType}: status={StatusCode}", resourceType, response.StatusCode);
+                return (null, null);
+            }
+
+            var fileData = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var fileName = response.Content.Headers.ContentDisposition?.FileName?.Trim('"');
+
+            return (fileData, fileName);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading {ResourceType} {FileKey}", resourceType, fileKey);
+            return (null, null);
         }
     }
 }

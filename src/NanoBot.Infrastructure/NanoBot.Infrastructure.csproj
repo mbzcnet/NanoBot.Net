@@ -19,9 +19,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\workspace\**\*.md">
-      <LogicalName>workspace/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
-      <Link>workspace/%(RecursiveDir)%(Filename)%(Extension)</Link>
+    <EmbeddedResource Include="..\templates\**\*.md">
+      <LogicalName>templates/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+      <Link>templates/%(RecursiveDir)%(Filename)%(Extension)</Link>
     </EmbeddedResource>
   </ItemGroup>
 

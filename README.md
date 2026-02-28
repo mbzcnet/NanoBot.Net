@@ -38,6 +38,8 @@
 - **Scheduled Tasks**: Cron-based job scheduling
 - **Heartbeat Service**: Periodic autonomous actions
 - **Skills System**: Loadable skill modules for extended capabilities
+- **Feishu File Download**: Automatic download of images, audio, files, and media from Feishu messages
+- **Tool Hints**: Real-time display of tool call progress during agent execution
 
 ## Installation
 
@@ -402,6 +404,11 @@ nbot gateway
 
 Uses WebSocket long connection — no public IP required.
 
+**Features:**
+- **File Download**: Automatically downloads images, audio files, documents, and media from Feishu messages
+- **File Storage**: Saves downloaded files to `~/.nanobot/media/` directory
+- **Supported Formats**: PNG, JPG, JPEG, GIF, BMP, WebP, ICO, TIFF, OPUS audio, MP4 video, PDF, Office documents, etc.
+
 **1. Create a Feishu bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
 - Create a new app → Enable **Bot** capability
@@ -589,6 +596,49 @@ src/
 | **JSON** | System.Text.Json |
 | **CLI Framework** | System.CommandLine |
 
+## New Features (Latest Release)
+
+### Feishu File Download
+
+NanoBot.Net automatically downloads and saves files from Feishu messages, making them available for agent processing.
+
+**Supported File Types:**
+- **Images**: PNG, JPG, JPEG, GIF, BMP, WebP, ICO, TIFF
+- **Audio**: OPUS format
+- **Documents**: PDF, Word (DOC/DOCX), Excel (XLS/XLSX), PowerPoint (PPT/PPTX)
+- **Media**: MP4 videos and other media files
+
+**How it Works:**
+1. When a Feishu message contains files, NanoBot.Net automatically detects them
+2. Downloads files using Feishu's API endpoints
+3. Saves files to the local `~/.nanobot/media/` directory
+4. Makes file paths available in the message context for agent processing
+
+**Configuration:** No additional configuration required - works automatically with existing Feishu setup.
+
+### Tool Hints
+
+During agent execution, NanoBot.Net provides real-time feedback about tool calls being executed.
+
+**How it Works:**
+1. When the agent decides to use tools, it displays a concise hint like `web_search("query")`
+2. Shows progress during tool execution
+3. Provides immediate feedback about what the agent is currently doing
+
+**Example:**
+```
+Agent: I'm searching for information about AI assistants...
+web_search("AI assistants comparison")
+Agent: Found several relevant results. Based on the information...
+```
+
+**Benefits:**
+- **Transparency**: Users can see what the agent is doing in real-time
+- **Better UX**: Provides feedback during potentially long-running operations
+- **Debugging**: Helps identify when tools are being called and with what parameters
+
+This feature works across all channels and provides a better user experience by showing the agent's thought process and tool usage.
+
 ## Development
 
 ### Prerequisites
@@ -615,6 +665,8 @@ dotnet pack src/NanoBot.Cli/NanoBot.Cli.csproj -c Release
 
 ## Roadmap
 
+- [x] **Feishu File Download**: Automatic download of images, audio, files, and media from Feishu messages ✅
+- [x] **Tool Hints**: Real-time display of tool call progress during agent execution ✅
 - [ ] Multi-modal support (images, voice, video)
 - [ ] Long-term memory enhancements
 - [ ] Better reasoning (multi-step planning)

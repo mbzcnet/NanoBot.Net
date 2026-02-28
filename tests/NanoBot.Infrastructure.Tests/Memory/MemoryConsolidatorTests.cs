@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -47,7 +45,8 @@ public class MemoryConsolidatorTests : IDisposable
             _workspaceMock.Object,
             logger: _loggerMock.Object);
 
-        await consolidator.ConsolidateAsync([], 0);
+        var result = await consolidator.ConsolidateAsync([], 0);
+        Assert.Null(result);
 
         _chatClientMock.Verify(c => c.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
@@ -71,7 +70,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "Hi there!")
         };
 
-        await consolidator.ConsolidateAsync(messages, 0);
+        var newIndex = await consolidator.ConsolidateAsync(messages, 0);
+        Assert.False(newIndex.HasValue);
 
         _chatClientMock.Verify(c => c.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
@@ -97,7 +97,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I'm good!")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 4);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 4);
+        Assert.Null(result);
 
         _chatClientMock.Verify(c => c.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
@@ -108,13 +109,16 @@ public class MemoryConsolidatorTests : IDisposable
     [Fact]
     public async Task ConsolidateAsync_CallsLLM_WhenMessagesNeedConsolidation()
     {
-        var jsonResult = new JsonObject
-        {
-            ["history_entry"] = "[2024-01-15 10:30] User asked about weather.",
-            ["memory_update"] = "User is interested in weather information."
-        };
+        var call = new FunctionCallContent(
+            callId: "call_1",
+            name: "save_memory",
+            arguments: new Dictionary<string, object?>
+            {
+                ["history_entry"] = "[2024-01-15 10:30] User asked about weather.",
+                ["memory_update"] = "User is interested in weather information."
+            });
 
-        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, jsonResult.ToJsonString()));
+        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, [call]));
 
         _chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
@@ -140,7 +144,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.NotNull(result);
 
         _chatClientMock.Verify(c => c.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
@@ -151,13 +156,16 @@ public class MemoryConsolidatorTests : IDisposable
     [Fact]
     public async Task ConsolidateAsync_UpdatesHistoryAndMemory()
     {
-        var jsonResult = new JsonObject
-        {
-            ["history_entry"] = "[2024-01-15 10:30] User asked about weather.",
-            ["memory_update"] = "User is interested in weather information."
-        };
+        var call = new FunctionCallContent(
+            callId: "call_1",
+            name: "save_memory",
+            arguments: new Dictionary<string, object?>
+            {
+                ["history_entry"] = "[2024-01-15 10:30] User asked about weather.",
+                ["memory_update"] = "User is interested in weather information."
+            });
 
-        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, jsonResult.ToJsonString()));
+        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, [call]));
 
         _chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
@@ -183,7 +191,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.NotNull(result);
 
         _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
             It.Is<string>(s => s.Contains("weather")),
@@ -219,7 +228,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.Null(result);
 
         _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
             It.IsAny<string>(),
@@ -229,6 +239,7 @@ public class MemoryConsolidatorTests : IDisposable
     [Fact]
     public async Task ConsolidateAsync_HandlesInvalidJsonResponse()
     {
+        // No tool call => treated as failure / no-op
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "This is not valid JSON"));
 
         _chatClientMock.Setup(c => c.GetResponseAsync(
@@ -255,7 +266,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.Null(result);
 
         _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
             It.IsAny<string>(),
@@ -265,13 +277,16 @@ public class MemoryConsolidatorTests : IDisposable
     [Fact]
     public async Task ConsolidateAsync_ArchiveAll_ProcessesAllMessages()
     {
-        var jsonResult = new JsonObject
-        {
-            ["history_entry"] = "[2024-01-15 10:30] Conversation archived.",
-            ["memory_update"] = "Archived conversation."
-        };
+        var call = new FunctionCallContent(
+            callId: "call_1",
+            name: "save_memory",
+            arguments: new Dictionary<string, object?>
+            {
+                ["history_entry"] = "[2024-01-15 10:30] Conversation archived.",
+                ["memory_update"] = "Archived conversation."
+            });
 
-        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, jsonResult.ToJsonString()));
+        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, [call]));
 
         _chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
@@ -295,7 +310,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "Hi there!")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0, archiveAll: true);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0, archiveAll: true);
+        Assert.NotNull(result);
 
         _chatClientMock.Verify(c => c.GetResponseAsync(
             It.IsAny<IEnumerable<ChatMessage>>(),
@@ -330,7 +346,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.Null(result);
 
         _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
             It.IsAny<string>(),
@@ -340,14 +357,17 @@ public class MemoryConsolidatorTests : IDisposable
     [Fact]
     public async Task ConsolidateAsync_HandlesMarkdownCodeFences()
     {
-        var jsonResult = new JsonObject
-        {
-            ["history_entry"] = "Test entry",
-            ["memory_update"] = "Test update"
-        };
+        // 新实现不解析 code fences；需要 tool call
+        var call = new FunctionCallContent(
+            callId: "call_1",
+            name: "save_memory",
+            arguments: new Dictionary<string, object?>
+            {
+                ["history_entry"] = "Test entry",
+                ["memory_update"] = "Test update"
+            });
 
-        var responseWithFences = new ChatResponse(new ChatMessage(ChatRole.Assistant, 
-            $"```json\n{jsonResult.ToJsonString()}\n```"));
+        var responseWithFences = new ChatResponse(new ChatMessage(ChatRole.Assistant, [call]));
 
         _chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
@@ -373,7 +393,8 @@ public class MemoryConsolidatorTests : IDisposable
             new(ChatRole.Assistant, "I don't have access to weather data.")
         };
 
-        await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
+        Assert.NotNull(result);
 
         _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
             It.IsAny<string>(),

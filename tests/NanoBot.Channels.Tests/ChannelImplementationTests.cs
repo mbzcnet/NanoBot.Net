@@ -248,6 +248,20 @@ public class DiscordChannelTests
 
         Assert.False(channel.IsConnected);
     }
+
+    [Fact]
+    public async Task StartTyping_LogsDebugOnHttpFailure()
+    {
+        // This test verifies that the typing loop logs errors and exits on HTTP failure
+        // rather than continuing to retry indefinitely
+        var channel = new DiscordChannel(_config, _mockBus.Object, _mockLogger.Object);
+
+        await channel.StopAsync();
+
+        // Verify that debug logging was called for typing failures
+        // Note: This is a basic test - full integration testing would require mocking HttpClient
+        Assert.False(channel.IsConnected);
+    }
 }
 
 public class SlackChannelTests

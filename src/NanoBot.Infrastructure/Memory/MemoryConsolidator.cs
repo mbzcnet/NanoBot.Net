@@ -1,6 +1,4 @@
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Memory;
@@ -30,7 +28,7 @@ public class MemoryConsolidator
         _logger = logger;
     }
 
-    public async Task ConsolidateAsync(
+    public async Task<int?> ConsolidateAsync(
         IList<ChatMessage> messages,
         int lastConsolidatedIndex,
         bool archiveAll = false,
@@ -39,7 +37,7 @@ public class MemoryConsolidator
         if (messages == null || messages.Count == 0)
         {
             _logger?.LogDebug("No messages to consolidate");
-            return;
+            return null;
         }
 
         var keepCount = archiveAll ? 0 : _memoryWindow / 2;
@@ -49,14 +47,14 @@ public class MemoryConsolidator
             if (messages.Count <= keepCount)
             {
                 _logger?.LogDebug("No consolidation needed (messages={Count}, keep={KeepCount})", messages.Count, keepCount);
-                return;
+                return null;
             }
 
             var messagesToProcess = messages.Count - lastConsolidatedIndex;
             if (messagesToProcess <= 0)
             {
                 _logger?.LogDebug("No new messages to consolidate (lastConsolidated={Index}, total={Total})", lastConsolidatedIndex, messages.Count);
-                return;
+                return null;
             }
         }
 
@@ -65,13 +63,13 @@ public class MemoryConsolidator
         
         if (startIndex >= endIndex)
         {
-            return;
+            return null;
         }
 
         var oldMessages = messages.Skip(startIndex).Take(endIndex - startIndex).ToList();
         if (oldMessages.Count == 0)
         {
-            return;
+            return null;
         }
 
         _logger?.LogInformation("Memory consolidation started: {Total} total, {ToProcess} to consolidate, {Keep} keep",
@@ -82,64 +80,58 @@ public class MemoryConsolidator
 
         var prompt = BuildConsolidationPrompt(currentMemory, conversation);
 
+        var saveMemoryTool = AIFunctionFactory.Create(
+            (string history_entry, string memory_update) => string.Empty,
+            new AIFunctionFactoryOptions
+            {
+                Name = "save_memory",
+                Description = "Save the memory consolidation result to persistent storage."
+            });
+
         try
         {
             var response = await _chatClient.GetResponseAsync(
                 [
-                    new ChatMessage(ChatRole.System, "You are a memory consolidation agent. Respond only with valid JSON."),
+                    new ChatMessage(ChatRole.System, "You are a memory consolidation agent. Call the save_memory tool with your consolidation of the conversation."),
                     new ChatMessage(ChatRole.User, prompt)
                 ],
+                options: new ChatOptions { Tools = [saveMemoryTool] },
                 cancellationToken: cancellationToken);
 
-            var text = response.Messages.FirstOrDefault()?.Text?.Trim();
-            if (string.IsNullOrEmpty(text))
+            var call = response.Messages
+                .SelectMany(m => m.Contents)
+                .OfType<FunctionCallContent>()
+                .FirstOrDefault(fc => string.Equals(fc.Name, "save_memory", StringComparison.OrdinalIgnoreCase));
+
+            if (call?.Arguments is not IDictionary<string, object?> args)
             {
-                _logger?.LogWarning("Memory consolidation: LLM returned empty response, skipping");
-                return;
+                _logger?.LogWarning("Memory consolidation: LLM did not call save_memory, skipping");
+                return null;
             }
 
-            text = CleanJsonResponse(text);
-            
-            JsonObject? result;
-            try
+            var historyEntry = args.TryGetValue("history_entry", out var he) ? he?.ToString() : null;
+            var memoryUpdate = args.TryGetValue("memory_update", out var mu) ? mu?.ToString() : null;
+
+            if (!string.IsNullOrWhiteSpace(historyEntry))
             {
-                result = JsonNode.Parse(text) as JsonObject;
-            }
-            catch (JsonException ex)
-            {
-                _logger?.LogWarning(ex, "Memory consolidation: failed to parse JSON response: {Response}", text?[..Math.Min(200, text.Length)]);
-                return;
+                await _memoryStore.AppendHistoryAsync(historyEntry!, cancellationToken);
             }
 
-            if (result == null)
+            if (!string.IsNullOrWhiteSpace(memoryUpdate) && memoryUpdate != currentMemory)
             {
-                _logger?.LogWarning("Memory consolidation: unexpected response type, skipping");
-                return;
-            }
-
-            if (result.TryGetPropertyValue("history_entry", out var historyEntry) && historyEntry != null)
-            {
-                var entryText = historyEntry.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(entryText))
-                {
-                    await _memoryStore.AppendHistoryAsync(entryText, cancellationToken);
-                }
-            }
-
-            if (result.TryGetPropertyValue("memory_update", out var memoryUpdate) && memoryUpdate != null)
-            {
-                var updateText = memoryUpdate.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(updateText) && updateText != currentMemory)
-                {
-                    await WriteMemoryAsync(updateText, cancellationToken);
-                }
+                await WriteMemoryAsync(memoryUpdate!, cancellationToken);
             }
 
             _logger?.LogInformation("Memory consolidation done: {Total} messages", messages.Count);
+
+            // 与原项目一致：archive_all 时 last_consolidated=0；否则 = total - keepCount
+            var newLastConsolidated = archiveAll ? 0 : messages.Count - keepCount;
+            return newLastConsolidated;
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Memory consolidation failed");
+            return null;
         }
     }
 
@@ -153,7 +145,7 @@ public class MemoryConsolidator
                 continue;
             }
 
-            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm");
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             var role = message.Role == ChatRole.User ? "USER" : "ASSISTANT";
             sb.AppendLine($"[{timestamp}] {role}: {message.Text}");
         }
@@ -163,33 +155,18 @@ public class MemoryConsolidator
     private static string BuildConsolidationPrompt(string currentMemory, string conversation)
     {
         return $""""
-You are a memory consolidation agent. Process this conversation and return a JSON object with exactly two keys:
+Process this conversation and call the save_memory tool with your consolidation.
 
-1. "history_entry": A paragraph (2-5 sentences) summarizing the key events/decisions/topics. Start with a timestamp like [YYYY-MM-DD HH:MM]. Include enough detail to be useful when found by grep search later.
-
-2. "memory_update": The updated long-term memory content. Add any new facts: user location, preferences, personal info, habits, project context, technical decisions, tools/services used. If nothing new, return the existing content unchanged.
+Arguments:
+- history_entry: A paragraph (2-5 sentences) summarizing key events/decisions/topics. Start with [YYYY-MM-DD HH:MM]. Include detail useful for grep search.
+- memory_update: Full updated long-term memory as markdown. Include all existing facts plus new ones. Return unchanged if nothing new.
 
 ## Current Long-term Memory
 {currentMemory ?? "(empty)"}
 
 ## Conversation to Process
 {conversation}
-
-Respond with ONLY valid JSON, no markdown fences.
 """";
-    }
-
-    private static string CleanJsonResponse(string text)
-    {
-        if (text.StartsWith("```"))
-        {
-            var lines = text.Split('\n');
-            if (lines.Length > 2)
-            {
-                text = string.Join('\n', lines.Skip(1).SkipLast(1));
-            }
-        }
-        return text.Trim();
     }
 
     private async Task WriteMemoryAsync(string content, CancellationToken cancellationToken)

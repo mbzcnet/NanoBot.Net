@@ -65,7 +65,7 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
             foreach (var message in context.ResponseMessages)
             {
                 var text = message.Text ?? string.Empty;
-                sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {text}");
+                sb.AppendLine($"[{DateTime.Now:yyyy-MM-dd HH:mm}] {message.Role.ToString().ToLowerInvariant()}: {text}");
             }
         }
 

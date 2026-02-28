@@ -116,6 +116,77 @@ public class MessageSanitizerTests
 
         Assert.Equal("You are a helpful assistant.", result[0].Text);
     }
+
+    [Fact]
+    public void SanitizeMessages_EmptyTextWithoutToolCalls_ReplacedWithPlaceholder()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.User, "")
+        };
+
+        var result = MessageSanitizer.SanitizeMessages(messages);
+
+        Assert.Equal("(empty)", result[0].Text);
+    }
+
+    [Fact]
+    public void SanitizeMessages_EmptyTextAssistantWithToolCalls_AllowsNull()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.Assistant, "")
+            {
+                Contents = { new FunctionCallContent("test", "call123", new Dictionary<string, object?>()) }
+            }
+        };
+
+        var result = MessageSanitizer.SanitizeMessages(messages);
+
+        Assert.NotNull(result[0].Text);
+    }
+
+    [Fact]
+    public void SanitizeMessages_PreservesFunctionCallsWithEmptyText()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.Assistant, "")
+            {
+                Contents = 
+                { 
+                    new FunctionCallContent("search", "call123", new Dictionary<string, object?> { ["query"] = "test" })
+                }
+            }
+        };
+
+        var result = MessageSanitizer.SanitizeMessages(messages);
+
+        Assert.Single(result[0].Contents.OfType<FunctionCallContent>());
+        Assert.NotNull(result[0].Text);
+    }
+
+    [Fact]
+    public void SanitizeMessages_PreservesMultipleFunctionCalls()
+    {
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.Assistant, "I'll help with that")
+            {
+                Contents = 
+                { 
+                    new FunctionCallContent("search", "call123", new Dictionary<string, object?> { ["query"] = "test" }),
+                    new FunctionCallContent("read_file", "call456", new Dictionary<string, object?> { ["path"] = "file.txt" })
+                }
+            }
+        };
+
+        var result = MessageSanitizer.SanitizeMessages(messages);
+
+        var functionCalls = result[0].Contents.OfType<FunctionCallContent>().ToList();
+        Assert.Equal(2, functionCalls.Count);
+        Assert.Equal("I'll help with that", result[0].Text);
+    }
 }
 
 public class MessageSanitizerStripThinkTagsTests

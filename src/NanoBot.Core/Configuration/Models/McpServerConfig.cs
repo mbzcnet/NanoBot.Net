@@ -11,4 +11,6 @@ public class McpServerConfig
     public string? Cwd { get; set; }
 
     public Dictionary<string, string>? Headers { get; set; }
+
+    public int ToolTimeout { get; set; } = 30;
 }

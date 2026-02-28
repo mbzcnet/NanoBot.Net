@@ -106,13 +106,8 @@ public class MemoryStore : IMemoryStore
                 Directory.CreateDirectory(directory);
             }
 
-            var sb = new StringBuilder();
-            sb.AppendLine();
-            sb.Append($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] ");
-            sb.AppendLine(entry.Trim());
-            sb.AppendLine();
-
-            await File.AppendAllTextAsync(historyPath, sb.ToString(), cancellationToken);
+            var text = entry.TrimEnd();
+            await File.AppendAllTextAsync(historyPath, text + "\n\n", cancellationToken);
             _logger?.LogDebug("History appended: {Path}", historyPath);
         }
         finally

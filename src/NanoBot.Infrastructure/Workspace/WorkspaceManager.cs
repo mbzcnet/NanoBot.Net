@@ -78,7 +78,7 @@ public class WorkspaceManager : IWorkspaceManager
 
         foreach (var resourceName in workspaceResources)
         {
-            var relativePath = ConvertResourceNameToRelativePath(resourceName, "workspace");
+            var relativePath = ConvertResourceNameToRelativePath(resourceName, "templates");
             var targetPath = Path.Combine(GetWorkspacePath(), relativePath);
 
             if (File.Exists(targetPath))

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Workspace;
@@ -7,10 +8,11 @@ namespace NanoBot.Infrastructure.Heartbeat;
 public class HeartbeatService : IHeartbeatService, IDisposable
 {
     private const int DefaultIntervalSeconds = 30 * 60;
-    private const string HeartbeatOkToken = "HEARTBEATOK";
-    private const string HeartbeatPrompt = """Read HEARTBEAT.md in your workspace (if it exists). Follow any instructions or tasks listed there. If nothing needs attention, reply with just: HEARTBEAT_OK""";
+
+    private const string DecideSystemPrompt = "You are a heartbeat agent. Call the heartbeat tool to report your decision.";
 
     private readonly IWorkspaceManager _workspaceManager;
+    private readonly IChatClient? _chatClient;
     private readonly Func<string, Task<string>>? _onHeartbeat;
     private readonly ILogger<HeartbeatService> _logger;
     private readonly int _intervalSeconds;
@@ -25,12 +27,14 @@ public class HeartbeatService : IHeartbeatService, IDisposable
 
     public HeartbeatService(
         IWorkspaceManager workspaceManager,
+        IChatClient? chatClient,
         ILogger<HeartbeatService> logger,
         Func<string, Task<string>>? onHeartbeat = null,
         int intervalSeconds = DefaultIntervalSeconds,
         bool enabled = true)
     {
         _workspaceManager = workspaceManager;
+        _chatClient = chatClient;
         _logger = logger;
         _onHeartbeat = onHeartbeat;
         _intervalSeconds = intervalSeconds;
@@ -115,8 +119,6 @@ public class HeartbeatService : IHeartbeatService, IDisposable
 
     public async Task<string?> TriggerNowAsync()
     {
-        if (_onHeartbeat == null) return null;
-
         return await ExecuteHeartbeatAsync();
     }
 
@@ -187,25 +189,41 @@ public class HeartbeatService : IHeartbeatService, IDisposable
 
     private async Task<string?> ExecuteHeartbeatAsync()
     {
-        if (_onHeartbeat == null) return null;
-
         string? response = null;
         string? error = null;
         bool success = false;
 
         try
         {
-            response = await _onHeartbeat(HeartbeatPrompt);
-            success = true;
-
-            var normalizedResponse = response.Replace("_", "").ToUpperInvariant();
-            if (normalizedResponse.Contains(HeartbeatOkToken.Replace("_", "")))
+            var content = await ReadHeartbeatFileAsync();
+            if (IsHeartbeatEmpty(content))
             {
-                _logger.LogInformation("Heartbeat: OK (no action needed)");
+                _logger.LogDebug("Heartbeat: no tasks (HEARTBEAT.md empty)");
+                return null;
+            }
+
+            var (action, tasks) = await DecideAsync(content!, CancellationToken.None);
+
+            if (!string.Equals(action, "run", StringComparison.OrdinalIgnoreCase))
+            {
+                response = "skip";
+                success = true;
+                _logger.LogInformation("Heartbeat: OK (nothing to report)");
             }
             else
             {
-                _logger.LogInformation("Heartbeat: completed task");
+                if (_onHeartbeat == null)
+                {
+                    response = tasks;
+                    success = true;
+                    _logger.LogWarning("Heartbeat: tasks found but onHeartbeat callback not provided");
+                }
+                else
+                {
+                    response = await _onHeartbeat(tasks);
+                    success = true;
+                    _logger.LogInformation("Heartbeat: completed task");
+                }
             }
         }
         catch (Exception ex)
@@ -216,12 +234,50 @@ public class HeartbeatService : IHeartbeatService, IDisposable
 
         HeartbeatExecuted?.Invoke(this, new HeartbeatEventArgs
         {
-            Prompt = HeartbeatPrompt,
+            Prompt = "HEARTBEAT",
             Response = response ?? string.Empty,
             Success = success,
             Error = error
         });
 
         return response;
+    }
+
+    private async Task<(string Action, string Tasks)> DecideAsync(string heartbeatMarkdown, CancellationToken cancellationToken)
+    {
+        if (_chatClient == null)
+        {
+            return ("skip", string.Empty);
+        }
+
+        var heartbeatTool = AIFunctionFactory.Create(
+            (string action, string? tasks) => "",
+            new AIFunctionFactoryOptions
+            {
+                Name = "heartbeat",
+                Description = "Report heartbeat decision after reviewing tasks. action=skip|run; tasks is required for run."
+            });
+
+        var response = await _chatClient.GetResponseAsync(
+            [
+                new ChatMessage(ChatRole.System, DecideSystemPrompt),
+                new ChatMessage(ChatRole.User, $"Review the following HEARTBEAT.md and decide whether there are active tasks.\n\n{heartbeatMarkdown}")
+            ],
+            options: new ChatOptions { Tools = [heartbeatTool] },
+            cancellationToken: cancellationToken);
+
+        var call = response.Messages
+            .SelectMany(m => m.Contents)
+            .OfType<FunctionCallContent>()
+            .FirstOrDefault(fc => string.Equals(fc.Name, "heartbeat", StringComparison.OrdinalIgnoreCase));
+
+        if (call?.Arguments is not IDictionary<string, object?> args)
+        {
+            return ("skip", string.Empty);
+        }
+
+        var action = args.TryGetValue("action", out var a) ? a?.ToString() ?? "skip" : "skip";
+        var tasks = args.TryGetValue("tasks", out var t) ? t?.ToString() ?? string.Empty : string.Empty;
+        return (action, tasks);
     }
 }

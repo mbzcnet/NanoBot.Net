@@ -340,7 +340,15 @@ public class DiscordChannel : ChannelBase
                 {
                     await _httpClient.PostAsync(url, null, cts.Token);
                 }
-                catch { }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Discord typing indicator failed for {ChannelId}", channelId);
+                    return;
+                }
                 await Task.Delay(8000, cts.Token);
             }
         }, cts.Token);

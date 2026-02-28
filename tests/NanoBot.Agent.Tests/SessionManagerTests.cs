@@ -63,7 +63,7 @@ public class SessionManagerTests : IDisposable
 
         await manager.SaveSessionAsync(session, "test:save");
 
-        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_save.json");
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_save.jsonl");
         Assert.True(File.Exists(sessionFile));
     }
 
@@ -76,7 +76,7 @@ public class SessionManagerTests : IDisposable
 
         await manager.ClearSessionAsync("test:clear");
 
-        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_clear.json");
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_clear.jsonl");
         Assert.False(File.Exists(sessionFile));
     }
 

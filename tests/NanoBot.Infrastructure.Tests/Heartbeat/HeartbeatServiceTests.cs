@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.AI;
 using Moq;
 using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Workspace;
@@ -12,6 +13,32 @@ public class HeartbeatServiceTests : IDisposable
     private readonly Mock<IWorkspaceManager> _workspaceManagerMock;
     private readonly ILogger<HeartbeatService> _logger;
     private readonly string _testHeartbeatPath;
+
+    private static IChatClient CreateChatClientThatRuns(string tasks)
+    {
+        var chatClient = new Mock<IChatClient>();
+
+        chatClient
+            .Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                var call = new FunctionCallContent(
+                    callId: "call_1",
+                    name: "heartbeat",
+                    arguments: new Dictionary<string, object?>
+                    {
+                        ["action"] = "run",
+                        ["tasks"] = tasks
+                    });
+
+                return new ChatResponse(new ChatMessage(ChatRole.Assistant, [call]));
+            });
+
+        return chatClient.Object;
+    }
 
     public HeartbeatServiceTests()
     {
@@ -32,7 +59,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public void Constructor_CreatesInstance()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
         Assert.NotNull(service);
     }
 
@@ -41,6 +68,7 @@ public class HeartbeatServiceTests : IDisposable
     {
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient: null,
             _logger,
             enabled: true);
 
@@ -57,6 +85,7 @@ public class HeartbeatServiceTests : IDisposable
     {
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient: null,
             _logger,
             enabled: false);
 
@@ -69,7 +98,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public async Task StopAsync_StopsService()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
         await service.StartAsync();
         await service.StopAsync();
 
@@ -80,7 +109,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public void AddJob_ReturnsJobWithId()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
 
         var definition = new HeartbeatDefinition
         {
@@ -100,7 +129,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public void RemoveJob_RemovesFromList()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
 
         var definition = new HeartbeatDefinition
         {
@@ -119,7 +148,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public void ListJobs_ReturnsAllJobs()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
 
         service.AddJob(new HeartbeatDefinition { Name = "Job 1", IntervalSeconds = 60, Message = "Test" });
         service.AddJob(new HeartbeatDefinition { Name = "Job 2", IntervalSeconds = 120, Message = "Test" });
@@ -131,7 +160,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public void GetStatus_ReturnsCorrectCounts()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
 
         service.AddJob(new HeartbeatDefinition { Name = "Job 1", IntervalSeconds = 60, Message = "Test" });
 
@@ -143,8 +172,10 @@ public class HeartbeatServiceTests : IDisposable
     public async Task TriggerNowAsync_WithCallback_ReturnsResponse()
     {
         var expectedResponse = "HEARTBEAT_OK";
+        var chatClient = CreateChatClientThatRuns("- [ ] Test task");
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient,
             _logger,
             onHeartbeat: prompt => Task.FromResult(expectedResponse));
 
@@ -159,7 +190,7 @@ public class HeartbeatServiceTests : IDisposable
     [Fact]
     public async Task TriggerNowAsync_WithoutCallback_ReturnsNull()
     {
-        var service = new HeartbeatService(_workspaceManagerMock.Object, _logger);
+        var service = new HeartbeatService(_workspaceManagerMock.Object, chatClient: null, _logger);
 
         var response = await service.TriggerNowAsync();
 
@@ -170,8 +201,10 @@ public class HeartbeatServiceTests : IDisposable
     public async Task HeartbeatExecuted_EventIsRaised()
     {
         var tcs = new TaskCompletionSource<HeartbeatEventArgs>();
+        var chatClient = CreateChatClientThatRuns("- [ ] Test task");
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient,
             _logger,
             onHeartbeat: prompt => Task.FromResult("HEARTBEAT_OK"));
 
@@ -193,6 +226,7 @@ public class HeartbeatServiceTests : IDisposable
         var executed = false;
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient: null,
             _logger,
             intervalSeconds: 1,
             onHeartbeat: prompt =>
@@ -218,6 +252,7 @@ public class HeartbeatServiceTests : IDisposable
         var executed = false;
         var service = new HeartbeatService(
             _workspaceManagerMock.Object,
+            chatClient: null,
             _logger,
             intervalSeconds: 1,
             onHeartbeat: prompt =>

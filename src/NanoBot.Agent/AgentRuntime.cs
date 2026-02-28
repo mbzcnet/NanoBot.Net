@@ -173,13 +173,32 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             {
                 _logger?.LogInformation("[TIMING] Subsequent chunk: {ElapsedMs}ms, text: {Text}", swInner.ElapsedMilliseconds, update.Text?.Length > 50 ? update.Text[..50] + "..." : update.Text);
             }
+            
+            // Check for tool calls and send tool hint if text is empty
+            var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
+            if (functionCalls.Any() && string.IsNullOrWhiteSpace(update.Text))
+            {
+                var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
+                if (!string.IsNullOrEmpty(toolHint))
+                {
+                    // Create a tool hint update with metadata
+                    var toolHintUpdate = new AgentResponseUpdate
+                    {
+                        Role = ChatRole.Assistant,
+                        Contents = { new TextContent(toolHint) }
+                    };
+                    toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
+                    yield return toolHintUpdate;
+                }
+            }
+            
             swInner.Restart(); // Restart for next chunk
             yield return update;
         }
         sw.Stop();
         _logger?.LogInformation("[TIMING] RunStreamingAsync completed: {ElapsedMs}ms", sw.ElapsedMilliseconds);
         
-        _ = TryConsolidateMemoryAsync(session, CancellationToken.None).ContinueWith(t => 
+        _ = TryConsolidateMemoryAsync(session, sessionKey, CancellationToken.None).ContinueWith(t => 
         {
             if (t.IsFaulted)
                 _logger?.LogWarning(t.Exception, "Background memory consolidation failed");
@@ -253,7 +272,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
 
-        await TryConsolidateMemoryAsync(session, cancellationToken);
+        await TryConsolidateMemoryAsync(session, sessionKey, cancellationToken);
 
         return new OutboundMessage
         {
@@ -382,7 +401,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         return messages;
     }
 
-    private async Task TryConsolidateMemoryAsync(AgentSession session, CancellationToken cancellationToken)
+    private async Task TryConsolidateMemoryAsync(AgentSession session, string sessionKey, CancellationToken cancellationToken)
     {
         if (_memoryStore == null)
             return;
@@ -410,7 +429,14 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 _memoryWindow);
 
             _logger?.LogInformation("Starting memory consolidation for {Count} messages", messages.Count);
-            await consolidator.ConsolidateAsync(messages, _memoryWindow, archiveAll: false, cancellationToken);
+            var lastConsolidated = _sessionManager.GetLastConsolidated(sessionKey);
+            var newLastConsolidated = await consolidator.ConsolidateAsync(messages, lastConsolidated, archiveAll: false, cancellationToken);
+
+            if (newLastConsolidated.HasValue)
+            {
+                _sessionManager.SetLastConsolidated(sessionKey, newLastConsolidated.Value);
+                await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
+            }
             _logger?.LogInformation("Memory consolidation completed");
         }
         catch (Exception ex)

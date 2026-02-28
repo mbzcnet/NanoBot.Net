@@ -37,7 +37,7 @@ public class EmbeddedResourceLoaderTests
         var resources = _loader.GetWorkspaceResourceNames();
 
         Assert.NotEmpty(resources);
-        Assert.All(resources, r => Assert.StartsWith("workspace/", r));
+        Assert.All(resources, r => Assert.StartsWith("templates/", r));
     }
 
     [Fact]

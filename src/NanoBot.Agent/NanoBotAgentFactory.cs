@@ -32,16 +32,6 @@ public static class NanoBotAgentFactory
 
         var providers = new List<ChatHistoryProvider>();
 
-        if (memoryStore != null)
-        {
-            providers.Add(new MemoryConsolidationChatHistoryProvider(
-                chatClient,
-                memoryStore,
-                workspace,
-                memoryWindow,
-                loggerFactory?.CreateLogger<MemoryConsolidationChatHistoryProvider>()));
-        }
-
         var compositeProvider = new CompositeChatHistoryProvider(providers);
 
         var aiContextProviders = new List<AIContextProvider>

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Bus;
@@ -80,10 +81,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IHeartbeatService>(sp =>
         {
             var workspaceManager = sp.GetRequiredService<IWorkspaceManager>();
+            var chatClient = sp.GetService<IChatClient>();
             var logger = sp.GetRequiredService<ILogger<HeartbeatService>>();
             var cfg = config ?? sp.GetService<HeartbeatConfig>() ?? new HeartbeatConfig();
             return new HeartbeatService(
                 workspaceManager,
+                chatClient,
                 logger,
                 onHeartbeat,
                 cfg.IntervalSeconds,

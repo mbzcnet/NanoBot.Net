@@ -102,7 +102,7 @@ public class SessionCommand : ICliCommand
             return Task.CompletedTask;
         }
 
-        var sessionFiles = Directory.GetFiles(sessionsPath, "*.json");
+        var sessionFiles = Directory.GetFiles(sessionsPath, "*.jsonl");
 
         if (sessionFiles.Length == 0)
         {
@@ -130,7 +130,7 @@ public class SessionCommand : ICliCommand
 
     private static Task ClearSessionAsync(string sessionsPath, string sessionId)
     {
-        var sessionFile = Path.Combine(sessionsPath, $"{sessionId}.json");
+        var sessionFile = Path.Combine(sessionsPath, $"{sessionId}.jsonl");
 
         if (!File.Exists(sessionFile))
         {
@@ -151,7 +151,7 @@ public class SessionCommand : ICliCommand
             return Task.CompletedTask;
         }
 
-        var sessionFiles = Directory.GetFiles(sessionsPath, "*.json");
+        var sessionFiles = Directory.GetFiles(sessionsPath, "*.jsonl");
         var count = 0;
 
         foreach (var file in sessionFiles)
@@ -166,7 +166,7 @@ public class SessionCommand : ICliCommand
 
     private static async Task ExportSessionAsync(string sessionsPath, string sessionId)
     {
-        var sessionFile = Path.Combine(sessionsPath, $"{sessionId}.json");
+        var sessionFile = Path.Combine(sessionsPath, $"{sessionId}.jsonl");
 
         if (!File.Exists(sessionFile))
         {
@@ -175,7 +175,7 @@ public class SessionCommand : ICliCommand
         }
 
         var content = await File.ReadAllTextAsync(sessionFile);
-        var exportPath = $"{sessionId}_export.json";
+        var exportPath = $"{sessionId}_export.jsonl";
 
         await File.WriteAllTextAsync(exportPath, content);
         Console.WriteLine($"✓ Session exported to: {exportPath}");

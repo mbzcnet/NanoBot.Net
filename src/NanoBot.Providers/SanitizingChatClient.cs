@@ -143,16 +143,25 @@ public static class MessageSanitizer
         var text = msg.Text;
         var role = msg.Role;
 
-        if (role == ChatRole.Assistant)
+        // Handle empty text content
+        if (string.IsNullOrEmpty(text))
         {
-            if (string.IsNullOrEmpty(text) && !HasFunctionCalls(msg))
+            if (role == ChatRole.Assistant && HasFunctionCalls(msg))
             {
+                // Assistant with tool calls can have null/empty text
                 text = string.Empty;
+            }
+            else
+            {
+                // Replace empty content with placeholder to avoid API 400 errors
+                text = "(empty)";
             }
         }
 
-        var cleanMessage = new ChatMessage(role, text ?? string.Empty);
+        var cleanMessage = new ChatMessage(role, text);
 
+        // Add non-text content from original message
+        // Note: ChatMessage constructor already adds text as TextContent, so we skip TextContent here
         foreach (var content in msg.Contents)
         {
             if (content is FunctionCallContent fcc)
@@ -162,6 +171,11 @@ public static class MessageSanitizer
             else if (content is FunctionResultContent frc)
             {
                 cleanMessage.Contents.Add(frc);
+            }
+            else if (content is not TextContent)
+            {
+                // Keep other non-text content types
+                cleanMessage.Contents.Add(content);
             }
         }
 

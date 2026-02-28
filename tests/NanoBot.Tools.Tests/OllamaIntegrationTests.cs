@@ -51,9 +51,20 @@ public class OllamaIntegrationTests : IDisposable
         }
     }
 
+    private static bool EnsureEnabled()
+    {
+        var enabled = string.Equals(
+            Environment.GetEnvironmentVariable("NANOBOT_OLLAMA_INTEGRATION"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+
+        return enabled;
+    }
+
     [Fact]
     public async Task FileTools_WithRealLLM_CanReadAndWriteFiles()
     {
+        if (!EnsureEnabled()) return;
         var testFile = Path.Combine(_testDirectory, "test.txt");
         await File.WriteAllTextAsync(testFile, "Hello from Ollama test");
 
@@ -77,6 +88,7 @@ public class OllamaIntegrationTests : IDisposable
     [Fact]
     public async Task FileTools_WithRealLLM_CanListDirectory()
     {
+        if (!EnsureEnabled()) return;
         await File.WriteAllTextAsync(Path.Combine(_testDirectory, "file1.txt"), "content1");
         await File.WriteAllTextAsync(Path.Combine(_testDirectory, "file2.txt"), "content2");
         Directory.CreateDirectory(Path.Combine(_testDirectory, "subdir"));
@@ -94,6 +106,7 @@ public class OllamaIntegrationTests : IDisposable
     [Fact]
     public async Task ShellTools_WithRealLLM_CanExecuteCommand()
     {
+        if (!EnsureEnabled()) return;
         var execTool = ShellTools.CreateExecTool((ShellToolOptions?)null);
 
         var response = await _chatClient.GetResponseAsync(
@@ -107,6 +120,7 @@ public class OllamaIntegrationTests : IDisposable
     [Fact]
     public async Task SpawnTool_WithRealLLM_CanSpawnSubAgent()
     {
+        if (!EnsureEnabled()) return;
         var mockWorkspace = new Mock<IWorkspaceManager>();
         mockWorkspace.Setup(w => w.GetWorkspacePath()).Returns(_testDirectory);
         mockWorkspace.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(_testDirectory, "skills"));

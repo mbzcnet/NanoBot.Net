@@ -23,4 +23,5 @@ public record McpServerConfig
     public IReadOnlyDictionary<string, string> Env { get; init; } = new Dictionary<string, string>();
     public string? Cwd { get; init; }
     public string? Url { get; init; }
+    public int ToolTimeout { get; init; } = 30;
 }

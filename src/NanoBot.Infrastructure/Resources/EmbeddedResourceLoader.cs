@@ -19,7 +19,7 @@ public class EmbeddedResourceLoader : IEmbeddedResourceLoader
     public IReadOnlyList<string> GetWorkspaceResourceNames()
     {
         return _resourceNames
-            .Where(n => n.StartsWith("workspace/"))
+            .Where(n => n.StartsWith("templates/"))
             .ToList()
             .AsReadOnly();
     }
@@ -68,7 +68,7 @@ public class EmbeddedResourceLoader : IEmbeddedResourceLoader
 
         foreach (var resourceName in workspaceResources)
         {
-            await ExtractResourceAsync(resourceName, targetDirectory, "workspace", cancellationToken);
+            await ExtractResourceAsync(resourceName, targetDirectory, "templates", cancellationToken);
         }
     }
 
