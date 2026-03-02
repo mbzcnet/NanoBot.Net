@@ -8,6 +8,7 @@ COPY src/NanoBot.Tools/NanoBot.Tools.csproj NanoBot.Tools/
 COPY src/NanoBot.Channels/NanoBot.Channels.csproj NanoBot.Channels/
 COPY src/NanoBot.Agent/NanoBot.Agent.csproj NanoBot.Agent/
 COPY src/NanoBot.Cli/NanoBot.Cli.csproj NanoBot.Cli/
+COPY src/NanoBot.WebUI/NanoBot.WebUI.csproj NanoBot.WebUI/
 
 RUN dotnet restore NanoBot.Cli/NanoBot.Cli.csproj
 
@@ -26,7 +27,9 @@ COPY --from=build /app/publish .
 
 RUN mkdir -p /root/.nanobot
 
+# 暴露CLI端口和WebUI端口
 EXPOSE 18790
+EXPOSE 18888
 
 ENTRYPOINT ["dotnet", "NanoBot.Cli.dll"]
 CMD ["status"]

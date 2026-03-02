@@ -33,7 +33,9 @@ set -e
 
 REPO="mbzcnet/NanoBot.Net"
 PROJECT="src/NanoBot.Cli/NanoBot.Cli.csproj"
+WEBUI_PROJECT="src/NanoBot.WebUI/NanoBot.WebUI.csproj"
 OUTPUT_DIR="dist"
+WEBUI_DIR_NAME="webui"
 FORMULA_FILE="install/homebrew-nanobot/Formula/nbot.rb"
 BINARY_NAME="nbot"
 
@@ -232,6 +234,15 @@ build_all_platforms() {
             -p:PublishSingleFile=true \
             -p:PublishTrimmed=true \
             -o "$OUTPUT_DIR/$PLATFORM"
+
+        local webui_output="$OUTPUT_DIR/$PLATFORM/$WEBUI_DIR_NAME"
+        info "Publishing WebUI for $PLATFORM into $webui_output..."
+        rm -rf "$webui_output"
+        dotnet publish "$WEBUI_PROJECT" \
+            -c Release \
+            -r "$PLATFORM" \
+            --self-contained true \
+            -o "$webui_output"
         
         cd "$OUTPUT_DIR"
         if [[ "$PLATFORM" == win-* ]]; then

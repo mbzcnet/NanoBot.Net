@@ -1,0 +1,303 @@
+@page "/settings"
+@inject NavigationManager NavigationManager
+@inject ISnackbar Snackbar
+@inject ILogger<Settings> Logger
+@using NanoBot.Core.Configuration
+
+<PageTitle>NanoBot - 设置</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.Large" Class="settings-container">
+    <MudPaper Elevation="1" Class="pa-4">
+        <MudText Typo="Typo.h4" Class="mb-4">WebUI 设置</MudText>
+        
+        <MudGrid>
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">服务器配置</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudTextField @bind-Value="serverConfig.Host" 
+                                      Label="主机地址" 
+                                      Variant="Variant.Outlined"
+                                      Class="mb-3" />
+                        
+                        <MudNumericField @bind-Value="serverConfig.Port"
+                                        Label="端口"
+                                        Min="1"
+                                        Max="65535"
+                                        Variant="Variant.Outlined"
+                                        Class="mb-3" />
+                        
+                        <MudTextField @bind-Value="serverConfig.Urls"
+                                      Label="URLs (可选)"
+                                      Variant="Variant.Outlined"
+                                      HelperText="留空则使用主机+端口自动生成"
+                                      Class="mb-3" />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+            
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">认证配置</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudSelect @bind-Value="authConfig.Mode" 
+                                   Label="认证模式"
+                                   Variant="Variant.Outlined"
+                                   Class="mb-3">
+                            <MudSelectItem Value="@("none")">无认证</MudSelectItem>
+                            <MudSelectItem Value="@("token")">Token认证</MudSelectItem>
+                            <MudSelectItem Value="@("password")">密码认证</MudSelectItem>
+                        </MudSelect>
+                        
+                        @if (authConfig.Mode == "token")
+                        {
+                            <MudTextField @bind-Value="authConfig.Token"
+                                          Label="Token"
+                                          Variant="Variant.Outlined"
+                                          Class="mb-3" />
+                        }
+                        
+                        @if (authConfig.Mode == "password")
+                        {
+                            <MudTextField @bind-Value="authConfig.Password"
+                                          Label="密码"
+                                          InputType="InputType.Password"
+                                          Variant="Variant.Outlined"
+                                          Class="mb-3" />
+                        }
+                        
+                        <MudCheckBox @bind-Checked="authConfig.AllowLocalhost"
+                                     Label="允许本地访问"
+                                     T="bool"
+                                     Class="mb-3" />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+            
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">CORS 配置</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyOrigin"
+                                     Label="允许任意源"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        @if (!corsConfig.AllowAnyOrigin)
+                        {
+                            <MudTextField @bind-Value="newCorsOrigin"
+                                          Label="添加允许的源"
+                                          Variant="Variant.Outlined"
+                                          Adornment="Adornment.End"
+                                          AdornmentIcon="@Icons.Material.Filled.Add"
+                                          OnAdornmentClick="AddCorsOrigin"
+                                          Class="mb-3" />
+                            
+                            @foreach (var origin in corsConfig.AllowedOrigins)
+                            {
+                                <MudChip Color="Color.Primary" 
+                                        Class="mr-2 mb-2"
+                                        T="string"
+                                        OnClose="() => RemoveCorsOrigin(origin)">
+                                    @origin
+                                </MudChip>
+                            }
+                        }
+                        
+                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyMethod"
+                                     Label="允许任意方法"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyHeader"
+                                     Label="允许任意头部"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        <MudCheckBox @bind-Checked="corsConfig.AllowCredentials"
+                                     Label="允许凭据"
+                                     T="bool"
+                                     Class="mb-3" />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+            
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">功能配置</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudCheckBox @bind-Checked="featuresConfig.FileUpload"
+                                     Label="启用文件上传"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        <MudTextField @bind-Value="featuresConfig.MaxFileSize"
+                                      Label="最大文件大小"
+                                      Variant="Variant.Outlined"
+                                      HelperText="如: 10MB, 1GB"
+                                      Class="mb-3" />
+                        
+                        <MudTextField @bind-Value="newFileType"
+                                      Label="添加允许的文件类型"
+                                      Variant="Variant.Outlined"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@Icons.Material.Filled.Add"
+                                      OnAdornmentClick="AddFileType"
+                                      Class="mb-3" />
+                        
+                        @foreach (var fileType in featuresConfig.AllowedFileTypes)
+                        {
+                            <MudChip Color="Color.Secondary" 
+                                    Class="mr-2 mb-2"
+                                    T="string"
+                                    OnClose="() => RemoveFileType(fileType)">
+                                @fileType
+                            </MudChip>
+                        }
+                        
+                        <MudCheckBox @bind-Checked="featuresConfig.EnableChatHistory"
+                                     Label="启用聊天历史"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        <MudCheckBox @bind-Checked="featuresConfig.EnableSessionManagement"
+                                     Label="启用会话管理"
+                                     T="bool"
+                                     Class="mb-3" />
+                        
+                        <MudCheckBox @bind-Checked="featuresConfig.EnableRealTimeUpdates"
+                                     Label="启用实时更新"
+                                     T="bool"
+                                     Class="mb-3" />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        </MudGrid>
+        
+        <div class="d-flex justify-end mt-4">
+            <MudButton Variant="Variant.Outlined" 
+                       Color="Color.Default"
+                       Class="mr-2"
+                       OnClick="ResetToDefaults">
+                重置为默认
+            </MudButton>
+            
+            <MudButton Variant="Variant.Filled" 
+                       Color="Color.Primary"
+                       OnClick="SaveSettings"
+                       StartIcon="@Icons.Material.Filled.Save">
+                保存设置
+            </MudButton>
+        </div>
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private WebUIServerConfig serverConfig = new();
+    private WebUIAuthConfig authConfig = new();
+    private WebUICorsConfig corsConfig = new();
+    private WebUIFeaturesConfig featuresConfig = new();
+    
+    private string newCorsOrigin = string.Empty;
+    private string newFileType = string.Empty;
+    
+    protected override void OnInitialized()
+    {
+        LoadCurrentSettings();
+    }
+    
+    private void LoadCurrentSettings()
+    {
+        // TODO: 从配置服务加载当前设置
+        // 这里先使用默认值
+        serverConfig = new WebUIServerConfig();
+        authConfig = new WebUIAuthConfig();
+        corsConfig = new WebUICorsConfig();
+        featuresConfig = new WebUIFeaturesConfig();
+    }
+    
+    private void AddCorsOrigin()
+    {
+        if (!string.IsNullOrWhiteSpace(newCorsOrigin) && 
+            !corsConfig.AllowedOrigins.Contains(newCorsOrigin))
+        {
+            corsConfig.AllowedOrigins.Add(newCorsOrigin);
+            newCorsOrigin = string.Empty;
+            StateHasChanged();
+        }
+    }
+    
+    private void RemoveCorsOrigin(string origin)
+    {
+        corsConfig.AllowedOrigins.Remove(origin);
+        StateHasChanged();
+    }
+    
+    private void AddFileType()
+    {
+        if (!string.IsNullOrWhiteSpace(newFileType) && 
+            !featuresConfig.AllowedFileTypes.Contains(newFileType))
+        {
+            if (!newFileType.StartsWith("."))
+            {
+                newFileType = "." + newFileType;
+            }
+            featuresConfig.AllowedFileTypes.Add(newFileType);
+            newFileType = string.Empty;
+            StateHasChanged();
+        }
+    }
+    
+    private void RemoveFileType(string fileType)
+    {
+        featuresConfig.AllowedFileTypes.Remove(fileType);
+        StateHasChanged();
+    }
+    
+    private void ResetToDefaults()
+    {
+        serverConfig = new WebUIServerConfig();
+        authConfig = new WebUIAuthConfig();
+        corsConfig = new WebUICorsConfig();
+        featuresConfig = new WebUIFeaturesConfig();
+        StateHasChanged();
+        
+        Snackbar.Add("已重置为默认设置", Severity.Info);
+    }
+    
+    private async Task SaveSettings()
+    {
+        try
+        {
+            // TODO: 保存到配置文件
+            Logger.LogInformation("保存WebUI设置");
+            
+            Snackbar.Add("设置已保存", Severity.Success);
+            
+            // 可能需要重启服务以应用某些设置
+            await Task.Delay(1000);
+            NavigationManager.NavigateTo("/", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "保存设置失败");
+            Snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+    }
+}

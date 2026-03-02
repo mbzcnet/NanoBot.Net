@@ -952,7 +952,77 @@ NanoBot.Net/
 
 ---
 
-## 九、实施计划
+## 九、NativeAOT 多平台发布与 fallback 策略
+
+### 9.1 AOT/Trim 警告梳理与影响
+
+| 模块 | 告警类型 | 影响 | 处置策略 |
+|------|----------|------|-----------|
+| `NanoBot.Core/Configuration/Extensions/ConfigurationLoader.cs` | IL2026 / IL3050 (`JsonSerializer.Serialize/Deserialize`) | 依赖反射生成多态配置，NativeAOT 可能裁剪模型导致配置读取失败，Trimming 也会发出警告。 | 引入 `System.Text.Json` Source Generator（定义 `JsonSerializerContext`），或者在 `TrimmerRootDescriptor` 中保留配置模型。 |
+| `NanoBot.Agent/SessionManager.cs` | IL2026 / IL3050 / IL3051 (`JsonSerializer`、`JsonNode`) | 会话缓存序列化、记忆快照使用 `JsonNode`，需要动态代码。 | 优先改为强类型模型 + Source Generator；短期可通过 `DynamicDependency`/`DynamicallyAccessedMembers` 保留类型。 |
+| `NanoBot.Channels/*Channel.cs` (Discord/Slack/WhatsApp/Feishu) | IL2026 / IL3050 | 各通道编解码 payload 时需要完整模型。 | 按通道定义 `JsonSerializable` 类型列表，或为不常用通道在构建时禁用，避免 AOT 失败。 |
+| `NanoBot.Infrastructure` / `NanoBot.Tools` | IL2104 / IL3053 | 表示当前装配仍有 Trim/AOT 警告未收敛。 | 在收敛计划中逐项消除；若某依赖无法兼容，触发 fallback。 |
+| `Microsoft.Playwright` (测试依赖) | IL3000 / IL3002 | 单文件场景 `Assembly.Location` 永远为空，AOT 运行时可能抛异常。CLI 正常运行无需 Playwright，建议将其限定在测试项目中。 | 将 Playwright 限制为 `tests/*` 或条件引用，不参与 CLI 发布即可规避。 |
+
+> 结论：macOS arm64 AOT 构建已经跑通（`dotnet publish ... -r osx-arm64 -p:PublishAot=true`，生成于 `dist-aot/osx-arm64`），但需按上表逐步收敛 JSON 相关警告，并在生产构建中开启 `WarningsAsErrors` 防止回归。
+
+### 9.2 平台发布命令（优先 NativeAOT）
+
+| 平台 | 命令示例 | 备注 |
+|------|----------|------|
+| macOS arm64 | `dotnet publish src/NanoBot.Cli/NanoBot.Cli.csproj -c Release -r osx-arm64 -p:PublishAot=true -p:InvariantGlobalization=true -p:StripSymbols=true -o dist-aot/osx-arm64` | 已验证可构建。Archive：`tar -C dist-aot -czvf nbot-osx-arm64-aot.tar.gz osx-arm64`. |
+| macOS x64 | 同上但 `-r osx-x64`，需在 macOS x64 Runner 上执行 | Apple Silicon 不能交叉编译 x64 AOT，CI 需配置 Intel runner。 |
+| Linux x64 | `dotnet publish ... -r linux-x64 -p:PublishAot=true ... -o dist-aot/linux-x64` （在 Linux 主机/runner） | Archive：`tar -C dist-aot -czvf nbot-linux-x64-aot.tar.gz linux-x64`. |
+| Linux arm64 | 同上 `-r linux-arm64`（推荐使用 arm64 容器 runner） | 可在 GitHub Actions arm64 self-host runner 执行。 |
+| Windows x64 | `dotnet publish ... -r win-x64 -p:PublishAot=true ... -o dist-aot/win-x64` （在 Windows runner） | Archive：`Compress-Archive -Path dist-aot/win-x64/* -DestinationPath nbot-win-x64-aot.zip`. |
+| Windows arm64 | `-r win-arm64`（Windows arm64 runner） | 同 x64 打包逻辑。 |
+
+**校验方式**：
+
+```bash
+# Unix 平台
+shasum -a 256 nbot-<rid>-aot.tar.gz > nbot-<rid>-aot.tar.gz.sha256
+
+# Windows 平台（PowerShell）
+Get-FileHash .\nbot-win-<arch>-aot.zip -Algorithm SHA256 | Out-File nbot-win-<arch>-aot.zip.sha256
+```
+
+所有校验文件与压缩包一同上传 Release，并写入 Homebrew/Winget manifest。
+
+### 9.3 安装体验（单包 + 配置向导）
+
+1. 用户下载对应平台压缩包或运行“一行脚本”（`curl ... | bash` / `irm ... | iex`）。
+2. 安装脚本自动检测 `osx-x64/osx-arm64/linux-x64/linux-arm64/win-x64/win-arm64`，下载匹配包，并将 `nbot`/`nbot.exe` 放入 `~/.local/bin` 或 `%USERPROFILE%\.local\bin`。
+3. 解压后首次运行 `./nbot configure`（或 `nbot onboard`）进入配置向导，完成 API Key、工作区路径等设置，向导依赖 CLI 本身，无需额外 UI。
+4. 高阶用户可通过 Homebrew/Winget 获取同样的 NativeAOT/Self-contained 产物；脚本仅作为快捷入口。
+
+### 9.4 NativeAOT → Self-contained fallback
+
+当出现以下任一条件时，切换到 Self-contained（SingleFile + Trim）产物：
+
+1. 关键依赖（如某个 Channel 或 Provider）仍需 `System.Reflection.Emit`、`JsonSerializer` 动态生成且短期无法改造。
+2. CI 环境缺少目标 RID 的 AOT Toolchain（例如无法获得 macOS Intel runner）。
+3. 第三方库（如 Playwright）必须保留在 CLI 中且与 `PublishAot` 冲突。
+4. 需要开启调试符号或降低构建时间的临时版本。
+
+Fallback 命令模板：
+
+```bash
+dotnet publish src/NanoBot.Cli/NanoBot.Cli.csproj \
+  -c Release \
+  -r <rid> \
+  --self-contained true \
+  -p:PublishSingleFile=true \
+  -p:PublishTrimmed=true \
+  -p:InvariantGlobalization=true \
+  -o dist-sc/<rid>
+```
+
+输出命名建议 `nbot-<rid>-sc.tar.gz` / `.zip`，与 AOT 产物并列，供 Homebrew/Winget/脚本按优先级选择：优先下载 AOT，若检测失败则退回 Self-contained。
+
+---
+
+## 十、实施计划
 
 | 阶段 | 任务 | 优先级 |
 |------|------|--------|

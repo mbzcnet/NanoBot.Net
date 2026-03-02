@@ -44,6 +44,10 @@ public class WorkspaceManager : IWorkspaceManager
 
     public string GetHistoryFile() => _config.GetHistoryFile();
 
+    public string GetCachePath() => _config.GetCachePath();
+
+    public string GetUploadsPath() => _config.GetUploadsPath();
+
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         if (_initialized)

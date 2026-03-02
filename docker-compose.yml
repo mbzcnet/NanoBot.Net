@@ -22,6 +22,22 @@ services:
           cpus: '0.25'
           memory: 256M
   
+  nanobot-webui:
+    container_name: nanobot-webui
+    <<: *common-config
+    command: ["webui"]
+    restart: unless-stopped
+    ports:
+      - 18888:18888
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+  
   nanobot-cli:
     <<: *common-config
     profiles:

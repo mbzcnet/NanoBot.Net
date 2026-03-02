@@ -32,10 +32,13 @@
         @if (_isSettingsSection)
         {
             <MudNavMenu>
-                <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
+                <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
+                    WebUI 设置
+                </MudNavLink>
+                <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Tune" Match="NavLinkMatch.Prefix">
                     系统配置
                 </MudNavLink>
-                <MudNavLink Href="/config/profiles" Icon="@Icons.Material.Filled.Tune" Match="NavLinkMatch.Prefix">
+                <MudNavLink Href="/config/profiles" Icon="@Icons.Material.Filled.Person" Match="NavLinkMatch.Prefix">
                     LLM Profiles
                 </MudNavLink>
                 <MudDivider Class="my-2" />

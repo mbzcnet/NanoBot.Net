@@ -17,4 +17,6 @@ public class AgentConfig
     public MemoryConfig Memory { get; set; } = new();
 
     public HeartbeatConfig? Heartbeat { get; set; }
+
+    public WebUIConfig WebUI { get; set; } = new();
 }

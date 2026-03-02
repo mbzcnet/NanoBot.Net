@@ -174,7 +174,7 @@ body.nb-scrolled .nb-topbar {
 }
 
 .chat-container {
-    max-width: 1040px;
+    max-width: 1280px;
 }
 
 .mud-paper.nb-chat-shell {
@@ -697,7 +697,7 @@ body.nb-scrolled .nb-topbar {
     }
 
     .nb-message-bubble {
-        max-width: 92% !important;
+        max-width: 96% !important;
     }
 
     .nb-composer-row {

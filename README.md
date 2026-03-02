@@ -111,6 +111,24 @@ nbot agent -m "Hello, what can you do?"
 
 > **Note**: If configuration is incomplete, the agent will prompt you to run `nbot configure` first.
 
+### 3. Launch the WebUI
+
+```bash
+nbot webui
+```
+
+This command boots the Blazor-based WebUI. Useful options:
+
+- `-p, --port <number>`: change the listening port (default `5000`).
+- `-c, --config <path>`: specify a custom configuration file (defaults to `~/.nbot/config.json`).
+- `--no-browser`: skip automatically opening the browser (helpful on headless servers).
+
+If you prefer running directly from source without installing the global tool:
+
+```bash
+dotnet run --project src/NanoBot.Cli -- webui --port 5073
+```
+
 ## Commands
 
 | Command | Description |
@@ -120,6 +138,7 @@ nbot agent -m "Hello, what can you do?"
 | `nbot onboard` | Initialize workspace (legacy) |
 | `nbot agent` | Start interactive chat |
 | `nbot agent -m "..."` | Send a single message |
+| `nbot webui` | Start the WebUI server (see options above) |
 | `nbot gateway` | Start gateway service mode |
 | `nbot status` | Show agent status |
 | `nbot config` | Manage configuration |

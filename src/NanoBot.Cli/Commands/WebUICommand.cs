@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using NanoBot.Cli.Extensions;
 using NanoBot.Cli.Services;
 using NanoBot.Core.Configuration;
+using NanoBot.Core.Configuration.Validators;
 
 namespace NanoBot.Cli.Commands;
 
@@ -19,7 +20,7 @@ public class WebUICommand : ICliCommand
         var portOption = new Option<int>(
             name: "--port",
             description: "Port to listen on",
-            getDefaultValue: () => 5000
+            getDefaultValue: () => 18888
         );
         portOption.AddAlias("-p");
 
@@ -61,8 +62,6 @@ public class WebUICommand : ICliCommand
         bool noBrowser,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"🐈 Starting NanoBot WebUI on port {port}...");
-
         // 检查配置文件
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var actualConfigPath = configPath ?? Path.Combine(homeDir, ".nbot", "config.json");
@@ -77,10 +76,49 @@ public class WebUICommand : ICliCommand
             return;
         }
 
+        // 加载配置
+        AgentConfig? agentConfig;
+        try
+        {
+            agentConfig = await ConfigurationLoader.LoadAsync(actualConfigPath, cancellationToken);
+            if (agentConfig == null)
+            {
+                Console.WriteLine("❌ Failed to load configuration");
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error loading configuration: {ex.Message}");
+            return;
+        }
+
+        // 验证WebUI配置
+        var validationResult = WebUIConfigValidator.Validate(agentConfig.WebUI);
+        if (!validationResult.IsValid)
+        {
+            Console.WriteLine("❌ WebUI配置验证失败:");
+            Console.WriteLine(validationResult.GetSummary());
+            return;
+        }
+
+        // 显示警告
+        if (validationResult.Warnings.Count > 0)
+        {
+            Console.WriteLine("⚠️  WebUI配置警告:");
+            Console.WriteLine(validationResult.GetSummary());
+            Console.WriteLine();
+        }
+
+        // 确定最终端口（CLI参数优先）
+        var finalPort = port != 18888 ? port : agentConfig.WebUI.Server.Port;
+        var finalUrls = port != 18888 ? $"http://localhost:{finalPort}" : agentConfig.WebUI.Server.GetResolvedUrls();
+
+        Console.WriteLine($"🐈 Starting NanoBot WebUI on port {finalPort}...");
         Console.WriteLine($"✓ Configuration loaded from: {actualConfigPath}");
 
         // 启动 WebUI
-        var webuiPath = GetWebUIProjectPath();
+        var (webuiPath, source) = ResolveWebUIPath();
         if (string.IsNullOrEmpty(webuiPath) || !Directory.Exists(webuiPath))
         {
             Console.WriteLine();
@@ -89,30 +127,42 @@ public class WebUICommand : ICliCommand
             return;
         }
 
-        Console.WriteLine($"✓ WebUI project found: {webuiPath}");
+        Console.WriteLine($"✓ WebUI {(source == WebUISource.Packaged ? "bundle" : "project")} found: {webuiPath}");
         Console.WriteLine();
-        Console.WriteLine($"Starting server on http://localhost:{port}");
+        Console.WriteLine($"Starting server on {finalUrls}");
         Console.WriteLine("Press Ctrl+C to stop the server");
         Console.WriteLine();
 
-        // 启动 dotnet run
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "dotnet",
-            Arguments = $"run --urls http://localhost:{port}",
-            WorkingDirectory = webuiPath,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = false
-        };
+        var startInfo = CreateStartInfo(webuiPath, finalPort, finalUrls, source, actualConfigPath);
 
         using var process = new Process { StartInfo = startInfo };
         
+        var serverStarted = false;
+        var startupTimeout = TimeSpan.FromSeconds(30);
+        var startTime = DateTime.UtcNow;
+        var outputBuffer = new List<string>();
+        
+        // 设置输出处理来检测启动完成
         process.OutputDataReceived += (sender, e) =>
         {
             if (!string.IsNullOrEmpty(e.Data))
+            {
                 Console.WriteLine(e.Data);
+                outputBuffer.Add(e.Data);
+                // 检测ASP.NET Core启动完成的标志
+                if (e.Data.Contains("Now listening on:") || 
+                    e.Data.Contains("Application started.") ||
+                    e.Data.Contains("Hosting environment:"))
+                {
+                    serverStarted = true;
+                }
+                // 检测编译完成的标志
+                if (e.Data.Contains("正在生成...") || e.Data.Contains("Building..."))
+                {
+                    // 编译开始，重置启动状态
+                    serverStarted = false;
+                }
+            }
         };
         
         process.ErrorDataReceived += (sender, e) =>
@@ -124,16 +174,44 @@ public class WebUICommand : ICliCommand
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
-
-        // 等待服务器启动
-        await Task.Delay(3000, cancellationToken);
+        
+        // 等待服务器启动完成
+        var compilationCompleted = false;
+        while (!serverStarted && !cancellationToken.IsCancellationRequested)
+        {
+            await Task.Delay(500, cancellationToken);
+            
+            // 检查是否超时
+            if (DateTime.UtcNow - startTime > startupTimeout)
+            {
+                Console.WriteLine("⚠️  服务器启动超时，但继续等待浏览器打开...");
+                break;
+            }
+            
+            // 检查编译是否完成
+            if (!compilationCompleted && outputBuffer.Any(line => 
+                line.Contains("info: Microsoft.Hosting.Lifetime[14]") ||
+                line.Contains("Now listening on:") ||
+                line.Contains("Application started.")))
+            {
+                compilationCompleted = true;
+            }
+            
+            // 只有在编译完成后才认为服务器真正启动
+            if (compilationCompleted && 
+                (outputBuffer.Any(line => line.Contains("Now listening on:")) ||
+                 DateTime.UtcNow - startTime > TimeSpan.FromSeconds(10)))
+            {
+                serverStarted = true;
+            }
+        }
 
         // 打开浏览器
         if (!noBrowser)
         {
             try
             {
-                var url = $"http://localhost:{port}";
+                var url = finalUrls.Split(';', StringSplitOptions.RemoveEmptyEntries).First();
                 Console.WriteLine($"Opening browser at {url}...");
                 OpenBrowser(url);
             }
@@ -147,31 +225,111 @@ public class WebUICommand : ICliCommand
         await process.WaitForExitAsync(cancellationToken);
     }
 
+    private static ProcessStartInfo CreateStartInfo(string webuiPath, int port, string urls, WebUISource source, string configPath)
+    {
+        if (source == WebUISource.Packaged)
+        {
+            var executable = GetPackagedWebUIExecutable(webuiPath);
+            if (!File.Exists(executable))
+            {
+                throw new FileNotFoundException($"WebUI executable not found at {executable}");
+            }
+
+            return new ProcessStartInfo
+            {
+                FileName = executable,
+                Arguments = $"--urls \"{urls}\" --config \"{configPath}\"",
+                WorkingDirectory = webuiPath,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = false
+            };
+        }
+
+        return new ProcessStartInfo
+        {
+            FileName = "dotnet",
+            Arguments = $"run --urls \"{urls}\" --config \"{configPath}\"",
+            WorkingDirectory = webuiPath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = false
+        };
+    }
+
+    private static (string? Path, WebUISource Source) ResolveWebUIPath()
+    {
+        var packagedPath = GetPackagedWebUIPath();
+        if (!string.IsNullOrEmpty(packagedPath) && Directory.Exists(packagedPath))
+        {
+            return (packagedPath, WebUISource.Packaged);
+        }
+
+        var projectPath = GetWebUIProjectPath();
+        if (!string.IsNullOrEmpty(projectPath) && Directory.Exists(projectPath))
+        {
+            return (projectPath, WebUISource.SourceProject);
+        }
+
+        return (null, WebUISource.None);
+    }
+
+    private static string? GetPackagedWebUIPath()
+    {
+        try
+        {
+            var baseDir = AppContext.BaseDirectory;
+            var packaged = Path.Combine(baseDir, "webui");
+            return packaged;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? GetWebUIProjectPath()
     {
         // 尝试找到 WebUI 项目路径
         var currentDir = Directory.GetCurrentDirectory();
-        
-        // 检查是否在项目根目录
-        var webuiPath = Path.Combine(currentDir, "src", "NanoBot.WebUI");
-        if (Directory.Exists(webuiPath))
-            return webuiPath;
-        
-        // 检查是否在 src 目录
-        webuiPath = Path.Combine(currentDir, "NanoBot.WebUI");
-        if (Directory.Exists(webuiPath))
-            return webuiPath;
-        
-        // 检查父目录
-        var parentDir = Directory.GetParent(currentDir)?.FullName;
-        if (parentDir != null)
+
+        var directoriesToProbe = new List<string?>
         {
-            webuiPath = Path.Combine(parentDir, "src", "NanoBot.WebUI");
-            if (Directory.Exists(webuiPath))
-                return webuiPath;
+            currentDir,
+            Directory.GetParent(currentDir)?.FullName,
+            Directory.GetParent(currentDir)?.Parent?.FullName
+        };
+
+        foreach (var baseDir in directoriesToProbe)
+        {
+            if (string.IsNullOrEmpty(baseDir))
+                continue;
+
+            var fromSrc = Path.Combine(baseDir, "src", "NanoBot.WebUI");
+            if (Directory.Exists(fromSrc))
+                return fromSrc;
+
+            var direct = Path.Combine(baseDir, "NanoBot.WebUI");
+            if (Directory.Exists(direct))
+                return direct;
         }
-        
+
         return null;
+    }
+
+    private static string GetPackagedWebUIExecutable(string webuiPath)
+    {
+        var executableName = OperatingSystem.IsWindows() ? "NanoBot.WebUI.exe" : "NanoBot.WebUI";
+        return Path.Combine(webuiPath, executableName);
+    }
+
+    private enum WebUISource
+    {
+        None,
+        Packaged,
+        SourceProject
     }
 
     private static void OpenBrowser(string url)

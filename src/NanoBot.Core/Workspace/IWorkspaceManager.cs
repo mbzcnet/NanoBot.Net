@@ -24,6 +24,10 @@ public interface IWorkspaceManager
 
     string GetHistoryFile();
 
+    string GetCachePath();
+
+    string GetUploadsPath();
+
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     void EnsureDirectory(string path);

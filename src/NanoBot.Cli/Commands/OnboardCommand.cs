@@ -112,8 +112,7 @@ public class OnboardCommand : ICliCommand
 
             if (response == "y")
             {
-                config = new AgentConfig { Name = name ?? "NanoBot" };
-                config.Workspace.Path = workspacePath;
+                config = CreateDefaultAgentConfig(name ?? "NanoBot", workspacePath);
                 await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
                 Console.WriteLine($"✓ Config reset to defaults at {configPath}");
             }
@@ -135,8 +134,7 @@ public class OnboardCommand : ICliCommand
         }
         else
         {
-            config = new AgentConfig { Name = name ?? "NanoBot" };
-            config.Workspace.Path = workspacePath;
+            config = CreateDefaultAgentConfig(name ?? "NanoBot", workspacePath);
             await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
             Console.WriteLine($"✓ Created config at {configPath}");
         }
@@ -532,4 +530,35 @@ This file stores important information that should persist across sessions.
 
 (Things to remember)
 ";
+
+    private static AgentConfig CreateDefaultAgentConfig(string name, string workspacePath)
+    {
+        var config = new AgentConfig 
+        { 
+            Name = name,
+            Workspace = { Path = workspacePath }
+        };
+
+        // 配置WebUI默认设置
+        config.WebUI.Enabled = true;
+        config.WebUI.Server.Host = "127.0.0.1";
+        config.WebUI.Server.Port = 18888;
+        config.WebUI.Auth.Mode = "token";
+        config.WebUI.Auth.Token = GenerateRandomToken();
+        config.WebUI.Auth.AllowLocalhost = true;
+        config.WebUI.Cors.AllowedOrigins.Add("http://localhost:18888");
+        config.WebUI.Security.EnableHttps = false;
+        config.WebUI.Features.FileUpload = true;
+        config.WebUI.Features.MaxFileSize = "10MB";
+
+        return config;
+    }
+
+    private static string GenerateRandomToken()
+    {
+        var bytes = new byte[32];
+        using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
+        rng.GetBytes(bytes);
+        return Convert.ToBase64String(bytes).Replace("+", "").Replace("/", "").Replace("=", "").Substring(0, 32);
+    }
 }

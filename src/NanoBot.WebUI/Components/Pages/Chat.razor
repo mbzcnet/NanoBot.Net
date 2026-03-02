@@ -6,6 +6,7 @@
 @inject ILogger<Chat> Logger
 @inject IWebHostEnvironment WebHostEnvironment
 @inject IJSRuntime JSRuntime
+@inject NanoBot.Core.Storage.IFileStorageService FileStorageService
 @using NanoBot.WebUI.Services
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
@@ -14,7 +15,7 @@
 
 <PageTitle>NanoBot - 聊天</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="chat-container">
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="chat-container">
     <MudPaper Elevation="0" Class="d-flex flex-column nb-chat-shell" Style="height: calc(100vh - 120px);">
         
         @* 消息列表区域 *@
@@ -340,21 +341,16 @@
 
     private async Task<string> SaveImageFromStreamAsync(Stream sourceStream, string? extension)
     {
-        var ext = string.IsNullOrWhiteSpace(extension) ? ".png" : extension;
-        var uploadsRoot = Path.Combine(WebHostEnvironment.WebRootPath, "uploads", SessionId);
-        Directory.CreateDirectory(uploadsRoot);
-
-        var fileName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}{ext}";
-        var filePath = Path.Combine(uploadsRoot, fileName);
-
-        await using var writeStream = File.Create(filePath);
-        if (sourceStream.CanSeek)
+        try
         {
-            sourceStream.Position = 0;
+            var relativePath = await FileStorageService.SaveFileAsync(sourceStream, SessionId, extension);
+            return FileStorageService.GetFileUrl(relativePath);
         }
-
-        await sourceStream.CopyToAsync(writeStream);
-        return $"/uploads/{SessionId}/{fileName}";
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save image for session {SessionId}", SessionId);
+            throw;
+        }
     }
 
     private static string GetExtensionFromContentType(string contentType)
@@ -414,9 +410,9 @@
     {
         return role?.ToLowerInvariant() switch
         {
-            "user" => "max-width: min(70%, 760px); line-height: 1.55;",
-            "system" => "max-width: min(86%, 920px); line-height: 1.5;",
-            _ => "max-width: min(74%, 820px); line-height: 1.55;"
+            "user" => "max-width: min(85%, 900px); line-height: 1.55;",
+            "system" => "max-width: min(92%, 980px); line-height: 1.5;",
+            _ => "max-width: min(88%, 920px); line-height: 1.55;"
         };
     }
 
