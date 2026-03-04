@@ -23,6 +23,20 @@ public partial class TelegramChannel : ChannelBase
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _typingTasks = new();
     private User? _botUser;
 
+    // Media group aggregation
+    private readonly ConcurrentDictionary<string, MediaGroupBuffer> _mediaGroupBuffers = new();
+    private readonly ConcurrentDictionary<string, Task> _mediaGroupTasks = new();
+    private readonly TimeSpan _mediaGroupDelay = TimeSpan.FromMilliseconds(600);
+
+    private sealed class MediaGroupBuffer
+    {
+        public string SenderId { get; set; } = "";
+        public string ChatId { get; set; } = "";
+        public List<string> Contents { get; set; } = new();
+        public List<string> Media { get; set; } = new();
+        public Dictionary<string, object> Metadata { get; set; } = new();
+    }
+
     public TelegramChannel(TelegramConfig config, IMessageBus bus, ILogger<TelegramChannel> logger)
         : base(bus, logger)
     {
@@ -75,11 +89,27 @@ public partial class TelegramChannel : ChannelBase
     {
         _running = false;
 
+        // Cancel all typing indicators
         foreach (var cts in _typingTasks.Values)
         {
             cts.Cancel();
         }
         _typingTasks.Clear();
+
+        // Cancel media group tasks
+        foreach (var kvp in _mediaGroupTasks.ToList())
+        {
+            try
+            {
+                if (!_mediaGroupBuffers.ContainsKey(kvp.Key))
+                {
+                    continue;
+                }
+            }
+            catch { }
+        }
+        _mediaGroupTasks.Clear();
+        _mediaGroupBuffers.Clear();
 
         _logger.LogInformation("Telegram channel stopped");
         await Task.CompletedTask;
@@ -162,6 +192,7 @@ public partial class TelegramChannel : ChannelBase
 
         var senderId = BuildSenderId(user);
         var chatId = message.Chat.Id.ToString();
+        var strChatId = chatId;
 
         var contentParts = new List<string>();
 
@@ -172,7 +203,7 @@ public partial class TelegramChannel : ChannelBase
             contentParts.Add(message.Caption);
 
         var content = string.Join("\n", contentParts);
-        
+
         if (content.Trim().ToLowerInvariant() == "/help")
         {
             await SendHelpMessageAsync(chatId, cancellationToken);
@@ -186,6 +217,34 @@ public partial class TelegramChannel : ChannelBase
         }
 
         var mediaPaths = new List<string>();
+        var mediaType = (string?)null;
+
+        // Download media if present
+        if (message.Photo != null || message.Voice != null || message.Audio != null || message.Document != null)
+        {
+            var (fileId, type) = message.Photo != null ? (message.Photo.Last().FileId, "image") :
+                                 message.Voice != null ? (message.Voice.FileId, "voice") :
+                                 message.Audio != null ? (message.Audio.FileId, "audio") :
+                                 message.Document != null ? (message.Document.FileId, "file") :
+                                 (null, null);
+
+            if (fileId != null && type != null)
+            {
+                mediaType = type;
+                try
+                {
+                    var filePath = await DownloadFileAsync(fileId, cancellationToken);
+                    if (filePath != null)
+                    {
+                        mediaPaths.Add(filePath);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to download media");
+                }
+            }
+        }
 
         if (!string.IsNullOrEmpty(message.Text))
             contentParts.Add(message.Text);
@@ -193,13 +252,7 @@ public partial class TelegramChannel : ChannelBase
         if (!string.IsNullOrEmpty(message.Caption))
             contentParts.Add(message.Caption);
 
-        var hasMedia = message.Photo != null || message.Voice != null || message.Audio != null || message.Document != null;
-        var mediaType = message.Photo != null ? "image" :
-                        message.Voice != null ? "voice" :
-                        message.Audio != null ? "audio" :
-                        message.Document != null ? "file" : null;
-
-        if (hasMedia && mediaType != null)
+        if (mediaType != null)
         {
             contentParts.Add($"[{mediaType}: attachment]");
         }
@@ -208,6 +261,49 @@ public partial class TelegramChannel : ChannelBase
         if (string.IsNullOrEmpty(content))
             content = "[empty message]";
 
+        // Media group aggregation: buffer briefly, forward as one aggregated turn
+        if (!string.IsNullOrEmpty(message.MediaGroupId))
+        {
+            var key = $"{strChatId}:{message.MediaGroupId}";
+
+            var buffer = _mediaGroupBuffers.GetOrAdd(key, _ => new MediaGroupBuffer
+            {
+                SenderId = senderId,
+                ChatId = strChatId,
+                Contents = new List<string>(),
+                Media = new List<string>(),
+                Metadata = new Dictionary<string, object>
+                {
+                    ["message_id"] = message.MessageId,
+                    ["user_id"] = user.Id,
+                    ["username"] = user.Username,
+                    ["first_name"] = user.FirstName,
+                    ["is_group"] = message.Chat.Type != ChatType.Private,
+                    ["media_group_id"] = message.MediaGroupId
+                }
+            });
+
+            StartTyping(strChatId);
+
+            if (!string.IsNullOrEmpty(content) && content != "[empty message]")
+            {
+                buffer.Contents.Add(content);
+            }
+
+            if (mediaPaths.Count > 0)
+            {
+                buffer.Media.AddRange(mediaPaths);
+            }
+
+            if (!_mediaGroupTasks.ContainsKey(key))
+            {
+                _mediaGroupTasks[key] = FlushMediaGroupAsync(key);
+            }
+
+            return;
+        }
+
+        // Start typing indicator before processing
         StartTyping(chatId);
 
         await HandleMessageAsync(
@@ -225,6 +321,75 @@ public partial class TelegramChannel : ChannelBase
             }
         );
     }
+
+    private async Task FlushMediaGroupAsync(string key)
+    {
+        try
+        {
+            await Task.Delay(_mediaGroupDelay);
+
+            if (!_mediaGroupBuffers.TryRemove(key, out var buffer))
+            {
+                return;
+            }
+
+            var content = string.Join("\n", buffer.Contents);
+            if (string.IsNullOrEmpty(content))
+            {
+                content = "[empty message]";
+            }
+            var dedupedMedia = buffer.Media.Distinct().ToList();
+
+            await HandleMessageAsync(
+                senderId: buffer.SenderId,
+                chatId: buffer.ChatId,
+                content: content,
+                media: dedupedMedia,
+                metadata: buffer.Metadata
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error flushing media group {Key}", key);
+        }
+        finally
+        {
+            _mediaGroupTasks.TryRemove(key, out _);
+        }
+    }
+
+    private async Task<string?> DownloadFileAsync(string fileId, CancellationToken cancellationToken)
+    {
+        if (_botClient == null)
+        {
+            return null;
+        }
+
+        var file = await _botClient.GetFileAsync(fileId, cancellationToken);
+        if (file.FilePath == null)
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(file.FilePath);
+        var filePath = Path.Combine(_mediaDirectory, fileName);
+
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        using var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await _botClient.DownloadFileAsync(file.FilePath, stream, cancellationToken);
+
+        return filePath;
+    }
+
+    private readonly string _mediaDirectory = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        ".nanobot",
+        "media");
 
     private async Task SendHelpMessageAsync(string chatId, CancellationToken cancellationToken)
     {

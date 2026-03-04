@@ -1,0 +1,195 @@
+@using NanoBot.Core.Configuration
+
+<div class="nb-channel-config-editor">
+    <MudTextField @bind-Value="Config.BaseUrl"
+                  Label="Base URL"
+                  Variant="Variant.Outlined"
+                  HelperText="Mochat API 地址"
+                  Class="mb-3" />
+
+    <MudTextField @bind-Value="Config.SocketUrl"
+                  Label="Socket URL"
+                  Variant="Variant.Outlined"
+                  HelperText="WebSocket 服务器地址"
+                  Class="mb-3" />
+
+    <MudTextField @bind-Value="Config.SocketPath"
+                  Label="Socket Path"
+                  Variant="Variant.Outlined"
+                  HelperText="Socket.IO 路径"
+                  Class="mb-3" />
+
+    <MudTextField @bind-Value="Config.ClawToken"
+                  Label="Claw Token"
+                  Variant="Variant.Outlined"
+                  HelperText="认证令牌"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+
+    <MudTextField @bind-Value="Config.AgentUserId"
+                  Label="Agent User ID"
+                  Variant="Variant.Outlined"
+                  HelperText="代理用户 ID"
+                  Class="mb-3" />
+
+    <MudDivider Class="my-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的会话 (Sessions)</MudText>
+    <MudTextField @bind-Value="_newSession"
+                  Label="添加会话"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddSession"
+                  Class="mb-2" />
+
+    @foreach (var session in Config.Sessions)
+    {
+        <MudChip Color="Color.Primary"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveSession(session)">
+            @session
+        </MudChip>
+    }
+
+    <MudDivider Class="my-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的面板 (Panels)</MudText>
+    <MudTextField @bind-Value="_newPanel"
+                  Label="添加面板"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddPanel"
+                  Class="mb-2" />
+
+    @foreach (var panel in Config.Panels)
+    {
+        <MudChip Color="Color.Info"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemovePanel(panel)">
+            @panel
+        </MudChip>
+    }
+
+    <MudDivider Class="my-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的用户/群组 (Allow From)</MudText>
+    <MudTextField @bind-Value="_newAllowFrom"
+                  Label="添加允许的用户/群组"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddAllowFrom"
+                  Class="mb-2" />
+
+    @foreach (var allowFrom in Config.AllowFrom)
+    {
+        <MudChip Color="Color.Success"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveAllowFrom(allowFrom)">
+            @allowFrom
+        </MudChip>
+    }
+
+    <MudDivider Class="my-3" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">回复设置</MudText>
+    <MudSelect @bind-Value="Config.ReplyDelayMode"
+               Label="回复延迟模式"
+               Variant="Variant.Outlined"
+               Class="mb-3">
+        <MudSelectItem Value="@("non-mention")">非提及</MudSelectItem>
+        <MudSelectItem Value="@("mention")">提及</MudSelectItem>
+        <MudSelectItem Value="@("all")">全部</MudSelectItem>
+    </MudSelect>
+
+    <MudNumericField @bind-Value="Config.ReplyDelayMs"
+                     Label="回复延迟 (毫秒)"
+                     Min="0"
+                     Variant="Variant.Outlined"
+                     Class="mb-3" />
+
+    <MudCheckBox @bind-Checked="Config.Mention.RequireInGroups"
+                 Label="在群组中需要提及"
+                 T="bool"
+                 Class="mb-3" />
+</div>
+
+@code {
+    [Parameter]
+    public MochatConfig Config { get; set; } = new();
+
+    [Parameter]
+    public EventCallback<MochatConfig> ConfigChanged { get; set; }
+
+    private string _newSession = string.Empty;
+    private string _newPanel = string.Empty;
+    private string _newAllowFrom = string.Empty;
+
+    private void AddSession()
+    {
+        if (!string.IsNullOrWhiteSpace(_newSession) &&
+            !Config.Sessions.Contains(_newSession))
+        {
+            var list = Config.Sessions.ToList();
+            list.Add(_newSession);
+            Config.Sessions = list;
+            _newSession = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveSession(string session)
+    {
+        var list = Config.Sessions.ToList();
+        list.Remove(session);
+        Config.Sessions = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+
+    private void AddPanel()
+    {
+        if (!string.IsNullOrWhiteSpace(_newPanel) &&
+            !Config.Panels.Contains(_newPanel))
+        {
+            var list = Config.Panels.ToList();
+            list.Add(_newPanel);
+            Config.Panels = list;
+            _newPanel = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemovePanel(string panel)
+    {
+        var list = Config.Panels.ToList();
+        list.Remove(panel);
+        Config.Panels = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+
+    private void AddAllowFrom()
+    {
+        if (!string.IsNullOrWhiteSpace(_newAllowFrom) &&
+            !Config.AllowFrom.Contains(_newAllowFrom))
+        {
+            var list = Config.AllowFrom.ToList();
+            list.Add(_newAllowFrom);
+            Config.AllowFrom = list;
+            _newAllowFrom = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveAllowFrom(string allowFrom)
+    {
+        var list = Config.AllowFrom.ToList();
+        list.Remove(allowFrom);
+        Config.AllowFrom = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+}

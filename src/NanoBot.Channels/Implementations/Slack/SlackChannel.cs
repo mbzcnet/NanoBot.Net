@@ -324,8 +324,50 @@ public partial class SlackChannel : ChannelBase
 
         text = TableRegex().Replace(text, ConvertTable);
 
+        // Post-processing cleanup
+        text = CleanupMrkdwn(text);
+
         return text;
     }
+
+    private static string CleanupMrkdwn(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return text;
+
+        // Fix nested formatting: **bold *italic* bold** -> **bold** *italic* **bold**
+        // Slack doesn't support nested formatting
+
+        // Remove consecutive spaces
+        text = MultipleSpacesRegex().Replace(text, " ");
+
+        // Clean up empty bold/italic markers
+        text = EmptyFormattingRegex().Replace(text, "");
+
+        // Fix code block syntax: ``` -> ``` (ensure proper Slack formatting)
+        text = CodeBlockRegex().Replace(text, "```$1```");
+
+        // Clean up multiple consecutive newlines (max 2)
+        text = MultipleNewlinesRegex().Replace(text, "\n\n");
+
+        // Trim each line
+        var lines = text.Split('\n').Select(l => l.TrimEnd()).ToArray();
+        text = string.Join("\n", lines);
+
+        return text.Trim();
+    }
+
+    [GeneratedRegex(@" +")]
+    private static partial Regex MultipleSpacesRegex();
+
+    [GeneratedRegex(@"\*\*\s*\*\*|\*\s*\*|_\s*_|`[^`]*``[^`]*`")]
+    private static partial Regex EmptyFormattingRegex();
+
+    [GeneratedRegex(@"```\s*([^`]+?)\s*```")]
+    private static partial Regex CodeBlockRegex();
+
+    [GeneratedRegex(@"\n{3,}")]
+    private static partial Regex MultipleNewlinesRegex();
 
     [GeneratedRegex(@"(?m)^\|.*\|$(?:\n\|[\s:|-]*\|$)(?:\n\|.*\|$)*")]
     private static partial Regex TableRegex();

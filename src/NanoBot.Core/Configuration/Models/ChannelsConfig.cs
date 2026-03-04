@@ -14,4 +14,24 @@ public class ChannelsConfig
     public SlackConfig? Slack { get; set; }
     public QQConfig? QQ { get; set; }
     public MochatConfig? Mochat { get; set; }
+    public MatrixConfig? Matrix { get; set; }
+}
+
+public class MatrixConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    public string? Homeserver { get; set; }
+
+    public string? AccessToken { get; set; }
+
+    public string? UserId { get; set; }
+
+    public string? DeviceId { get; set; }
+
+    public string? RoomId { get; set; }
+
+    public bool EncryptRooms { get; set; } = false;
+
+    public bool SyncPresence { get; set; } = true;
 }

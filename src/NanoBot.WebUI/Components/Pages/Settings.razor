@@ -2,112 +2,117 @@
 @inject NavigationManager NavigationManager
 @inject ISnackbar Snackbar
 @inject ILogger<Settings> Logger
+@inject IStringLocalizer<Settings> Localizer
+@inject ILocalizationService localizationService
+@inject IWebUIConfigService webUIConfigService
 @using NanoBot.Core.Configuration
+@using NanoBot.WebUI.Services
+@using Microsoft.Extensions.Localization
 
-<PageTitle>NanoBot - 设置</PageTitle>
+<PageTitle>@Localizer["Title"]</PageTitle>
 
 <MudContainer MaxWidth="MaxWidth.Large" Class="settings-container">
     <MudPaper Elevation="1" Class="pa-4">
-        <MudText Typo="Typo.h4" Class="mb-4">WebUI 设置</MudText>
-        
+        <MudText Typo="Typo.h4" Class="mb-4">@Localizer["WebUISettings"]</MudText>
+
         <MudGrid>
             <MudItem xs="12" md="6">
                 <MudCard>
                     <MudCardHeader>
                         <CardHeaderContent>
-                            <MudText Typo="Typo.h6">服务器配置</MudText>
+                            <MudText Typo="Typo.h6">@Localizer["ServerConfig"]</MudText>
                         </CardHeaderContent>
                     </MudCardHeader>
                     <MudCardContent>
-                        <MudTextField @bind-Value="serverConfig.Host" 
-                                      Label="主机地址" 
+                        <MudTextField @bind-Value="serverConfig.Host"
+                                      Label="@Localizer["Host"]"
                                       Variant="Variant.Outlined"
                                       Class="mb-3" />
-                        
+
                         <MudNumericField @bind-Value="serverConfig.Port"
-                                        Label="端口"
+                                        Label="@Localizer["Port"]"
                                         Min="1"
                                         Max="65535"
                                         Variant="Variant.Outlined"
                                         Class="mb-3" />
-                        
+
                         <MudTextField @bind-Value="serverConfig.Urls"
-                                      Label="URLs (可选)"
+                                      Label="@Localizer["Urls"]"
                                       Variant="Variant.Outlined"
-                                      HelperText="留空则使用主机+端口自动生成"
+                                      HelperText="@Localizer["UrlsHelper"]"
                                       Class="mb-3" />
                     </MudCardContent>
                 </MudCard>
             </MudItem>
-            
+
             <MudItem xs="12" md="6">
                 <MudCard>
                     <MudCardHeader>
                         <CardHeaderContent>
-                            <MudText Typo="Typo.h6">认证配置</MudText>
+                            <MudText Typo="Typo.h6">@Localizer["AuthConfig"]</MudText>
                         </CardHeaderContent>
                     </MudCardHeader>
                     <MudCardContent>
-                        <MudSelect @bind-Value="authConfig.Mode" 
-                                   Label="认证模式"
+                        <MudSelect @bind-Value="authConfig.Mode"
+                                   Label="@Localizer["AuthMode"]"
                                    Variant="Variant.Outlined"
                                    Class="mb-3">
-                            <MudSelectItem Value="@("none")">无认证</MudSelectItem>
-                            <MudSelectItem Value="@("token")">Token认证</MudSelectItem>
-                            <MudSelectItem Value="@("password")">密码认证</MudSelectItem>
+                            <MudSelectItem Value="@("none")">@Localizer["AuthModeNone"]</MudSelectItem>
+                            <MudSelectItem Value="@("token")">@Localizer["AuthModeToken"]</MudSelectItem>
+                            <MudSelectItem Value="@("password")">@Localizer["AuthModePassword"]</MudSelectItem>
                         </MudSelect>
-                        
+
                         @if (authConfig.Mode == "token")
                         {
                             <MudTextField @bind-Value="authConfig.Token"
-                                          Label="Token"
+                                          Label="@Localizer["Token"]"
                                           Variant="Variant.Outlined"
                                           Class="mb-3" />
                         }
-                        
+
                         @if (authConfig.Mode == "password")
                         {
                             <MudTextField @bind-Value="authConfig.Password"
-                                          Label="密码"
+                                          Label="@Localizer["Password"]"
                                           InputType="InputType.Password"
                                           Variant="Variant.Outlined"
                                           Class="mb-3" />
                         }
-                        
-                        <MudCheckBox @bind-Checked="authConfig.AllowLocalhost"
-                                     Label="允许本地访问"
+
+                        <MudCheckBox @bind-checked="authConfig.AllowLocalhost"
+                                     Label="@Localizer["AllowLocalhost"]"
                                      T="bool"
                                      Class="mb-3" />
                     </MudCardContent>
                 </MudCard>
             </MudItem>
-            
+
             <MudItem xs="12" md="6">
                 <MudCard>
                     <MudCardHeader>
                         <CardHeaderContent>
-                            <MudText Typo="Typo.h6">CORS 配置</MudText>
+                            <MudText Typo="Typo.h6">@Localizer["CorsConfig"]</MudText>
                         </CardHeaderContent>
                     </MudCardHeader>
                     <MudCardContent>
-                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyOrigin"
-                                     Label="允许任意源"
+                        <MudCheckBox @bind-checked="corsConfig.AllowAnyOrigin"
+                                     Label="@Localizer["AllowAnyOrigin"]"
                                      T="bool"
                                      Class="mb-3" />
-                        
+
                         @if (!corsConfig.AllowAnyOrigin)
                         {
                             <MudTextField @bind-Value="newCorsOrigin"
-                                          Label="添加允许的源"
+                                          Label="@Localizer["AddAllowedOrigin"]"
                                           Variant="Variant.Outlined"
                                           Adornment="Adornment.End"
                                           AdornmentIcon="@Icons.Material.Filled.Add"
                                           OnAdornmentClick="AddCorsOrigin"
                                           Class="mb-3" />
-                            
+
                             @foreach (var origin in corsConfig.AllowedOrigins)
                             {
-                                <MudChip Color="Color.Primary" 
+                                <MudChip Color="Color.Primary"
                                         Class="mr-2 mb-2"
                                         T="string"
                                         OnClose="() => RemoveCorsOrigin(origin)">
@@ -115,94 +120,103 @@
                                 </MudChip>
                             }
                         }
-                        
-                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyMethod"
-                                     Label="允许任意方法"
+
+                        <MudCheckBox @bind-checked="corsConfig.AllowAnyMethod"
+                                     Label="@Localizer["AllowAnyMethod"]"
                                      T="bool"
                                      Class="mb-3" />
-                        
-                        <MudCheckBox @bind-Checked="corsConfig.AllowAnyHeader"
-                                     Label="允许任意头部"
+
+                        <MudCheckBox @bind-checked="corsConfig.AllowAnyHeader"
+                                     Label="@Localizer["AllowAnyHeader"]"
                                      T="bool"
                                      Class="mb-3" />
-                        
-                        <MudCheckBox @bind-Checked="corsConfig.AllowCredentials"
-                                     Label="允许凭据"
+
+                        <MudCheckBox @bind-checked="corsConfig.AllowCredentials"
+                                     Label="@Localizer["AllowCredentials"]"
                                      T="bool"
                                      Class="mb-3" />
                     </MudCardContent>
                 </MudCard>
             </MudItem>
-            
+
             <MudItem xs="12" md="6">
                 <MudCard>
                     <MudCardHeader>
                         <CardHeaderContent>
-                            <MudText Typo="Typo.h6">功能配置</MudText>
+                            <MudText Typo="Typo.h6">@Localizer["FeaturesConfig"]</MudText>
                         </CardHeaderContent>
                     </MudCardHeader>
                     <MudCardContent>
-                        <MudCheckBox @bind-Checked="featuresConfig.FileUpload"
-                                     Label="启用文件上传"
+                        <MudCheckBox @bind-checked="featuresConfig.FileUpload"
+                                     Label="@Localizer["EnableFileUpload"]"
                                      T="bool"
                                      Class="mb-3" />
-                        
+
                         <MudTextField @bind-Value="featuresConfig.MaxFileSize"
-                                      Label="最大文件大小"
+                                      Label="@Localizer["MaxFileSize"]"
                                       Variant="Variant.Outlined"
-                                      HelperText="如: 10MB, 1GB"
+                                      HelperText="@Localizer["MaxFileSizeHelper"]"
                                       Class="mb-3" />
-                        
+
                         <MudTextField @bind-Value="newFileType"
-                                      Label="添加允许的文件类型"
+                                      Label="@Localizer["AddFileType"]"
                                       Variant="Variant.Outlined"
                                       Adornment="Adornment.End"
                                       AdornmentIcon="@Icons.Material.Filled.Add"
                                       OnAdornmentClick="AddFileType"
                                       Class="mb-3" />
-                        
+
                         @foreach (var fileType in featuresConfig.AllowedFileTypes)
                         {
-                            <MudChip Color="Color.Secondary" 
+                            <MudChip Color="Color.Secondary"
                                     Class="mr-2 mb-2"
                                     T="string"
                                     OnClose="() => RemoveFileType(fileType)">
                                 @fileType
                             </MudChip>
                         }
-                        
-                        <MudCheckBox @bind-Checked="featuresConfig.EnableChatHistory"
-                                     Label="启用聊天历史"
-                                     T="bool"
-                                     Class="mb-3" />
-                        
-                        <MudCheckBox @bind-Checked="featuresConfig.EnableSessionManagement"
-                                     Label="启用会话管理"
-                                     T="bool"
-                                     Class="mb-3" />
-                        
-                        <MudCheckBox @bind-Checked="featuresConfig.EnableRealTimeUpdates"
-                                     Label="启用实时更新"
-                                     T="bool"
-                                     Class="mb-3" />
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+
+            <MudItem xs="12" md="6">
+                <MudCard>
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@Localizer["LocalizationConfig"]</MudText>
+                        </CardHeaderContent>
+                    </MudCardHeader>
+                    <MudCardContent>
+                        <MudSelect @bind-Value="localizationConfig.DefaultLanguage"
+                                   Label="@Localizer["DefaultLanguage"]"
+                                   Variant="Variant.Outlined"
+                                   Class="mb-3">
+                            <MudSelectItem Value="@("auto")">@Localizer["LanguageAuto"]</MudSelectItem>
+                            <MudSelectItem Value="@("zh-CN")">@Localizer["LanguageZhCN"]</MudSelectItem>
+                            <MudSelectItem Value="@("en-US")">@Localizer["LanguageEnUS"]</MudSelectItem>
+                        </MudSelect>
+
+                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                            @Localizer["LanguageChanged"]
+                        </MudText>
                     </MudCardContent>
                 </MudCard>
             </MudItem>
         </MudGrid>
-        
+
         <div class="d-flex justify-end mt-4">
-            <MudButton Variant="Variant.Outlined" 
+            <MudButton Variant="Variant.Outlined"
                        Color="Color.Default"
                        Class="mr-2"
                        OnClick="ResetToDefaults">
-                重置为默认
+                @Localizer["ResetToDefaults"]
             </MudButton>
-            
-            <MudButton Variant="Variant.Filled" 
+
+            <MudButton Variant="Variant.Filled"
                        Color="Color.Primary"
                        OnClick="SaveSettings"
                        StartIcon="@Icons.Material.Filled.Save">
-                保存设置
+                @Localizer["SaveSettings"]
             </MudButton>
         </div>
     </MudPaper>
@@ -213,28 +227,53 @@
     private WebUIAuthConfig authConfig = new();
     private WebUICorsConfig corsConfig = new();
     private WebUIFeaturesConfig featuresConfig = new();
-    
+    private WebUILocalizationConfig localizationConfig = new();
+
     private string newCorsOrigin = string.Empty;
     private string newFileType = string.Empty;
-    
-    protected override void OnInitialized()
+
+    protected override async Task OnInitializedAsync()
     {
-        LoadCurrentSettings();
+        await LoadCurrentSettingsAsync();
     }
-    
-    private void LoadCurrentSettings()
+
+    private async Task LoadCurrentSettingsAsync()
     {
-        // TODO: 从配置服务加载当前设置
-        // 这里先使用默认值
-        serverConfig = new WebUIServerConfig();
-        authConfig = new WebUIAuthConfig();
-        corsConfig = new WebUICorsConfig();
-        featuresConfig = new WebUIFeaturesConfig();
+        try
+        {
+            // 从配置服务加载当前设置
+            var config = webUIConfigService.GetConfig();
+
+            serverConfig = config.Server;
+            authConfig = config.Auth;
+            corsConfig = config.Cors;
+            featuresConfig = config.Features;
+            localizationConfig = config.Localization;
+
+            // 从本地存储加载语言设置（异步）
+            var savedLanguage = await localizationService.GetSavedCultureAsync();
+            if (!string.IsNullOrEmpty(savedLanguage))
+            {
+                localizationConfig.DefaultLanguage = savedLanguage;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "加载 WebUI 配置失败");
+            Snackbar.Add("加载配置失败：" + ex.Message, Severity.Error);
+
+            // 使用默认值
+            serverConfig = new WebUIServerConfig();
+            authConfig = new WebUIAuthConfig();
+            corsConfig = new WebUICorsConfig();
+            featuresConfig = new WebUIFeaturesConfig();
+            localizationConfig = new WebUILocalizationConfig();
+        }
     }
-    
+
     private void AddCorsOrigin()
     {
-        if (!string.IsNullOrWhiteSpace(newCorsOrigin) && 
+        if (!string.IsNullOrWhiteSpace(newCorsOrigin) &&
             !corsConfig.AllowedOrigins.Contains(newCorsOrigin))
         {
             corsConfig.AllowedOrigins.Add(newCorsOrigin);
@@ -242,16 +281,16 @@
             StateHasChanged();
         }
     }
-    
+
     private void RemoveCorsOrigin(string origin)
     {
         corsConfig.AllowedOrigins.Remove(origin);
         StateHasChanged();
     }
-    
+
     private void AddFileType()
     {
-        if (!string.IsNullOrWhiteSpace(newFileType) && 
+        if (!string.IsNullOrWhiteSpace(newFileType) &&
             !featuresConfig.AllowedFileTypes.Contains(newFileType))
         {
             if (!newFileType.StartsWith("."))
@@ -263,41 +302,61 @@
             StateHasChanged();
         }
     }
-    
+
     private void RemoveFileType(string fileType)
     {
         featuresConfig.AllowedFileTypes.Remove(fileType);
         StateHasChanged();
     }
-    
+
     private void ResetToDefaults()
     {
         serverConfig = new WebUIServerConfig();
         authConfig = new WebUIAuthConfig();
         corsConfig = new WebUICorsConfig();
         featuresConfig = new WebUIFeaturesConfig();
+        localizationConfig = new WebUILocalizationConfig();
         StateHasChanged();
-        
-        Snackbar.Add("已重置为默认设置", Severity.Info);
+
+        Snackbar.Add(Localizer["ResetSuccess"], Severity.Info);
     }
-    
+
     private async Task SaveSettings()
     {
         try
         {
-            // TODO: 保存到配置文件
-            Logger.LogInformation("保存WebUI设置");
-            
-            Snackbar.Add("设置已保存", Severity.Success);
-            
-            // 可能需要重启服务以应用某些设置
-            await Task.Delay(1000);
-            NavigationManager.NavigateTo("/", forceLoad: true);
+            // 构建完整的配置对象
+            var config = new WebUIConfig
+            {
+                Server = serverConfig,
+                Auth = authConfig,
+                Cors = corsConfig,
+                Features = featuresConfig,
+                Localization = localizationConfig
+            };
+
+            // 保存到配置文件
+            var success = await webUIConfigService.SaveConfigAsync(config);
+
+            if (success)
+            {
+                // 保存语言设置到本地存储
+                await localizationService.SaveCultureAsync(localizationConfig.DefaultLanguage);
+
+                Snackbar.Add(Localizer["SaveSuccess"], Severity.Success);
+
+                // 提示用户某些设置需要重启才能生效
+                Snackbar.Add("注意：服务器和 CORS 设置需要重启 WebUI 才能生效", Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add("保存配置失败", Severity.Error);
+            }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "保存设置失败");
-            Snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+            Snackbar.Add(Localizer["SaveFailed", ex.Message], Severity.Error);
         }
     }
 }

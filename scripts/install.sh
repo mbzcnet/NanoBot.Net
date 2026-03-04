@@ -95,8 +95,13 @@ install_nbot() {
 
     mkdir -p "$INSTALL_DIR"
 
-    mv "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
+    mv "$TEMP_DIR/$PLATFORM/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
     chmod +x "$INSTALL_DIR/$BINARY_NAME"
+
+    if [ -d "$TEMP_DIR/$PLATFORM/webui" ]; then
+        mv "$TEMP_DIR/$PLATFORM/webui" "$INSTALL_DIR/webui"
+        info "Installed WebUI to $INSTALL_DIR/webui"
+    fi
 
     rm -rf "$TEMP_DIR"
 

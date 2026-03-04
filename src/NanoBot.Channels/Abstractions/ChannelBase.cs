@@ -26,7 +26,7 @@ public abstract class ChannelBase : IChannel
     public abstract Task StopAsync(CancellationToken cancellationToken = default);
     public abstract Task SendMessageAsync(OutboundMessage message, CancellationToken cancellationToken = default);
 
-    protected bool IsAllowed(string senderId, IReadOnlyList<string> allowList)
+    protected bool IsAllowed(string senderId, IReadOnlyList<string>? allowList)
     {
         if (allowList == null || allowList.Count == 0)
             return true;
@@ -46,7 +46,7 @@ public abstract class ChannelBase : IChannel
         return false;
     }
 
-    protected async Task HandleMessageAsync(
+    protected async Task PublishInboundAsync(
         string senderId,
         string chatId,
         string content,
@@ -66,6 +66,16 @@ public abstract class ChannelBase : IChannel
 
         MessageReceived?.Invoke(this, message);
         await Bus.PublishInboundAsync(message);
+    }
+
+    protected Task HandleMessageAsync(
+        string senderId,
+        string chatId,
+        string content,
+        IReadOnlyList<string>? media = null,
+        IDictionary<string, object>? metadata = null)
+    {
+        return PublishInboundAsync(senderId, chatId, content, media, metadata);
     }
 
     protected virtual void OnMessageReceived(InboundMessage message)

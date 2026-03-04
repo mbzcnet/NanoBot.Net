@@ -1,17 +1,19 @@
-﻿@page "/"
+@page "/"
 @inject NavigationManager NavigationManager
 @inject ISessionService SessionService
+@inject IStringLocalizer<Home> Localizer
 @using NanoBot.WebUI.Services
+@using Microsoft.Extensions.Localization
 @rendermode InteractiveServer
 
-<PageTitle>NanoBot - 主页</PageTitle>
+<PageTitle>@Localizer["Title"]</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-8 nb-home-page">
+<MudContainer MaxWidth="MaxWidth.Medium" Class="nb-home-page">
     <MudPaper Elevation="0" Class="pa-8 text-center nb-home-hero">
         <MudIcon Icon="@Icons.Material.Filled.SmartToy" Size="Size.Large" Color="Color.Primary" Style="font-size: 4rem;" />
-        <MudText Typo="Typo.h3" Class="mt-4">欢迎使用 NanoBot</MudText>
+        <MudText Typo="Typo.h3" Class="mt-4">@Localizer["Welcome"]</MudText>
         <MudText Typo="Typo.body1" Class="mt-2 mud-text-secondary">
-            您的个人 AI 助手
+            @Localizer["Subtitle"]
         </MudText>
         
         <MudButton Variant="Variant.Filled" 
@@ -20,28 +22,28 @@
                    StartIcon="@Icons.Material.Filled.Add"
                    Class="mt-6"
                    OnClick="StartNewSession">
-            开始新会话
+            @Localizer["StartNewSession"]
         </MudButton>
         
         <MudDivider Class="my-6" />
         
-        <MudText Typo="Typo.h6" Class="mb-4">快速开始</MudText>
+        <MudText Typo="Typo.h6" Class="mb-4">@Localizer["QuickStart"]</MudText>
         <MudGrid>
             <MudItem xs="12" md="6">
                 <MudPaper Elevation="2" Class="pa-4 nb-home-quick-card" Style="cursor: pointer;" @onclick="StartNewSession">
                     <MudIcon Icon="@Icons.Material.Filled.Chat" Color="Color.Info" />
-                    <MudText Typo="Typo.subtitle1" Class="mt-2">聊天对话</MudText>
+                    <MudText Typo="Typo.subtitle1" Class="mt-2">@Localizer["ChatConversation"]</MudText>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                        与 AI 助手进行自然对话
+                        @Localizer["ChatDescription"]
                     </MudText>
                 </MudPaper>
             </MudItem>
             <MudItem xs="12" md="6">
                 <MudPaper Elevation="2" Class="pa-4 nb-home-quick-card" Style="cursor: pointer;" @onclick="NavigateToConfig">
                     <MudIcon Icon="@Icons.Material.Filled.Settings" Color="Color.Warning" />
-                    <MudText Typo="Typo.subtitle1" Class="mt-2">配置管理</MudText>
+                    <MudText Typo="Typo.subtitle1" Class="mt-2">@Localizer["ConfigManagement"]</MudText>
                     <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                        配置 Agent 和 LLM 提供商
+                        @Localizer["ConfigDescription"]
                     </MudText>
                 </MudPaper>
             </MudItem>

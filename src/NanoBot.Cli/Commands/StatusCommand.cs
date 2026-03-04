@@ -4,12 +4,12 @@ using NanoBot.Core.Configuration;
 
 namespace NanoBot.Cli.Commands;
 
-public class StatusCommand : ICliCommand
+public class StatusCommand : NanoBotCommandBase
 {
-    public string Name => "status";
-    public string Description => "Show Agent status";
+    public override string Name => "status";
+    public override string Description => "Show Agent status";
 
-    public Command CreateCommand()
+    public override Command CreateCommand()
     {
         var jsonOption = new Option<bool>(
             name: "--json",
@@ -17,24 +17,16 @@ public class StatusCommand : ICliCommand
             getDefaultValue: () => false
         );
 
-        var configOption = new Option<string?>(
-            name: "--config",
-            description: "Configuration file path"
-        );
-        configOption.AddAlias("-c");
-
         var command = new Command(Name, Description)
         {
-            jsonOption,
-            configOption
+            jsonOption
         };
 
         command.SetHandler(async (context) =>
         {
             var json = context.ParseResult.GetValueForOption(jsonOption);
-            var configPath = context.ParseResult.GetValueForOption(configOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteStatusAsync(json, configPath, cancellationToken);
+            await ExecuteStatusAsync(json, cancellationToken);
         });
 
         return command;
@@ -42,12 +34,11 @@ public class StatusCommand : ICliCommand
 
     private async Task ExecuteStatusAsync(
         bool outputJson,
-        string? configPath,
         CancellationToken cancellationToken)
     {
-        var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath, cancellationToken);
+        var config = GetConfig();
+        var configFilePath = GetConfigPath();
         var workspacePath = config.Workspace.GetResolvedPath();
-        var configFilePath = GetConfigPath(configPath);
         
         var profileName = config.Llm.DefaultProfile ?? "default";
         var profile = config.Llm.Profiles.GetValueOrDefault(profileName);

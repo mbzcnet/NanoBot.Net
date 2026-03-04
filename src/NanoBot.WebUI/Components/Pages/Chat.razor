@@ -7,20 +7,23 @@
 @inject IWebHostEnvironment WebHostEnvironment
 @inject IJSRuntime JSRuntime
 @inject NanoBot.Core.Storage.IFileStorageService FileStorageService
+@inject IConfiguration Configuration
 @using NanoBot.WebUI.Services
+@using NanoBot.Core.Configuration
+@using NanoBot.Cli.Services
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
+@using Microsoft.Extensions.Configuration
 @implements IAsyncDisposable
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - 聊天</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="chat-container">
-    <MudPaper Elevation="0" Class="d-flex flex-column nb-chat-shell" Style="height: calc(100vh - 120px);">
+<div class="nb-chat-page">
+    <div class="nb-chat-shell">
         
-        @* 消息列表区域 *@
-        <div class="flex-grow-1 overflow-auto" style="min-height: 0;" @ref="_messagesContainerRef">
-            <MudPaper Elevation="0" Class="pa-4 nb-chat-stream">
+        <div @ref="_messagesContainerRef" style="flex:1;min-height:0;overflow:auto;">
+            <div class="nb-chat-content" style="max-width: 900px; margin: 0 auto;">
                 @if (_messages == null || !_messages.Any())
                 {
                     <div class="nb-chat-empty">
@@ -33,77 +36,92 @@
                 {
                     @foreach (var message in _messages)
                     {
-                        <div class="@GetMessageClass(message.Role)">
-                            <MudPaper Elevation="0" Class="pa-3 mb-3 nb-message-bubble" Style="@GetMessageStyle(message.Role)">
-                                <div class="d-flex align-center mb-2">
-                                    <MudIcon Icon="@GetMessageIcon(message.Role)" Size="Size.Small" Class="mr-2" />
-                                    <MudText Typo="Typo.subtitle2">@GetMessageSender(message.Role)</MudText>
-                                    <MudSpacer />
-                                    <MudText Typo="Typo.caption" Class="mud-text-secondary">
-                                        @message.Timestamp.ToString("HH:mm:ss")
-                                    </MudText>
-                                </div>
+                        <div class="nb-message-row nb-message-row-@message.Role.ToLower()">
+                            <div class="nb-message-bubble nb-message-bubble-@message.Role.ToLower()">
+                                @if (message.Role.ToLower() != "user")
+                                {
+                                    <div class="nb-message-header">
+                                        <MudIcon Icon="@GetMessageIcon(message.Role)" Size="Size.Small" Class="mr-2" />
+                                        <MudText Typo="Typo.caption">@GetMessageSender(message.Role)</MudText>
+                                    </div>
+                                }
                                 <MarkdownRenderer Content="@message.Content" />
-                            </MudPaper>
+                            </div>
                         </div>
                     }
                 }
 
                 @if (_isGenerating)
                 {
-                    <div class="message-assistant">
-                        <MudPaper Elevation="0" Class="pa-3 mb-3 nb-message-bubble">
+                    <div class="nb-message-row nb-message-row-assistant">
+                        <div class="nb-message-bubble nb-message-bubble-assistant">
                             <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mb-2" />
-                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                                AI 正在思考...
-                            </MudText>
-                        </MudPaper>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">AI 正在思考...</MudText>
+                        </div>
                     </div>
                 }
 
                 <div @ref="_messagesEndRef"></div>
-            </MudPaper>
+            </div>
         </div>
-        
-        @* 输入区域 *@
-        <div @ref="_inputAreaRef">
-            <MudPaper Elevation="0" Class="pa-3 mt-2 nb-composer nb-composer-floating">
-                <div class="nb-composer-row">
-                    <div class="nb-input-shell">
-                        <div class="nb-composer-topbar">
-                            <label for="chat-image-upload" class="@($"nb-attach-btn{(_isGenerating ? " disabled" : string.Empty)}")">
-                                <MudIcon Icon="@Icons.Material.Filled.Attachment" Size="Size.Small" />
-                            </label>
-                        </div>
+
+        <div @ref="_inputAreaRef" class="nb-composer-container">
+            <div class="nb-composer-shell">
+                <div class="nb-composer-main">
+                    <MudTextField @bind-Value="_inputMessage"
+                                  Placeholder="输入消息..."
+                                  Variant="Variant.Text"
+                                  Lines="1"
+                                  Class="nb-composer-input"
+                                  Disabled="@_isGenerating"
+                                  OnKeyDown="HandleKeyDown"
+                                  Immediate="true" />
+                </div>
+                <div class="nb-composer-toolbar">
+                    <div class="nb-composer-left">
+                        <label for="chat-image-upload" class="@($"nb-action-btn{(_isGenerating ? " disabled" : string.Empty)}")">
+                            <MudIcon Icon="@Icons.Material.Filled.Add" Size="Size.Small" />
+                        </label>
                         <InputFile id="chat-image-upload"
                                    OnChange="HandleImageSelected"
                                    accept="image/*"
                                    disabled="@_isGenerating"
-                                   class="nb-hidden-file-input"
                                    style="display:none" />
-
-                        <MudTextField @bind-Value="_inputMessage"
-                                      Placeholder="给 NanoBot 发送消息..."
-                                      Variant="Variant.Outlined"
-                                      Lines="2"
-                                      Class="nb-composer-input"
-                                      Disabled="@_isGenerating"
-                                      OnKeyDown="HandleKeyDown"
-                                      Immediate="true" />
-
-                        <MudButton Variant="Variant.Filled"
-                                   Color="Color.Primary"
-                                   Class="nb-send-fab"
-                                   OnClick="SendMessage"
-                                   Disabled="@((string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl)) || _isGenerating)">
-                            <MudIcon Icon="@Icons.Material.Rounded.NorthEast" Size="Size.Small" />
-                        </MudButton>
+                        <MudMenu Dense="true" OpenChanged="HandleProfileMenuOpenChanged">
+                            <ActivatorContent>
+                                <div class="nb-model-btn">
+                                    @_selectedModelLabel
+                                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Class="ml-1" />
+                                </div>
+                            </ActivatorContent>
+                            <ChildContent>
+                                @if (_profileOptions.Any())
+                                {
+                                    @foreach (var option in _profileOptions)
+                                    {
+                                        <MudMenuItem @key="option.ProfileId" OnClick="@(async () => await SelectProfile(option.ProfileId))">
+                                            @option.Display
+                                        </MudMenuItem>
+                                    }
+                                }
+                                else
+                                {
+                                    <MudMenuItem Disabled="true">未找到可用模型</MudMenuItem>
+                                }
+                            </ChildContent>
+                        </MudMenu>
+                    </div>
+                    <div class="nb-composer-right">
+                        <div class="@($"nb-send-btn{((string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl)) || _isGenerating ? " mud-disabled" : string.Empty)}")"
+                             @onclick="SendMessage">
+                            <MudIcon Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" />
+                        </div>
                     </div>
                 </div>
 
                 @if (!string.IsNullOrWhiteSpace(_attachedImageUrl))
                 {
-                    <div class="nb-composer-meta">
+                    <div class="mt-2 px-1">
                         <div class="d-flex align-center gap-2">
                             <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined" Size="Size.Small">
                                 已附加图片
@@ -121,8 +139,8 @@
 
                 @if (!string.IsNullOrWhiteSpace(_attachedImageUrl))
                 {
-                    <MudPaper Elevation="0" Class="pa-2 mt-2 nb-attach-preview">
-                        <img src="@_attachedImageUrl" alt="preview" style="max-width: 180px; max-height: 180px; border-radius: 8px;" />
+                    <MudPaper Elevation="1" Outlined="true" Class="pa-2 mt-2" Style="width: fit-content;">
+                        <img src="@_attachedImageUrl" alt="preview" style="max-width: 180px; max-height: 180px;" />
                     </MudPaper>
                 }
 
@@ -138,10 +156,10 @@
                         </MudButton>
                     </div>
                 }
-            </MudPaper>
+            </div>
         </div>
-    </MudPaper>
-</MudContainer>
+    </div>
+</div>
 
 @code {
     [Parameter]
@@ -157,10 +175,20 @@
     private string? _attachedImageUrl;
     private DotNetObjectReference<Chat>? _dotNetRef;
     private bool _pasteRegistered;
+    private readonly List<ProfileOption> _profileOptions = new();
+    private string? _selectedProfileId;
+    private string _selectedModelLabel = "未配置模型";
 
     protected override async Task OnInitializedAsync()
     {
         _cancellationTokenSource = new CancellationTokenSource();
+        await LoadProfileOptionsAsync();
+        await LoadMessages();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadProfileOptionsAsync();
         await LoadMessages();
     }
     
@@ -202,6 +230,83 @@
             Content = m.Content,
             Timestamp = m.Timestamp
         }).ToList();
+
+        // 自动滚动到底部
+        await Task.Yield();
+        await ScrollToBottom();
+    }
+
+    private async Task LoadProfileOptionsAsync()
+    {
+        try
+        {
+            var configPath = GetConfigPath();
+            if (!File.Exists(configPath))
+            {
+                _profileOptions.Clear();
+                _selectedModelLabel = "未配置模型";
+                return;
+            }
+
+            var config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            _profileOptions.Clear();
+            foreach (var profile in config.Llm.Profiles)
+            {
+                _profileOptions.Add(new ProfileOption(
+                    profile.Key,
+                    $"{profile.Value.Model} ({profile.Value.Provider})"));
+            }
+
+            var session = await SessionService.GetSessionAsync(SessionId);
+            var preferredProfileId = session?.ProfileId
+                                     ?? config.Llm.DefaultProfile
+                                     ?? _profileOptions.FirstOrDefault()?.ProfileId;
+
+            if (string.IsNullOrWhiteSpace(preferredProfileId))
+            {
+                _selectedProfileId = null;
+                _selectedModelLabel = "未配置模型";
+                return;
+            }
+
+            _selectedProfileId = preferredProfileId;
+            var selected = _profileOptions.FirstOrDefault(p => p.ProfileId == preferredProfileId);
+            _selectedModelLabel = selected?.Display ?? preferredProfileId;
+        }
+        catch (Exception ex)
+        {
+            _selectedModelLabel = "模型读取失败";
+            Logger.LogError(ex, "Failed to load profile options for chat");
+        }
+    }
+
+    private async Task SelectProfile(string profileId)
+    {
+        _selectedProfileId = profileId;
+        var selected = _profileOptions.FirstOrDefault(p => p.ProfileId == profileId);
+        _selectedModelLabel = selected?.Display ?? profileId;
+
+        try
+        {
+            await SessionService.SetSessionProfileAsync(SessionId, profileId);
+            Snackbar.Add($"已切换模型：{_selectedModelLabel}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set session profile for chat");
+            Snackbar.Add($"切换模型失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task HandleProfileMenuOpenChanged(bool open)
+    {
+        if (!open)
+        {
+            return;
+        }
+
+        await LoadProfileOptionsAsync();
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task SendMessage()
@@ -290,7 +395,18 @@
                 return;
             }
 
-            await using var readStream = file.OpenReadStream(10 * 1024 * 1024);
+            // 从配置读取最大文件大小
+            var maxFileSize = GetMaxFileSizeFromConfig();
+
+            // 检查文件大小
+            if (file.Size > maxFileSize)
+            {
+                var maxFileSizeMb = maxFileSize / 1024 / 1024;
+                Snackbar.Add($"图片大小超过限制（最大 {maxFileSizeMb}MB）", Severity.Warning);
+                return;
+            }
+
+            await using var readStream = file.OpenReadStream(GetMaxFileSizeFromConfig());
             _attachedImageUrl = await SaveImageFromStreamAsync(readStream, Path.GetExtension(file.Name));
             Snackbar.Add("图片已添加", Severity.Success);
         }
@@ -367,6 +483,12 @@
         };
     }
 
+    private static string GetConfigPath()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(homeDir, ".nbot", "config.json");
+    }
+
     private void StopGeneration()
     {
         Logger.LogInformation("Stopping generation for session {SessionId}", SessionId);
@@ -374,6 +496,48 @@
         _cancellationTokenSource?.Cancel();
         _isGenerating = false;
         Snackbar.Add("已停止生成", Severity.Info);
+    }
+
+    private long GetMaxFileSizeFromConfig()
+    {
+        try
+        {
+            var maxFileSizeStr = Configuration["WebUI:Features:MaxFileSize"] ?? "10MB";
+
+            // 解析配置字符串（如 "10MB", "5MB", "1GB" 等）
+            maxFileSizeStr = maxFileSizeStr.Trim().ToUpperInvariant();
+
+            if (long.TryParse(maxFileSizeStr, out var bytes))
+            {
+                return bytes;
+            }
+
+            if (maxFileSizeStr.EndsWith("KB", StringComparison.Ordinal))
+            {
+                var num = double.Parse(maxFileSizeStr[..^2]);
+                return (long)(num * 1024);
+            }
+
+            if (maxFileSizeStr.EndsWith("MB", StringComparison.Ordinal))
+            {
+                var num = double.Parse(maxFileSizeStr[..^2]);
+                return (long)(num * 1024 * 1024);
+            }
+
+            if (maxFileSizeStr.EndsWith("GB", StringComparison.Ordinal))
+            {
+                var num = double.Parse(maxFileSizeStr[..^2]);
+                return (long)(num * 1024 * 1024 * 1024);
+            }
+
+            // 默认 10MB
+            return 10 * 1024 * 1024;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "无法解析 MaxFileSize 配置，使用默认值 10MB");
+            return 10 * 1024 * 1024;
+        }
     }
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
@@ -396,23 +560,23 @@
         }
     }
 
-    private string GetMessageClass(string role)
+    private string GetMessageRowStyle(string role)
     {
         return role?.ToLowerInvariant() switch
         {
-            "user" => "message-user",
-            "system" => "message-system",
-            _ => "message-assistant"
+            "user" => "display:flex;justify-content:flex-end;",
+            "system" => "display:flex;justify-content:center;",
+            _ => "display:flex;justify-content:flex-start;"
         };
     }
 
-    private string GetMessageStyle(string role)
+    private string GetMessageBubbleStyle(string role)
     {
         return role?.ToLowerInvariant() switch
         {
-            "user" => "max-width: min(85%, 900px); line-height: 1.55;",
-            "system" => "max-width: min(92%, 980px); line-height: 1.5;",
-            _ => "max-width: min(88%, 920px); line-height: 1.55;"
+            "user" => "max-width: min(76%, 860px); background: var(--mud-palette-primary-darken);",
+            "system" => "max-width: min(88%, 980px);",
+            _ => "max-width: min(82%, 930px);"
         };
     }
 
@@ -442,4 +606,6 @@
         public string Content { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
     }
+
+    private sealed record ProfileOption(string ProfileId, string Display);
 }

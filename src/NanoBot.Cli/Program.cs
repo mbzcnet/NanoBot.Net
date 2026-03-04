@@ -1,6 +1,10 @@
 using System.Reflection;
 using System.CommandLine;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using NanoBot.Cli.Commands;
+using NanoBot.Cli.Extensions;
+using NanoBot.Core.Configuration;
 
 namespace NanoBot.Cli;
 
@@ -20,6 +24,16 @@ public static class Program
             return 0;
         }
 
+        var configPath = GetConfigPath(args);
+        var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath);
+
+        var services = new ServiceCollection();
+        var configuration = BuildConfiguration(configPath);
+        services.AddNanoBot(configuration);
+
+        var provider = services.BuildServiceProvider();
+        NanoBotCommandBase.Initialize(provider, config, configPath);
+
         var rootCommand = new RootCommand($"{Logo} nbot v{Version} - A lightweight personal AI assistant");
 
         var commands = GetCommands();
@@ -34,6 +48,32 @@ public static class Program
         });
 
         return await rootCommand.InvokeAsync(args);
+    }
+
+    private static string? GetConfigPath(string[] args)
+    {
+        for (int i = 0; i < args.Length - 1; i++)
+        {
+            if (args[i] == "--config" || args[i] == "-c")
+            {
+                return args[i + 1];
+            }
+        }
+        return null;
+    }
+
+    private static IConfiguration BuildConfiguration(string? configPath)
+    {
+        var configurationBuilder = new ConfigurationBuilder()
+            .SetBasePath(Directory.GetCurrentDirectory())
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
+
+        if (!string.IsNullOrEmpty(configPath))
+        {
+            configurationBuilder.AddJsonFile(configPath, optional: false, reloadOnChange: false);
+        }
+
+        return configurationBuilder.Build();
     }
 
     private static IReadOnlyList<ICliCommand> GetCommands()

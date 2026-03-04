@@ -147,9 +147,20 @@ public class MemoryConsolidator
 
             var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
             var role = message.Role == ChatRole.User ? "USER" : "ASSISTANT";
-            sb.AppendLine($"[{timestamp}] {role}: {message.Text}");
+            var text = FilterBase64Content(message.Text);
+            sb.AppendLine($"[{timestamp}] {role}: {text}");
         }
         return sb.ToString();
+    }
+
+    private static string FilterBase64Content(string text)
+    {
+        // Filter out base64-encoded content (e.g., data:image/png;base64,...)
+        return System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"data:image/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+",
+            "[image]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
     private static string BuildConsolidationPrompt(string currentMemory, string conversation)

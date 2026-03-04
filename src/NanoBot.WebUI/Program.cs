@@ -1,25 +1,30 @@
 using MudBlazor.Services;
 using NanoBot.WebUI.Components;
 using NanoBot.WebUI.Services;
+using NanoBot.WebUI.Middleware;
 using NanoBot.Cli.Extensions;
-using NanoBot.Cli.Services;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Configuration.Validators;
+using NanoBot.Core.Sessions;
+using System.Globalization;
+using Blazored.LocalStorage;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 解析配置文件参数
 var configPath = GetConfigPath(args);
+if (string.IsNullOrEmpty(configPath))
+{
+    configPath = ConfigurationChecker.ResolveExistingConfigPath();
+}
+
 AgentConfig? agentConfig = null;
 
-// 加载主配置文件
 if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
 {
     try
     {
         agentConfig = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
         
-        // 验证WebUI配置
         var validationResult = WebUIConfigValidator.Validate(agentConfig.WebUI);
         if (!validationResult.IsValid)
         {
@@ -28,7 +33,6 @@ if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
             Environment.Exit(1);
         }
         
-        // 显示警告
         if (validationResult.Warnings.Count > 0)
         {
             Console.WriteLine("⚠️  WebUI配置警告:");
@@ -49,23 +53,19 @@ else
     agentConfig = new AgentConfig();
 }
 
-// 应用WebUI配置到ASP.NET Core配置
 ApplyWebUIConfiguration(builder.Configuration, agentConfig.WebUI, args);
 
-// Add MudBlazor services
-builder.Services.AddMudServices();
+builder.Services.AddLocalization(options => options.ResourcesPath = "Resources");
+builder.Services.AddHttpContextAccessor();
 
-// Add Razor Components with Server interactivity
+builder.Services.AddMudServices();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
-
-// Add Controllers
 builder.Services.AddControllers();
-
-// Add SignalR
 builder.Services.AddSignalR();
 
-// Add CORS
+builder.Services.AddBlazoredLocalStorage();
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
@@ -80,67 +80,21 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Load NanoBot configuration
-var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-var defaultConfigPath = Path.Combine(homeDir, ".nbot", "config.json");
+builder.Services.AddNanoBot(agentConfig);
 
-if (File.Exists(defaultConfigPath) && agentConfig == null)
-{
-    agentConfig = await ConfigurationLoader.LoadAsync(defaultConfigPath, CancellationToken.None);
-    builder.Services.AddNanoBotConfiguration(builder.Configuration);
-    
-    // 手动注册配置对象
-    builder.Services.AddSingleton(agentConfig);
-    builder.Services.AddSingleton(agentConfig.Workspace);
-    builder.Services.AddSingleton(agentConfig.Llm);
-    
-    // Add NanoBot services
-    builder.Services.AddMicrosoftAgentsAI(agentConfig.Llm);
-    builder.Services.AddNanoBotTools();
-    builder.Services.AddNanoBotContextProviders();
-    builder.Services.AddNanoBotInfrastructure(agentConfig.Workspace);
-    builder.Services.AddNanoBotBackgroundServices();
-    builder.Services.AddNanoBotAgent();
-}
-else if (agentConfig != null)
-{
-    builder.Services.AddNanoBotConfiguration(builder.Configuration);
-    
-    // 手动注册配置对象
-    builder.Services.AddSingleton(agentConfig);
-    builder.Services.AddSingleton(agentConfig.Workspace);
-    builder.Services.AddSingleton(agentConfig.Llm);
-    
-    // Add NanoBot services
-    builder.Services.AddMicrosoftAgentsAI(agentConfig.Llm);
-    builder.Services.AddNanoBotTools();
-    builder.Services.AddNanoBotContextProviders();
-    builder.Services.AddNanoBotInfrastructure(agentConfig.Workspace);
-    builder.Services.AddNanoBotBackgroundServices();
-    builder.Services.AddNanoBotAgent();
-}
-else
-{
-    // 如果配置不存在，使用默认配置
-    var defaultConfig = new AgentConfig();
-    builder.Services.AddSingleton(defaultConfig);
-    builder.Services.AddSingleton(defaultConfig.Workspace);
-    builder.Services.AddSingleton(defaultConfig.Llm);
-}
-
-// Add WebUI services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddSingleton<ISessionService, SessionService>();
 builder.Services.AddSingleton<IAgentService, AgentService>();
-builder.Services.AddSingleton<NanoBot.Core.Storage.IFileStorageService, NanoBot.Infrastructure.Storage.FileStorageService>();
+builder.Services.AddScoped<ILocalizationService, LocalizationService>();
+builder.Services.AddSingleton<IWebUIConfigService, WebUIConfigService>();
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
+// 使用用户友好的异常处理中间件（在开发和生产环境都启用）
+app.UseUserFriendlyExceptions();
+
 if (!app.Environment.IsDevelopment())
 {
-    app.UseExceptionHandler("/Error", createScopeForErrors: true);
-    // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
 
@@ -158,18 +112,19 @@ else
     app.Logger.LogWarning("HTTPS redirection disabled because configured URLs are HTTP-only: {Urls}", configuredUrls);
 }
 
+var supportedCultures = new[] { "zh-CN", "en-US" };
+var localizationOptions = new RequestLocalizationOptions()
+    .SetDefaultCulture(supportedCultures[0])
+    .AddSupportedCultures(supportedCultures)
+    .AddSupportedUICultures(supportedCultures);
+
+app.UseRequestLocalization(localizationOptions);
+
 app.UseStaticFiles();
 app.UseAntiforgery();
-
-// Use CORS
 app.UseCors();
-
-// Map SignalR Hub
 app.MapHub<NanoBot.WebUI.Hubs.ChatHub>("/hub/chat");
-
-// Map Controllers
 app.MapControllers();
-
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
@@ -190,15 +145,12 @@ static string GetConfigPath(string[] args)
 
 static void ApplyWebUIConfiguration(IConfiguration configuration, WebUIConfig webUIConfig, string[] args)
 {
-    // 检查命令行参数是否指定了URLs
     var urlsFromArgs = GetUrlsFromArgs(args);
     if (!string.IsNullOrEmpty(urlsFromArgs))
     {
-        // 命令行参数优先级最高
         return;
     }
     
-    // 应用WebUI配置中的URLs
     if (!string.IsNullOrEmpty(webUIConfig.Server.GetResolvedUrls()))
     {
         Environment.SetEnvironmentVariable("ASPNETCORE_URLS", webUIConfig.Server.GetResolvedUrls());

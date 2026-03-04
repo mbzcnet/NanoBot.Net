@@ -44,21 +44,21 @@ public class AgentRuntimeTests : IDisposable
     public void Constructor_ThrowsOnNullAgent()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(null!, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50));
+            new AgentRuntime(null!, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50));
     }
 
     [Fact]
     public void Constructor_ThrowsOnNullBus()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(_agent, null!, _sessionManagerMock.Object, _workspaceMock.Object, null, 50));
+            new AgentRuntime(_agent, null!, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50));
     }
 
     [Fact]
     public void Constructor_ThrowsOnNullSessionManager()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            new AgentRuntime(_agent, _busMock.Object, null!, _workspaceMock.Object, null, 50));
+            new AgentRuntime(_agent, _busMock.Object, null!, _workspaceMock.Object, null, null, 50));
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class AgentRuntimeTests : IDisposable
         var workspaceMock = new Mock<IWorkspaceManager>();
         workspaceMock.Setup(w => w.GetSessionsPath()).Returns(sessionsDir);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, workspaceMock.Object, null, null, 50);
 
         Assert.True(Directory.Exists(sessionsDir));
     }
@@ -85,7 +85,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50, _loggerMock.Object);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50, _loggerMock.Object);
 
         var response = await runtime.ProcessDirectAsync("Hello");
 
@@ -101,7 +101,7 @@ public class AgentRuntimeTests : IDisposable
             .Callback<string, CancellationToken>((key, _) => capturedKey = key)
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         await runtime.ProcessDirectAsync("Hello", "custom:key");
 
@@ -115,7 +115,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         await runtime.ProcessDirectAsync("Hello");
 
@@ -133,7 +133,7 @@ public class AgentRuntimeTests : IDisposable
                 return new InboundMessage { Channel = "test", Content = "test", SenderId = "user", ChatId = "chat1" };
             });
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         var runTask = runtime.RunAsync(cts.Token);
         await Task.Delay(100);
@@ -147,7 +147,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public void Dispose_StopsRuntime()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         runtime.Dispose();
 
@@ -157,7 +157,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public void Dispose_IsIdempotent()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         runtime.Dispose();
         runtime.Dispose();
@@ -190,7 +190,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         var cts = new CancellationTokenSource();
         var runTask = runtime.RunAsync(cts.Token);
@@ -204,7 +204,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public async Task ProcessDirectAsync_HandlesHelpCommand()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         var response = await runtime.ProcessDirectAsync("/help");
 
@@ -215,7 +215,7 @@ public class AgentRuntimeTests : IDisposable
     [Fact]
     public async Task ProcessDirectAsync_HandlesNewCommand()
     {
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, 50);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50);
 
         var response = await runtime.ProcessDirectAsync("/new");
 

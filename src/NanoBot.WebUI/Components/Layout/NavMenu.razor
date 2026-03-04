@@ -2,58 +2,115 @@
 @inject ISessionService SessionService
 @inject ISnackbar Snackbar
 @inject ILogger<NavMenu> Logger
+@inject IDialogService DialogService
+@inject IStringLocalizer<NavMenu> Localizer
 @using NanoBot.WebUI.Services
+@using NanoBot.WebUI.Components.Dialogs
+@using Microsoft.Extensions.Localization
+@using Microsoft.AspNetCore.Components.Web
 @implements IDisposable
 @rendermode InteractiveServer
 
-<MudNavMenu Class="nb-navmenu">
-    <div class="nb-new-session-wrap">
-        <MudButton Variant="Variant.Filled" 
-                   Color="Color.Primary" 
+<div class="nb-navmenu-root">
+    <div class="nb-navmenu-header">
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.Add"
                    FullWidth="true"
                    Class="nb-new-session-btn"
                    OnClick="CreateNewSession">
-            新建会话
+            @Localizer["NewSession"]
         </MudButton>
+
+        <MudDivider Class="my-2 nb-section-divider" />
+
+        <MudText Typo="Typo.caption" Class="nb-session-caption mud-text-secondary">@Localizer["RecentSessions"]</MudText>
     </div>
-    
-    <MudDivider Class="my-2" />
-    
-    <MudText Typo="Typo.caption" Class="px-4 py-2 mud-text-secondary nb-session-title">最近会话</MudText>
-    
-    @if (_sessions == null || !_sessions.Any())
-    {
-        <MudText Typo="Typo.body2" Class="px-4 py-2 mud-text-secondary">
-            暂无会话
-        </MudText>
-    }
-    else
-    {
-        @foreach (var session in _sessions)
+
+    <div class="nb-session-scroll">
+        @if (_sessions == null || !_sessions.Any())
         {
-            <MudNavLink Href="@($"/chat/{session.Id}")" 
-                        Icon="@Icons.Material.Filled.Chat"
-                        Match="NavLinkMatch.All">
-                <div class="d-flex align-center justify-space-between" style="width: 100%;">
-                    <MudText Typo="Typo.body2" Style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        @session.Title
-                    </MudText>
-                </div>
-            </MudNavLink>
+            <MudText Typo="Typo.body2" Class="px-2 py-2 mud-text-secondary">
+                @Localizer["NoSessions"]
+            </MudText>
         }
-    }
-</MudNavMenu>
+        else
+        {
+            @foreach (var session in _displayedSessions)
+            {
+                <div class="@GetSessionItemClass(session.Id)"
+                     @ontouchstart="(e => OnSessionTouchStart(session.Id, e))"
+                     @ontouchmove="(e => OnSessionTouchMove(session.Id, e))"
+                     @ontouchend="(e => OnSessionTouchEnd(session.Id, e))">
+                    <NavLink href="@($"/chat/{session.Id}")" 
+                             class="session-link"
+                             Match="NavLinkMatch.Prefix">
+                        <div class="session-link-inner">
+                            <MudIcon Icon="@Icons.Material.Filled.Chat" Size="Size.Small" Class="session-chat-icon" />
+                            <div class="session-content">
+                                <MudText Typo="Typo.body2" Class="session-title">
+                                    @session.Title
+                                </MudText>
+                                <MudText Typo="Typo.caption" Class="mud-text-secondary session-time">
+                                    @FormatTime(session.UpdatedAt)
+                                </MudText>
+                            </div>
+                        </div>
+                    </NavLink>
+                    <div class="session-actions" @onclick:stopPropagation="true">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                                       Size="Size.Small"
+                                       Color="Color.Default"
+                                       title="重命名"
+                                       OnClick="@(() => RenameSession(session))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                       Size="Size.Small"
+                                       Color="Color.Error"
+                                       title="删除会话"
+                                       OnClick="@(() => DeleteSession(session))" />
+                    </div>
+                </div>
+            }
+            
+            @if (_displayedSessions.Count < _sessions.Count)
+            {
+                <div class="nb-load-more-row">
+                    <MudButton Variant="Variant.Text"
+                               Color="Color.Primary"
+                               Size="Size.Small"
+                               OnClick="LoadMoreSessions">
+                        @Localizer["LoadMore", _sessions.Count - _displayedSessions.Count]
+                    </MudButton>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="nb-navmenu-footer">
+        <MudDivider Class="my-2 nb-section-divider" />
+        <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
+            设置
+        </MudNavLink>
+    </div>
+</div>
 
 @code {
     private List<SessionInfo>? _sessions;
+    private List<SessionInfo> _displayedSessions = new();
     private System.Threading.Timer? _refreshTimer;
+    private string _currentSessionId = string.Empty;
+    private string _swipedSessionId = string.Empty;
+    private double _touchStartX;
+    private double _touchCurrentX;
+    private const int DefaultPageSize = 15;
+    private int _currentPageSize = DefaultPageSize;
 
     protected override async Task OnInitializedAsync()
     {
+        UpdateCurrentSessionId(NavigationManager.Uri);
         await LoadSessions();
+        StateHasChanged();
         
-        // 定期刷新会话列表
         _refreshTimer = new System.Threading.Timer(async _ =>
         {
             await InvokeAsync(async () =>
@@ -62,11 +119,114 @@
                 StateHasChanged();
             });
         }, null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+
+        NavigationManager.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        UpdateCurrentSessionId(e.Location);
+        _swipedSessionId = string.Empty;
+        StateHasChanged();
+    }
+
+    private void UpdateCurrentSessionId(string uri)
+    {
+        if (uri.Contains("/chat/"))
+        {
+            var parts = uri.Split("/chat/");
+            if (parts.Length > 1)
+            {
+                _currentSessionId = parts[1].Split('?')[0];
+            }
+        }
+        else
+        {
+            _currentSessionId = string.Empty;
+        }
+    }
+
+    private string FormatTime(DateTime dateTime)
+    {
+        var now = DateTime.Now;
+        var diff = now - dateTime;
+
+        if (diff.TotalMinutes < 1)
+            return "刚刚";
+        if (diff.TotalHours < 1)
+            return $"{(int)diff.TotalMinutes}分钟前";
+        if (diff.TotalDays < 1)
+            return $"{(int)diff.TotalHours}小时前";
+        if (diff.TotalDays < 7)
+            return $"{(int)diff.TotalDays}天前";
+
+        return dateTime.ToString("MM-dd");
     }
 
     private async Task LoadSessions()
     {
         _sessions = await SessionService.GetSessionsAsync();
+        UpdateDisplayedSessions();
+    }
+
+    private void UpdateDisplayedSessions()
+    {
+        if (_sessions == null || _sessions.Count == 0)
+        {
+            _displayedSessions = new List<SessionInfo>();
+        }
+        else
+        {
+            _displayedSessions = _sessions.Take(_currentPageSize).ToList();
+        }
+    }
+
+    private void LoadMoreSessions()
+    {
+        _currentPageSize += DefaultPageSize;
+        UpdateDisplayedSessions();
+        StateHasChanged();
+    }
+
+    private string GetSessionItemClass(string sessionId)
+    {
+        var activeClass = _currentSessionId == sessionId ? "active" : string.Empty;
+        var swipeClass = _swipedSessionId == sessionId ? "show-actions" : string.Empty;
+        return $"session-item {activeClass} {swipeClass}".Trim();
+    }
+
+    private void OnSessionTouchStart(string sessionId, TouchEventArgs e)
+    {
+        if (e.Touches.Length == 0)
+        {
+            return;
+        }
+
+        _touchStartX = e.Touches[0].ClientX;
+        _touchCurrentX = _touchStartX;
+    }
+
+    private void OnSessionTouchMove(string sessionId, TouchEventArgs e)
+    {
+        if (e.Touches.Length == 0)
+        {
+            return;
+        }
+
+        _touchCurrentX = e.Touches[0].ClientX;
+    }
+
+    private void OnSessionTouchEnd(string sessionId, TouchEventArgs e)
+    {
+        var deltaX = _touchCurrentX - _touchStartX;
+        if (deltaX <= -38)
+        {
+            _swipedSessionId = sessionId;
+        }
+        else if (deltaX >= 38 && _swipedSessionId == sessionId)
+        {
+            _swipedSessionId = string.Empty;
+        }
     }
 
     private async Task CreateNewSession()
@@ -88,12 +248,78 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to create new session");
-            Snackbar.Add($"创建会话失败: {ex.Message}", Severity.Error);
+            Snackbar.Add(Localizer["CreateSessionFailed", ex.Message], Severity.Error);
+        }
+    }
+
+    private async Task DeleteSession(SessionInfo session)
+    {
+        var parameters = new DialogParameters
+        {
+            { "ContentText", Localizer["DeleteConfirm"].Value },
+            { "ButtonText", Localizer["DeleteButton"].Value },
+            { "Color", Color.Error }
+        };
+
+        var dialog = await DialogService.ShowAsync<ConfirmDialog>(Localizer["Delete"], parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false })
+        {
+            try
+            {
+                await SessionService.DeleteSessionAsync(session.Id);
+                await LoadSessions();
+                StateHasChanged();
+
+                if (_currentSessionId == session.Id)
+                {
+                    NavigationManager.NavigateTo("/", forceLoad: false);
+                }
+
+                Snackbar.Add(Localizer["SessionDeleted"], Severity.Success);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to delete session {SessionId}", session.Id);
+                Snackbar.Add(Localizer["DeleteSessionFailed", ex.Message], Severity.Error);
+            }
+        }
+    }
+
+    private async Task RenameSession(SessionInfo session)
+    {
+        var parameters = new DialogParameters
+        {
+            { "CurrentTitle", session.Title }
+        };
+
+        var dialog = await DialogService.ShowAsync<RenameDialog>(Localizer["RenameSession"], parameters);
+        var result = await dialog.Result;
+
+        if (result is { Canceled: false, Data: string newTitle })
+        {
+            if (!string.IsNullOrWhiteSpace(newTitle) && newTitle != session.Title)
+            {
+                try
+                {
+                    await SessionService.RenameSessionAsync(session.Id, newTitle);
+                    await LoadSessions();
+                    StateHasChanged();
+                    Snackbar.Add(Localizer["SessionRenamed"], Severity.Success);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to rename session {SessionId}", session.Id);
+                    Snackbar.Add(Localizer["RenameFailed", ex.Message], Severity.Error);
+                }
+            }
         }
     }
 
     public void Dispose()
     {
         _refreshTimer?.Dispose();
+        NavigationManager.LocationChanged -= OnLocationChanged;
     }
 }

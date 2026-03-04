@@ -19,4 +19,13 @@ public class AgentConfig
     public HeartbeatConfig? Heartbeat { get; set; }
 
     public WebUIConfig WebUI { get; set; } = new();
+
+    public WebToolsConfig? WebTools { get; set; }
+}
+
+public class WebToolsConfig
+{
+    public string? SearchApikey { get; set; }
+
+    public string? FetchUserAgent { get; set; } = "Mozilla/5.0 (compatible; NanoBot/1.0)";
 }

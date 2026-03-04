@@ -54,3 +54,12 @@ NanoBot.Cli → NanoBot.Agent → NanoBot.Core (abstractions/interfaces)
 - xUnit 2.9.2 + Moq 4.20.72 for tests
 - System.CommandLine for CLI
 - Version managed centrally in `Directory.Build.props` (currently 0.1.2)
+
+## Project Management
+
+- When executing plans in `doc.ai/plans`, update the task status in the plan document after each task is completed.
+- When executing plans, must read the design documents in `doc.ai/solutions`.
+- When executing plans, must read the original project's source code related to the plan.
+- When writing solution design documents in `doc.ai/solutions`, do not write implementation code; only allow interface classes, properties, method signatures, etc.
+- When adding new designs (new classes), browse `doc.ai/solutions/Feature-List.md` to ensure alignment with existing design, no architecture breaking, and no redundant design.
+- When committing code, do not include the `Temp` directory.

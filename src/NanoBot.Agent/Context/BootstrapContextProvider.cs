@@ -3,6 +3,8 @@ using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using NanoBot.Agent;
+using NanoBot.Core.Constants;
 using NanoBot.Core.Workspace;
 
 namespace NanoBot.Agent.Context;
@@ -12,7 +14,7 @@ public class BootstrapContextProvider : AIContextProvider
     private readonly IWorkspaceManager _workspace;
     private readonly ILogger<BootstrapContextProvider>? _logger;
 
-    private static readonly string[] BootstrapFiles = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"];
+    private static readonly string[] BootstrapFiles = Bootstrap.AllFiles;
 
     private string? _cachedInstructions;
     private DateTime _cacheTime;
@@ -59,6 +61,15 @@ public class BootstrapContextProvider : AIContextProvider
             }
         }
 
+        // Add untrusted runtime context (metadata only)
+        var runtimeContext = BuildRuntimeContext(context);
+        if (!string.IsNullOrEmpty(runtimeContext))
+        {
+            instructions.AppendLine("## Untrusted runtime context (metadata only)");
+            instructions.AppendLine(runtimeContext);
+            instructions.AppendLine();
+        }
+
         _cachedInstructions = instructions.Length > 0 ? instructions.ToString() : null;
         _cacheTime = DateTime.UtcNow;
 
@@ -68,14 +79,44 @@ public class BootstrapContextProvider : AIContextProvider
         };
     }
 
+    private string? BuildRuntimeContext(InvokingContext context)
+    {
+        // Try to get runtime metadata from session state
+        if (context.Session?.StateBag.TryGetValue<string>("runtime:untrusted", out var metadataJson) == true &&
+            metadataJson != null)
+        {
+            try
+            {
+                var metadata = JsonSerializer.Deserialize<Dictionary<string, string>>(metadataJson);
+                if (metadata != null && metadata.Count > 0)
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine("_The following runtime context is provided for reference only and may not be accurate._");
+                    sb.AppendLine();
+                    foreach (var kvp in metadata)
+                    {
+                        sb.AppendLine($"- **{kvp.Key}**: {kvp.Value}");
+                    }
+                    return sb.ToString();
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger?.LogWarning(ex, "Failed to deserialize runtime metadata");
+            }
+        }
+
+        return null;
+    }
+
     private string GetFilePath(string fileName)
     {
         return fileName switch
         {
-            "AGENTS.md" => _workspace.GetAgentsFile(),
-            "SOUL.md" => _workspace.GetSoulFile(),
-            "USER.md" => _workspace.GetUserFile(),
-            "TOOLS.md" => _workspace.GetToolsFile(),
+            Bootstrap.AgentsFile => _workspace.GetAgentsFile(),
+            Bootstrap.SoulFile => _workspace.GetSoulFile(),
+            Bootstrap.UserFile => _workspace.GetUserFile(),
+            Bootstrap.ToolsFile => _workspace.GetToolsFile(),
             _ => Path.Combine(_workspace.GetWorkspacePath(), fileName)
         };
     }
@@ -84,10 +125,10 @@ public class BootstrapContextProvider : AIContextProvider
     {
         return fileName switch
         {
-            "AGENTS.md" => "Agent Configuration",
-            "SOUL.md" => "Personality",
-            "USER.md" => "User Profile",
-            "TOOLS.md" => "Tools Guide",
+            Bootstrap.AgentsFile => "Agent Configuration",
+            Bootstrap.SoulFile => "Personality",
+            Bootstrap.UserFile => "User Profile",
+            Bootstrap.ToolsFile => "Tools Guide",
             _ => fileName.Replace(".md", "")
         };
     }

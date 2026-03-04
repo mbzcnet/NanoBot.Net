@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="NewSession" xml:space="preserve">
+    <value>新建会话</value>
+  </data>
+  <data name="RecentSessions" xml:space="preserve">
+    <value>最近会话</value>
+  </data>
+  <data name="NoSessions" xml:space="preserve">
+    <value>暂无会话</value>
+  </data>
+  <data name="LoadMore" xml:space="preserve">
+    <value>加载更多 ({0} 项)</value>
+  </data>
+  <data name="Settings" xml:space="preserve">
+    <value>设置</value>
+  </data>
+  <data name="ChannelConfig" xml:space="preserve">
+    <value>通道配置</value>
+  </data>
+  <data name="Rename" xml:space="preserve">
+    <value>重命名</value>
+  </data>
+  <data name="Delete" xml:space="preserve">
+    <value>删除会话</value>
+  </data>
+  <data name="DeleteConfirm" xml:space="preserve">
+    <value>确定要删除这个会话吗？此操作不可恢复。</value>
+  </data>
+  <data name="DeleteButton" xml:space="preserve">
+    <value>删除</value>
+  </data>
+  <data name="RenameSession" xml:space="preserve">
+    <value>重命名会话</value>
+  </data>
+  <data name="SessionCreated" xml:space="preserve">
+    <value>新会话已创建</value>
+  </data>
+  <data name="SessionDeleted" xml:space="preserve">
+    <value>会话已删除</value>
+  </data>
+  <data name="SessionRenamed" xml:space="preserve">
+    <value>会话已重命名</value>
+  </data>
+  <data name="CreateSessionFailed" xml:space="preserve">
+    <value>创建会话失败: {0}</value>
+  </data>
+  <data name="DeleteSessionFailed" xml:space="preserve">
+    <value>删除会话失败: {0}</value>
+  </data>
+  <data name="RenameFailed" xml:space="preserve">
+    <value>重命名失败: {0}</value>
+  </data>
+  <data name="JustNow" xml:space="preserve">
+    <value>刚刚</value>
+  </data>
+  <data name="MinutesAgo" xml:space="preserve">
+    <value>{0}分钟前</value>
+  </data>
+  <data name="HoursAgo" xml:space="preserve">
+    <value>{0}小时前</value>
+  </data>
+  <data name="DaysAgo" xml:space="preserve">
+    <value>{0}天前</value>
+  </data>
+</root>

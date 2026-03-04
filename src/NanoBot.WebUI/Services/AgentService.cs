@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
+using NanoBot.Core.Sessions;
 
 namespace NanoBot.WebUI.Services;
 

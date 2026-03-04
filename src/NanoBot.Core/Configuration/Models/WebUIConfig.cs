@@ -13,6 +13,8 @@ public class WebUIConfig
     public WebUISecurityConfig Security { get; set; } = new();
 
     public WebUIFeaturesConfig Features { get; set; } = new();
+
+    public WebUILocalizationConfig Localization { get; set; } = new();
 }
 
 public class WebUIServerConfig
@@ -74,10 +76,14 @@ public class WebUIFeaturesConfig
     {
         ".png", ".jpg", ".jpeg", ".webp", ".gif"
     };
+}
 
-    public bool EnableChatHistory { get; set; } = true;
+public class WebUILocalizationConfig
+{
+    public string DefaultLanguage { get; set; } = "auto";
 
-    public bool EnableSessionManagement { get; set; } = true;
-
-    public bool EnableRealTimeUpdates { get; set; } = true;
+    public List<string> SupportedLanguages { get; set; } = new()
+    {
+        "zh-CN", "en-US"
+    };
 }

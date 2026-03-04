@@ -32,7 +32,12 @@
                            Class="mb-4">
                     <MudSelectItem Value="@("openai")">OpenAI</MudSelectItem>
                     <MudSelectItem Value="@("anthropic")">Anthropic</MudSelectItem>
+                    <MudSelectItem Value="@("openrouter")">OpenRouter</MudSelectItem>
                     <MudSelectItem Value="@("deepseek")">DeepSeek</MudSelectItem>
+                    <MudSelectItem Value="@("groq")">Groq</MudSelectItem>
+                    <MudSelectItem Value="@("gemini")">Google Gemini</MudSelectItem>
+                    <MudSelectItem Value="@("ollama")">Ollama (本地)</MudSelectItem>
+                    <MudSelectItem Value="@("custom")">自定义 Provider</MudSelectItem>
                 </MudSelect>
                 
                 <MudTextField @bind-Value="_profile.Model"

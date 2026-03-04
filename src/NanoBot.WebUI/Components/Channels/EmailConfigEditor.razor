@@ -1,0 +1,149 @@
+@using NanoBot.Core.Configuration
+
+<div class="nb-channel-config-editor">
+    <MudCheckBox @bind-Checked="Config.ConsentGranted"
+                 Label="同意处理邮件"
+                 T="bool"
+                 Class="mb-3" />
+    
+    <MudDivider Class="my-4" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">IMAP 配置 (接收)</MudText>
+    <MudTextField @bind-Value="Config.ImapHost"
+                  Label="IMAP 服务器"
+                  Variant="Variant.Outlined"
+                  Class="mb-2" />
+    
+    <MudNumericField @bind-Value="Config.ImapPort"
+                     Label="IMAP 端口"
+                     Variant="Variant.Outlined"
+                     Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.ImapUsername"
+                  Label="IMAP 用户名"
+                  Variant="Variant.Outlined"
+                  Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.ImapPassword"
+                  Label="IMAP 密码"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.ImapMailbox"
+                  Label="邮箱"
+                  Variant="Variant.Outlined"
+                  Class="mb-2" />
+    
+    <MudCheckBox @bind-Checked="Config.ImapUseSsl"
+                 Label="使用 SSL"
+                 T="bool"
+                 Class="mb-3" />
+    
+    <MudDivider Class="my-4" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">SMTP 配置 (发送)</MudText>
+    <MudTextField @bind-Value="Config.SmtpHost"
+                  Label="SMTP 服务器"
+                  Variant="Variant.Outlined"
+                  Class="mb-2" />
+    
+    <MudNumericField @bind-Value="Config.SmtpPort"
+                     Label="SMTP 端口"
+                     Variant="Variant.Outlined"
+                     Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.SmtpUsername"
+                  Label="SMTP 用户名"
+                  Variant="Variant.Outlined"
+                  Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.SmtpPassword"
+                  Label="SMTP 密码"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-2" />
+    
+    <MudCheckBox @bind-Checked="Config.SmtpUseTls"
+                 Label="使用 TLS"
+                 T="bool"
+                 Class="mb-2" />
+    
+    <MudTextField @bind-Value="Config.FromAddress"
+                  Label="发件人地址"
+                  Variant="Variant.Outlined"
+                  Class="mb-3" />
+    
+    <MudDivider Class="my-4" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">其他设置</MudText>
+    <MudCheckBox @bind-Checked="Config.AutoReplyEnabled"
+                 Label="自动回复"
+                 T="bool"
+                 Class="mb-2" />
+    
+    <MudNumericField @bind-Value="Config.PollIntervalSeconds"
+                     Label="轮询间隔 (秒)"
+                     Variant="Variant.Outlined"
+                     Class="mb-2" />
+    
+    <MudCheckBox @bind-Checked="Config.MarkSeen"
+                 Label="标记为已读"
+                 T="bool"
+                 Class="mb-2" />
+    
+    <MudNumericField @bind-Value="Config.MaxBodyChars"
+                     Label="最大正文字符数"
+                     Variant="Variant.Outlined"
+                     Class="mb-3" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的发件人</MudText>
+    <MudTextField @bind-Value="_newAllowFrom"
+                  Label="添加允许的发件人"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddAllowFrom"
+                  Class="mb-2" />
+    
+    @foreach (var allowFrom in Config.AllowFrom)
+    {
+        <MudChip Color="Color.Primary"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveAllowFrom(allowFrom)">
+            @allowFrom
+        </MudChip>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public EmailConfig Config { get; set; } = new();
+    
+    [Parameter]
+    public EventCallback<EmailConfig> ConfigChanged { get; set; }
+    
+    private string _newAllowFrom = string.Empty;
+
+    private void AddAllowFrom()
+    {
+        if (!string.IsNullOrWhiteSpace(_newAllowFrom) && 
+            !Config.AllowFrom.Contains(_newAllowFrom))
+        {
+            var list = Config.AllowFrom.ToList();
+            list.Add(_newAllowFrom);
+            Config.AllowFrom = list;
+            _newAllowFrom = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveAllowFrom(string allowFrom)
+    {
+        var list = Config.AllowFrom.ToList();
+        list.Remove(allowFrom);
+        Config.AllowFrom = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+}

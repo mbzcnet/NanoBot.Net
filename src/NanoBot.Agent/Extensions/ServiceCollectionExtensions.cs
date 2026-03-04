@@ -4,8 +4,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Context;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Configuration;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
+using NanoBot.Core.Subagents;
 using NanoBot.Core.Workspace;
 
 namespace NanoBot.Agent;
@@ -49,6 +51,9 @@ public static class ServiceCollectionExtensions
             var sessionManager = sp.GetRequiredService<ISessionManager>();
             var workspace = sp.GetRequiredService<IWorkspaceManager>();
             var memoryStore = sp.GetService<IMemoryStore>();
+            var subagentManager = sp.GetService<ISubagentManager>();
+            var agentConfig = sp.GetService<AgentConfig>();
+            var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
 
             return new AgentRuntime(
@@ -57,6 +62,7 @@ public static class ServiceCollectionExtensions
                 sessionManager,
                 workspace,
                 memoryStore,
+                subagentManager,
                 memoryWindow,
                 logger);
         });

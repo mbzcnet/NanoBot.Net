@@ -166,7 +166,6 @@ public sealed class MessageBus : IMessageBus
 
         Stop();
 
-        // Wait for dispatcher task to complete before disposing CTS
         if (_dispatcherTask != null)
         {
             try
@@ -178,11 +177,9 @@ public sealed class MessageBus : IMessageBus
             }
             catch (OperationCanceledException)
             {
-                // Expected when stopping
             }
             catch (AggregateException ex) when (ex.InnerExceptions.All(e => e is OperationCanceledException))
             {
-                // Expected when stopping
             }
         }
 

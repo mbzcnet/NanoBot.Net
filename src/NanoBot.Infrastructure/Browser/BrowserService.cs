@@ -10,19 +10,61 @@ public sealed class BrowserService : IBrowserService
 {
     private const int DefaultContentMaxChars = 8000;
 
-    private readonly IPlaywrightSessionManager _sessionManager;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly ConcurrentDictionary<string, ProfileState> _profiles = new(StringComparer.OrdinalIgnoreCase);
+    private IPlaywright? _playwright;
     private readonly ConcurrentDictionary<string, BrowserRefSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
 
-    public BrowserService(IPlaywrightSessionManager sessionManager)
+    public async Task<bool> IsStartedAsync(string profile, CancellationToken cancellationToken = default)
     {
-        _sessionManager = sessionManager;
+        await Task.CompletedTask;
+        return _profiles.ContainsKey(NormalizeProfile(profile));
+    }
+
+    public async Task EnsureStartedAsync(string profile, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeProfile(profile);
+        if (_profiles.ContainsKey(normalized))
+        {
+            return;
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (_profiles.ContainsKey(normalized))
+            {
+                return;
+            }
+
+            _playwright ??= await Playwright.CreateAsync();
+            var browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+            {
+                Headless = true
+            });
+            var context = await browser.NewContextAsync();
+            var state = new ProfileState
+            {
+                Profile = normalized,
+                Browser = browser,
+                Context = context,
+                Pages = new ConcurrentDictionary<string, IPage>(StringComparer.Ordinal),
+                NextTargetId = 0
+            };
+
+            _profiles[normalized] = state;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public async Task<BrowserToolResponse> GetStatusAsync(string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        var started = await _sessionManager.IsStartedAsync(normalized, cancellationToken);
-        var tabs = started ? await _sessionManager.GetTabsAsync(normalized, cancellationToken) : [];
+        var started = await IsStartedAsync(normalized, cancellationToken);
+        var tabs = started ? await GetTabsAsync(normalized, cancellationToken) : [];
 
         return new BrowserToolResponse
         {
@@ -37,7 +79,7 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> StartAsync(string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        await _sessionManager.EnsureStartedAsync(normalized, cancellationToken);
+        await EnsureStartedAsync(normalized, cancellationToken);
 
         return new BrowserToolResponse
         {
@@ -48,16 +90,82 @@ public sealed class BrowserService : IBrowserService
         };
     }
 
-    public Task<BrowserToolResponse> StopAsync(string profile, CancellationToken cancellationToken = default)
+    public async Task<BrowserToolResponse> StopAsync(string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
+        if (!_profiles.TryRemove(normalized, out var state))
+        {
+            return new BrowserToolResponse
+            {
+                Ok = true,
+                Action = "stop",
+                Profile = normalized,
+                Message = "Browser not started"
+            };
+        }
+
+        await state.Context.CloseAsync();
+        await state.Browser.CloseAsync();
         CleanupSnapshotsForProfile(normalized);
-        return _sessionManager.StopAsync(normalized, cancellationToken);
+
+        return new BrowserToolResponse
+        {
+            Ok = true,
+            Action = "stop",
+            Profile = normalized,
+            Message = "Browser stopped"
+        };
     }
 
-    public Task<IReadOnlyList<BrowserTabInfo>> GetTabsAsync(string profile, CancellationToken cancellationToken = default)
+    public async Task<BrowserToolResponse> StopAllAsync(CancellationToken cancellationToken = default)
     {
-        return _sessionManager.GetTabsAsync(NormalizeProfile(profile), cancellationToken);
+        var profiles = _profiles.Keys.ToArray();
+        foreach (var profile in profiles)
+        {
+            await StopAsync(profile, cancellationToken);
+        }
+
+        if (_playwright != null)
+        {
+            _playwright.Dispose();
+            _playwright = null;
+        }
+
+        return new BrowserToolResponse
+        {
+            Ok = true,
+            Action = "stop",
+            Profile = "all",
+            Message = "All browser profiles stopped"
+        };
+    }
+
+    public async Task<IReadOnlyList<BrowserTabInfo>> GetTabsAsync(string profile, CancellationToken cancellationToken = default)
+    {
+        var state = await GetOrStartProfileAsync(profile, cancellationToken);
+        RefreshClosedPages(state);
+
+        var tabs = new List<BrowserTabInfo>();
+        foreach (var entry in state.Pages)
+        {
+            var title = string.Empty;
+            try
+            {
+                title = await entry.Value.TitleAsync();
+            }
+            catch
+            {
+            }
+
+            tabs.Add(new BrowserTabInfo
+            {
+                TargetId = entry.Key,
+                Url = entry.Value.Url,
+                Title = title
+            });
+        }
+
+        return tabs;
     }
 
     public async Task<BrowserToolResponse> OpenTabAsync(string url, string profile, CancellationToken cancellationToken = default)
@@ -68,7 +176,7 @@ public sealed class BrowserService : IBrowserService
         }
 
         var normalized = NormalizeProfile(profile);
-        var (targetId, page) = await _sessionManager.CreatePageAsync(normalized, url, cancellationToken);
+        var (targetId, page) = await CreatePageAsync(normalized, url, cancellationToken);
 
         return new BrowserToolResponse
         {
@@ -84,7 +192,7 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> NavigateAsync(string targetId, string url, string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        var page = await _sessionManager.GetPageByTargetIdAsync(normalized, targetId, cancellationToken);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -108,7 +216,8 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> CloseTabAsync(string targetId, string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        await _sessionManager.ClosePageAsync(normalized, targetId, cancellationToken);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
+        await page.CloseAsync();
         _snapshots.TryRemove(SnapshotKey(normalized, targetId), out _);
 
         return new BrowserToolResponse
@@ -124,7 +233,7 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> GetSnapshotAsync(string targetId, string format, string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        var page = await _sessionManager.GetPageByTargetIdAsync(normalized, targetId, cancellationToken);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
 
         var nodesJson = await page.EvaluateAsync<string>(@"() => JSON.stringify((() => {
             const elements = Array.from(document.querySelectorAll('a, button, input, textarea, select, [role], [tabindex]'));
@@ -213,7 +322,7 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> GetContentAsync(string targetId, string? selector, int? maxChars, string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        var page = await _sessionManager.GetPageByTargetIdAsync(normalized, targetId, cancellationToken);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
         var selectorValue = string.IsNullOrWhiteSpace(selector) ? null : selector.Trim();
 
         var rawContent = await page.EvaluateAsync<string>(@"(selector) => {
@@ -269,7 +378,7 @@ public sealed class BrowserService : IBrowserService
     public async Task<BrowserToolResponse> ExecuteActionAsync(BrowserActionRequest request, string targetId, string profile, CancellationToken cancellationToken = default)
     {
         var normalized = NormalizeProfile(profile);
-        var page = await _sessionManager.GetPageByTargetIdAsync(normalized, targetId, cancellationToken);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
 
         var kind = request.Kind?.Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(kind))
@@ -459,6 +568,59 @@ public sealed class BrowserService : IBrowserService
         }
     }
 
+    public async Task<IPage> GetPageAsync(string profile, string targetId, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeProfile(profile);
+        var state = await GetOrStartProfileAsync(normalized, cancellationToken);
+        RefreshClosedPages(state);
+
+        if (state.Pages.TryGetValue(targetId, out var page))
+        {
+            return page;
+        }
+
+        throw new InvalidOperationException($"Tab not found: {targetId}");
+    }
+
+    public void Dispose()
+    {
+        StopAllAsync().GetAwaiter().GetResult();
+        _gate.Dispose();
+    }
+
+    private async Task<ProfileState> GetOrStartProfileAsync(string profile, CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeProfile(profile);
+        await EnsureStartedAsync(normalized, cancellationToken);
+
+        if (_profiles.TryGetValue(normalized, out var state))
+        {
+            return state;
+        }
+
+        throw new InvalidOperationException($"Browser profile unavailable: {normalized}");
+    }
+
+    private async Task<(string TargetId, IPage Page)> CreatePageAsync(string profile, string? url, CancellationToken cancellationToken)
+    {
+        var state = await GetOrStartProfileAsync(profile, cancellationToken);
+        var page = await state.Context.NewPageAsync();
+        var targetId = $"t{Interlocked.Increment(ref state.NextTargetId)}";
+        state.Pages[targetId] = page;
+
+        page.Close += (_, _) =>
+        {
+            state.Pages.TryRemove(targetId, out _);
+        };
+
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            await page.GotoAsync(url);
+        }
+
+        return (targetId, page);
+    }
+
     private static string NormalizeProfile(string profile)
     {
         return string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
@@ -506,6 +668,26 @@ public sealed class BrowserService : IBrowserService
                 _snapshots.TryRemove(key, out _);
             }
         }
+    }
+
+    private static void RefreshClosedPages(ProfileState state)
+    {
+        foreach (var entry in state.Pages)
+        {
+            if (entry.Value.IsClosed)
+            {
+                state.Pages.TryRemove(entry.Key, out _);
+            }
+        }
+    }
+
+    private sealed class ProfileState
+    {
+        public required string Profile { get; init; }
+        public required IBrowser Browser { get; init; }
+        public required IBrowserContext Context { get; init; }
+        public required ConcurrentDictionary<string, IPage> Pages { get; init; }
+        public int NextTargetId;
     }
 
     private sealed class SnapshotNode

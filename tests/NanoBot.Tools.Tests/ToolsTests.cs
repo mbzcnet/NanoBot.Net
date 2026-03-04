@@ -266,8 +266,7 @@ public class BrowserToolsTests
     [Fact]
     public async Task BrowserService_StartOpenContentStop_UsesRealPlaywright()
     {
-        await using var sessionManager = new PlaywrightSessionManager();
-        var browserService = new BrowserService(sessionManager);
+        using var browserService = new BrowserService();
 
         var start = await browserService.StartAsync("openclaw");
         Assert.True(start.Ok);

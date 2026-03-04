@@ -12,6 +12,7 @@ using NanoBot.Core.Cron;
 using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
+using NanoBot.Core.Storage;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Workspace;
@@ -22,6 +23,7 @@ using NanoBot.Infrastructure.Heartbeat;
 using NanoBot.Infrastructure.Memory;
 using NanoBot.Infrastructure.Resources;
 using NanoBot.Infrastructure.Skills;
+using NanoBot.Infrastructure.Storage;
 using NanoBot.Infrastructure.Subagents;
 using NanoBot.Infrastructure.Workspace;
 using NanoBot.Providers;
@@ -121,8 +123,8 @@ public static class ServiceCollectionExtensions
         });
 
         services.AddSingleton<IMessageBus, MessageBus>();
-        services.AddSingleton<IPlaywrightSessionManager, PlaywrightSessionManager>();
         services.AddSingleton<IBrowserService, BrowserService>();
+        services.AddSingleton<IFileStorageService, FileStorageService>();
 
         return services;
     }
@@ -231,6 +233,7 @@ public static class ServiceCollectionExtensions
             var sessionManager = sp.GetRequiredService<ISessionManager>();
             var workspace = sp.GetRequiredService<IWorkspaceManager>();
             var memoryStore = sp.GetService<IMemoryStore>();
+            var subagentManager = sp.GetService<ISubagentManager>();
             var agentConfig = sp.GetService<AgentConfig>();
             var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
@@ -241,6 +244,7 @@ public static class ServiceCollectionExtensions
                 sessionManager,
                 workspace,
                 memoryStore,
+                subagentManager,
                 memoryWindow,
                 logger);
         });
@@ -286,8 +290,33 @@ public static class ServiceCollectionExtensions
             };
         }
 
+        return services.AddNanoBot(agentConfig, agentOptions);
+    }
+
+    public static IServiceCollection AddNanoBot(
+        this IServiceCollection services,
+        AgentConfig agentConfig,
+        AgentOptions? agentOptions = null)
+    {
+        services.AddSingleton(agentConfig);
+        services.AddSingleton(agentConfig.Workspace);
+        services.AddSingleton(agentConfig.Llm);
+        services.AddSingleton(agentConfig.Channels);
+
+        if (agentConfig.Mcp != null)
+        {
+            services.AddSingleton(agentConfig.Mcp);
+        }
+
+        if (agentConfig.Heartbeat != null)
+        {
+            services.AddSingleton(agentConfig.Heartbeat);
+        }
+
+        services.AddSingleton(agentConfig.Security);
+        services.AddSingleton(agentConfig.Memory);
+
         services
-            .AddNanoBotConfiguration(configuration)
             .AddMicrosoftAgentsAI(agentConfig.Llm)
             .AddNanoBotInfrastructure(agentConfig.Workspace)
             .AddNanoBotTools(agentConfig.Workspace.GetResolvedPath())

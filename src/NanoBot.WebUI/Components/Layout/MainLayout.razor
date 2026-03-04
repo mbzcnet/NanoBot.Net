@@ -1,60 +1,61 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @inject NavigationManager NavigationManager
 @rendermode InteractiveServer
 @implements IDisposable
 
-<MudThemeProvider />
+<MudThemeProvider IsDarkMode="true" />
 <MudPopoverProvider />
 <MudDialogProvider />
 <MudSnackbarProvider />
 
 <MudLayout Class="nb-layout">
-    <MudAppBar Elevation="0" Class="nb-topbar">
-        <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
-                       Color="Color.Inherit"
-                       Edge="Edge.Start"
-                       OnClick="ToggleDrawer" />
-        <MudText Typo="Typo.h6" Style="cursor: pointer;" @onclick="NavigateToHome">NanoBot</MudText>
-        <MudSpacer />
-        <MudIconButton Icon="@Icons.Material.Filled.Settings" Color="Color.Inherit" OnClick="NavigateToConfig" />
-    </MudAppBar>
-    
-    <MudDrawer Open="@_drawerOpen"
-               OpenChanged="@((bool val) => _drawerOpen = val)"
-               Elevation="2"
-               ClipMode="DrawerClipMode.Always"
+    <MudDrawer @bind-Open="_drawerOpen"
+               Elevation="1"
+               ClipMode="DrawerClipMode.Never"
                Variant="DrawerVariant.Persistent"
+               Width="300px"
                Class="nb-sidebar">
-        <MudDrawerHeader>
-            <MudText Typo="Typo.h6">@(_isSettingsSection ? "设置" : "会话")</MudText>
+        <MudDrawerHeader Class="nb-drawer-header">
+            <MudText Typo="Typo.h6" @onclick="NavigateToHome">NanoBot</MudText>
         </MudDrawerHeader>
 
-        @if (_isSettingsSection)
-        {
-            <MudNavMenu>
-                <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
-                    WebUI 设置
-                </MudNavLink>
-                <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Tune" Match="NavLinkMatch.Prefix">
-                    系统配置
-                </MudNavLink>
-                <MudNavLink Href="/config/profiles" Icon="@Icons.Material.Filled.Person" Match="NavLinkMatch.Prefix">
-                    LLM Profiles
-                </MudNavLink>
-                <MudDivider Class="my-2" />
-                <MudNavLink Href="/" Icon="@Icons.Material.Filled.Chat" Match="NavLinkMatch.All">
-                    返回会话
-                </MudNavLink>
-            </MudNavMenu>
-        }
-        else
-        {
-            <NavMenu />
-        }
+        <div class="nb-drawer-content">
+            @if (_isSettingsSection)
+            {
+                <MudNavMenu>
+                    <MudNavLink Href="/config" Icon="@Icons.Material.Filled.Tune" Match="NavLinkMatch.All">
+                        系统
+                    </MudNavLink>
+                    <MudNavLink Href="/config/profiles" Icon="@Icons.Material.Filled.Person" Match="NavLinkMatch.Prefix">
+                        模型
+                    </MudNavLink>
+                    <MudNavLink Href="/config/channels" Icon="@Icons.Material.Filled.ChatBubble" Match="NavLinkMatch.All">
+                        通道
+                    </MudNavLink>
+                    <MudNavLink Href="/settings" Icon="@Icons.Material.Filled.Settings" Match="NavLinkMatch.Prefix">
+                        WebUI
+                    </MudNavLink>
+                    <MudDivider Class="my-2" />
+                    <MudNavLink Href="/" Icon="@Icons.Material.Filled.Chat" Match="NavLinkMatch.All">
+                        返回
+                    </MudNavLink>
+                </MudNavMenu>
+            }
+            else
+            {
+                <NavMenu />
+            }
+        </div>
     </MudDrawer>
-    
-    <MudMainContent Class="nb-main">
-        <MudContainer MaxWidth="MaxWidth.False" Class="nb-page-shell">
+
+    <MudMainContent Class="@GetMainContentClass()">
+        <div class="nb-menu-toggle-btn">
+            <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
+                           Color="Color.Inherit"
+                           OnClick="ToggleDrawer"
+                           Size="Size.Small" />
+        </div>
+        <MudContainer MaxWidth="MaxWidth.False" Class="nb-main-container">
             @Body
         </MudContainer>
     </MudMainContent>
@@ -70,19 +71,19 @@
         NavigationManager.LocationChanged += OnLocationChanged;
     }
 
+    private void NavigateToHome()
+    {
+        NavigationManager.NavigateTo("/");
+    }
+
     private void ToggleDrawer()
     {
         _drawerOpen = !_drawerOpen;
     }
 
-    private void NavigateToConfig()
+    private string GetMainContentClass()
     {
-        NavigationManager.NavigateTo("/config");
-    }
-
-    private void NavigateToHome()
-    {
-        NavigationManager.NavigateTo("/");
+        return _drawerOpen ? "nb-main-content" : "nb-main-content nb-main-content-full";
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
@@ -94,7 +95,8 @@
     private void UpdateSectionByRoute(string absoluteUri)
     {
         var path = new Uri(absoluteUri).AbsolutePath;
-        _isSettingsSection = path.StartsWith("/config", StringComparison.OrdinalIgnoreCase);
+        _isSettingsSection = path.StartsWith("/config", StringComparison.OrdinalIgnoreCase)
+                          || path.StartsWith("/settings", StringComparison.OrdinalIgnoreCase);
     }
 
     public void Dispose()

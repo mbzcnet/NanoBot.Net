@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Title" xml:space="preserve">
+    <value>NanoBot - 设置</value>
+  </data>
+  <data name="WebUISettings" xml:space="preserve">
+    <value>WebUI 设置</value>
+  </data>
+  <data name="ServerConfig" xml:space="preserve">
+    <value>服务器配置</value>
+  </data>
+  <data name="Host" xml:space="preserve">
+    <value>主机地址</value>
+  </data>
+  <data name="Port" xml:space="preserve">
+    <value>端口</value>
+  </data>
+  <data name="Urls" xml:space="preserve">
+    <value>URLs (可选)</value>
+  </data>
+  <data name="UrlsHelper" xml:space="preserve">
+    <value>留空则使用主机+端口自动生成</value>
+  </data>
+  <data name="AuthConfig" xml:space="preserve">
+    <value>认证配置</value>
+  </data>
+  <data name="AuthMode" xml:space="preserve">
+    <value>认证模式</value>
+  </data>
+  <data name="AuthModeNone" xml:space="preserve">
+    <value>无认证</value>
+  </data>
+  <data name="AuthModeToken" xml:space="preserve">
+    <value>Token认证</value>
+  </data>
+  <data name="AuthModePassword" xml:space="preserve">
+    <value>密码认证</value>
+  </data>
+  <data name="Token" xml:space="preserve">
+    <value>Token</value>
+  </data>
+  <data name="Password" xml:space="preserve">
+    <value>密码</value>
+  </data>
+  <data name="AllowLocalhost" xml:space="preserve">
+    <value>允许本地访问</value>
+  </data>
+  <data name="CorsConfig" xml:space="preserve">
+    <value>CORS 配置</value>
+  </data>
+  <data name="AllowAnyOrigin" xml:space="preserve">
+    <value>允许任意源</value>
+  </data>
+  <data name="AddAllowedOrigin" xml:space="preserve">
+    <value>添加允许的源</value>
+  </data>
+  <data name="AllowAnyMethod" xml:space="preserve">
+    <value>允许任意方法</value>
+  </data>
+  <data name="AllowAnyHeader" xml:space="preserve">
+    <value>允许任意头部</value>
+  </data>
+  <data name="AllowCredentials" xml:space="preserve">
+    <value>允许凭据</value>
+  </data>
+  <data name="FeaturesConfig" xml:space="preserve">
+    <value>功能配置</value>
+  </data>
+  <data name="EnableFileUpload" xml:space="preserve">
+    <value>启用文件上传</value>
+  </data>
+  <data name="MaxFileSize" xml:space="preserve">
+    <value>最大文件大小</value>
+  </data>
+  <data name="MaxFileSizeHelper" xml:space="preserve">
+    <value>如: 10MB, 1GB</value>
+  </data>
+  <data name="AddFileType" xml:space="preserve">
+    <value>添加允许的文件类型</value>
+  </data>
+  <data name="LocalizationConfig" xml:space="preserve">
+    <value>本地化配置</value>
+  </data>
+  <data name="DefaultLanguage" xml:space="preserve">
+    <value>默认语言</value>
+  </data>
+  <data name="LanguageAuto" xml:space="preserve">
+    <value>自动 (跟随浏览器)</value>
+  </data>
+  <data name="LanguageZhCN" xml:space="preserve">
+    <value>简体中文</value>
+  </data>
+  <data name="LanguageEnUS" xml:space="preserve">
+    <value>English</value>
+  </data>
+  <data name="ResetToDefaults" xml:space="preserve">
+    <value>重置为默认</value>
+  </data>
+  <data name="SaveSettings" xml:space="preserve">
+    <value>保存设置</value>
+  </data>
+  <data name="ResetSuccess" xml:space="preserve">
+    <value>已重置为默认设置</value>
+  </data>
+  <data name="SaveSuccess" xml:space="preserve">
+    <value>设置已保存</value>
+  </data>
+  <data name="SaveFailed" xml:space="preserve">
+    <value>保存失败: {0}</value>
+  </data>
+  <data name="LanguageChanged" xml:space="preserve">
+    <value>语言已更改，页面将重新加载</value>
+  </data>
+</root>

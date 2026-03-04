@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using NanoBot.Agent.Extensions;
 using NanoBot.Core.Workspace;
 
 namespace NanoBot.Agent;
@@ -13,18 +14,25 @@ public interface ISessionManager
     Task SaveSessionAsync(AgentSession session, string sessionKey, CancellationToken cancellationToken = default);
     Task ClearSessionAsync(string sessionKey, CancellationToken cancellationToken = default);
     Task InvalidateAsync(string sessionKey);
-    IEnumerable<SessionInfo> ListSessions();
+    IEnumerable<SessionFileInfo> ListSessions();
 
     int GetLastConsolidated(string sessionKey);
 
     void SetLastConsolidated(string sessionKey, int lastConsolidated);
+
+    string? GetSessionTitle(string sessionKey);
+    void SetSessionTitle(string sessionKey, string title);
+    string? GetSessionProfileId(string sessionKey);
+    void SetSessionProfileId(string sessionKey, string? profileId);
 }
 
-public record SessionInfo(
+public record SessionFileInfo(
     string Key,
     DateTimeOffset? CreatedAt,
     DateTimeOffset? UpdatedAt,
-    string Path
+    string Path,
+    string? Title = null,
+    string? ProfileId = null
 );
 
 public sealed class SessionManager : ISessionManager
@@ -160,14 +168,14 @@ public sealed class SessionManager : ISessionManager
         return Task.CompletedTask;
     }
 
-    public IEnumerable<SessionInfo> ListSessions()
+    public IEnumerable<SessionFileInfo> ListSessions()
     {
         if (!Directory.Exists(_sessionsDirectory))
         {
             return [];
         }
 
-        var sessions = new List<SessionInfo>();
+        var sessions = new List<SessionFileInfo>();
 
         foreach (var file in Directory.GetFiles(_sessionsDirectory, "*.jsonl"))
         {
@@ -175,11 +183,14 @@ public sealed class SessionManager : ISessionManager
             {
                 var key = Path.GetFileNameWithoutExtension(file).Replace("_", ":");
                 var info = new FileInfo(file);
-                sessions.Add(new SessionInfo(
+                var (title, profileId) = LoadSessionMetadata(file);
+                sessions.Add(new SessionFileInfo(
                     Key: key,
                     CreatedAt: info.CreationTimeUtc,
                     UpdatedAt: info.LastWriteTimeUtc,
-                    Path: file
+                    Path: file,
+                    Title: title,
+                    ProfileId: profileId
                 ));
             }
             catch (Exception ex)
@@ -189,6 +200,57 @@ public sealed class SessionManager : ISessionManager
         }
 
         return sessions.OrderByDescending(s => s.UpdatedAt);
+    }
+
+    private readonly Dictionary<string, string> _sessionTitles = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string?> _sessionProfileIds = new(StringComparer.Ordinal);
+
+    public string? GetSessionTitle(string sessionKey)
+    {
+        return _sessionTitles.GetValueOrDefault(sessionKey);
+    }
+
+    public void SetSessionTitle(string sessionKey, string title)
+    {
+        _sessionTitles[sessionKey] = title;
+    }
+
+    public string? GetSessionProfileId(string sessionKey)
+    {
+        return _sessionProfileIds.GetValueOrDefault(sessionKey);
+    }
+
+    public void SetSessionProfileId(string sessionKey, string? profileId)
+    {
+        _sessionProfileIds[sessionKey] = profileId;
+    }
+
+    private (string? title, string? profileId) LoadSessionMetadata(string sessionFile)
+    {
+        try
+        {
+            if (!File.Exists(sessionFile))
+                return (null, null);
+
+            using var fs = new FileStream(sessionFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var reader = new StreamReader(fs);
+            var firstLine = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(firstLine))
+                return (null, null);
+
+            var metadata = JsonSerializer.Deserialize<JsonObject>(firstLine, _jsonOptions);
+            if (metadata == null)
+                return (null, null);
+
+            var title = metadata.TryGetPropertyValue("title", out var titleNode) ? titleNode?.GetValue<string>() : null;
+            var profileId = metadata.TryGetPropertyValue("profile_id", out var profileNode) ? profileNode?.GetValue<string>() : null;
+
+            return (title, profileId);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     private async Task<AgentSession?> LoadSessionAsync(string sessionKey, CancellationToken cancellationToken)
@@ -317,24 +379,7 @@ public sealed class SessionManager : ISessionManager
 
     private List<JsonObject> GetAllMessages(AgentSession session)
     {
-        var messages = new List<ChatMessage>();
-
-        var historyProvider = session.GetService<ChatHistoryProvider>();
-        if (historyProvider != null)
-        {
-            var method = typeof(ChatHistoryProvider).GetMethod(
-                "GetAllMessages",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (method != null)
-            {
-                var result = method.Invoke(historyProvider, null);
-                if (result is IEnumerable<ChatMessage> enumerable)
-                {
-                    messages.AddRange(enumerable);
-                }
-            }
-        }
-
+        var messages = session.GetAllMessages();
         return messages.Select(SerializeMessage).ToList();
     }
 
@@ -345,6 +390,8 @@ public sealed class SessionManager : ISessionManager
         CancellationToken cancellationToken)
     {
         var createdAt = DateTimeOffset.Now;
+        string? existingTitle = null;
+        string? existingProfileId = null;
 
         if (File.Exists(sessionFile))
         {
@@ -356,12 +403,22 @@ public sealed class SessionManager : ISessionManager
                 if (!string.IsNullOrWhiteSpace(firstLine))
                 {
                     var existing = JsonSerializer.Deserialize<JsonObject>(firstLine, _jsonOptions);
-                    if (existing != null &&
-                        existing.TryGetPropertyValue("created_at", out var createdNode) &&
-                        createdNode != null &&
-                        DateTimeOffset.TryParse(createdNode.GetValue<string>(), out var parsed))
+                    if (existing != null)
                     {
-                        createdAt = parsed;
+                        if (existing.TryGetPropertyValue("created_at", out var createdNode) &&
+                            createdNode != null &&
+                            DateTimeOffset.TryParse(createdNode.GetValue<string>(), out var parsed))
+                        {
+                            createdAt = parsed;
+                        }
+                        if (existing.TryGetPropertyValue("title", out var titleNode))
+                        {
+                            existingTitle = titleNode?.GetValue<string>();
+                        }
+                        if (existing.TryGetPropertyValue("profile_id", out var profileNode))
+                        {
+                            existingProfileId = profileNode?.GetValue<string>();
+                        }
                     }
                 }
             }
@@ -372,6 +429,8 @@ public sealed class SessionManager : ISessionManager
         }
 
         var lastConsolidated = GetLastConsolidated(sessionKey);
+        var title = GetSessionTitle(sessionKey) ?? existingTitle;
+        var profileId = GetSessionProfileId(sessionKey) ?? existingProfileId;
 
         var metaObj = new JsonObject
         {
@@ -384,6 +443,8 @@ public sealed class SessionManager : ISessionManager
             ["key"] = sessionKey,
             ["created_at"] = createdAt.ToString("o"),
             ["updated_at"] = DateTimeOffset.Now.ToString("o"),
+            ["title"] = title,
+            ["profile_id"] = profileId,
             ["metadata"] = metaObj,
             ["last_consolidated"] = lastConsolidated
         };

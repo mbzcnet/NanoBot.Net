@@ -97,4 +97,24 @@ public class FileStorageService : IFileStorageService
     {
         return $"/api/files/sessions/{relativePath.Replace('\\', '/')}";
     }
+
+    public Task<bool> DeleteSessionDirectoryAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var sessionDirectory = Path.Combine(_workspaceManager.GetSessionsPath(), sessionId);
+            if (Directory.Exists(sessionDirectory))
+            {
+                Directory.Delete(sessionDirectory, recursive: true);
+                _logger.LogDebug("Session directory deleted: {SessionDirectory}", sessionDirectory);
+                return Task.FromResult(true);
+            }
+            return Task.FromResult(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting session directory {SessionId}", sessionId);
+            return Task.FromResult(false);
+        }
+    }
 }

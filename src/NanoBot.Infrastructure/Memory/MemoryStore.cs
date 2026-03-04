@@ -156,7 +156,8 @@ public class MemoryStore : IMemoryStore
         {
             if (!string.IsNullOrWhiteSpace(message.Text))
             {
-                sb.AppendLine($"- **User**: {TruncateText(message.Text, 500)}");
+                var text = FilterBase64Content(message.Text);
+                sb.AppendLine($"- **User**: {TruncateText(text, 500)}");
             }
         }
 
@@ -164,11 +165,22 @@ public class MemoryStore : IMemoryStore
         {
             if (!string.IsNullOrWhiteSpace(message.Text))
             {
-                sb.AppendLine($"- **Assistant**: {TruncateText(message.Text, 500)}");
+                var text = FilterBase64Content(message.Text);
+                sb.AppendLine($"- **Assistant**: {TruncateText(text, 500)}");
             }
         }
 
         return sb.ToString();
+    }
+
+    private static string FilterBase64Content(string text)
+    {
+        // Filter out base64-encoded content (e.g., data:image/png;base64,...)
+        return System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"data:image/[a-zA-Z]+;base64,[A-Za-z0-9+/=]+",
+            "[image]",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
     private static string TruncateText(string text, int maxLength)

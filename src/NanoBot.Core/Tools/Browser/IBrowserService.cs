@@ -1,12 +1,16 @@
 namespace NanoBot.Core.Tools.Browser;
 
-public interface IBrowserService
+public interface IBrowserService : IDisposable
 {
-    Task<BrowserToolResponse> GetStatusAsync(string profile, CancellationToken cancellationToken = default);
+    Task<bool> IsStartedAsync(string profile, CancellationToken cancellationToken = default);
+
+    Task EnsureStartedAsync(string profile, CancellationToken cancellationToken = default);
 
     Task<BrowserToolResponse> StartAsync(string profile, CancellationToken cancellationToken = default);
 
     Task<BrowserToolResponse> StopAsync(string profile, CancellationToken cancellationToken = default);
+
+    Task<BrowserToolResponse> StopAllAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<BrowserTabInfo>> GetTabsAsync(string profile, CancellationToken cancellationToken = default);
 
@@ -21,4 +25,6 @@ public interface IBrowserService
     Task<BrowserToolResponse> GetContentAsync(string targetId, string? selector, int? maxChars, string profile, CancellationToken cancellationToken = default);
 
     Task<BrowserToolResponse> ExecuteActionAsync(BrowserActionRequest request, string targetId, string profile, CancellationToken cancellationToken = default);
+
+    Task<BrowserToolResponse> GetStatusAsync(string profile, CancellationToken cancellationToken = default);
 }

@@ -1,0 +1,76 @@
+@using NanoBot.Core.Configuration
+
+<div class="nb-channel-config-editor">
+    <MudTextField @bind-Value="Config.AppId"
+                  Label="App ID"
+                  Variant="Variant.Outlined"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.AppSecret"
+                  Label="App Secret"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.EncryptKey"
+                  Label="Encrypt Key"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.VerificationToken"
+                  Label="Verification Token"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的用户/群组</MudText>
+    <MudTextField @bind-Value="_newAllowFrom"
+                  Label="添加允许的用户/群组"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddAllowFrom"
+                  Class="mb-2" />
+    
+    @foreach (var allowFrom in Config.AllowFrom)
+    {
+        <MudChip Color="Color.Primary"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveAllowFrom(allowFrom)">
+            @allowFrom
+        </MudChip>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public FeishuConfig Config { get; set; } = new();
+    
+    [Parameter]
+    public EventCallback<FeishuConfig> ConfigChanged { get; set; }
+    
+    private string _newAllowFrom = string.Empty;
+
+    private void AddAllowFrom()
+    {
+        if (!string.IsNullOrWhiteSpace(_newAllowFrom) && 
+            !Config.AllowFrom.Contains(_newAllowFrom))
+        {
+            var list = Config.AllowFrom.ToList();
+            list.Add(_newAllowFrom);
+            Config.AllowFrom = list;
+            _newAllowFrom = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveAllowFrom(string allowFrom)
+    {
+        var list = Config.AllowFrom.ToList();
+        list.Remove(allowFrom);
+        Config.AllowFrom = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+}

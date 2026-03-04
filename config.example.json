@@ -71,5 +71,20 @@
     "Enabled": false,
     "IntervalSeconds": 300,
     "Message": "Checking in. Is there anything you need help with?"
+  },
+  "WebUI": {
+    "Server": {
+      "Host": "127.0.0.1",
+      "Port": 18888
+    },
+    "Auth": {
+      "Mode": "token",
+      "Token": "${WEBUI_TOKEN}",
+      "AllowLocalhost": true
+    },
+    "Localization": {
+      "DefaultLanguage": "auto",
+      "SupportedLanguages": ["zh-CN", "en-US"]
+    }
   }
 }

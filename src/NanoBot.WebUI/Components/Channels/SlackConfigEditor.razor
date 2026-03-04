@@ -1,0 +1,143 @@
+@using NanoBot.Core.Configuration
+
+<div class="nb-channel-config-editor">
+    <MudSelect @bind-Value="Config.Mode"
+               Label="模式"
+               Variant="Variant.Outlined"
+               Class="mb-3">
+        <MudSelectItem Value="@("socket")">Socket Mode</MudSelectItem>
+        <MudSelectItem Value="@("http")">HTTP Mode</MudSelectItem>
+    </MudSelect>
+    
+    <MudTextField @bind-Value="Config.BotToken"
+                  Label="Bot Token"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.AppToken"
+                  Label="App Token"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudSelect @bind-Value="Config.GroupPolicy"
+               Label="群组策略"
+               Variant="Variant.Outlined"
+               Class="mb-3">
+        <MudSelectItem Value="@("mention")">Mention</MudSelectItem>
+        <MudSelectItem Value="@("open")">Open</MudSelectItem>
+        <MudSelectItem Value="@("closed")">Closed</MudSelectItem>
+    </MudSelect>
+    
+    <MudDivider Class="my-4" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的群组</MudText>
+    <MudTextField @bind-Value="_newGroupAllowFrom"
+                  Label="添加允许的群组"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddGroupAllowFrom"
+                  Class="mb-2" />
+    
+    @foreach (var allowFrom in Config.GroupAllowFrom)
+    {
+        <MudChip Color="Color.Primary"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveGroupAllowFrom(allowFrom)">
+            @allowFrom
+        </MudChip>
+    }
+    
+    <MudDivider Class="my-4" />
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">私聊设置</MudText>
+    <MudCheckBox @bind-Checked="Config.Dm.Enabled"
+                 Label="启用私聊"
+                 T="bool"
+                 Class="mb-2" />
+    
+    <MudSelect @bind-Value="Config.Dm.Policy"
+               Label="私聊策略"
+               Variant="Variant.Outlined"
+               Class="mb-3"
+               Disabled="@(!Config.Dm.Enabled)">
+        <MudSelectItem Value="@("open")">Open</MudSelectItem>
+        <MudSelectItem Value="@("closed")">Closed</MudSelectItem>
+    </MudSelect>
+    
+    <MudText Typo="Typo.subtitle2" Class="mb-2">允许的用户</MudText>
+    <MudTextField @bind-Value="_newDmAllowFrom"
+                  Label="添加允许的用户"
+                  Variant="Variant.Outlined"
+                  Adornment="Adornment.End"
+                  AdornmentIcon="@Icons.Material.Filled.Add"
+                  OnAdornmentClick="AddDmAllowFrom"
+                  Class="mb-2"
+                  Disabled="@(!Config.Dm.Enabled)" />
+    
+    @foreach (var allowFrom in Config.Dm.AllowFrom)
+    {
+        <MudChip Color="Color.Secondary"
+                Class="mr-2 mb-2"
+                T="string"
+                OnClose="() => RemoveDmAllowFrom(allowFrom)">
+            @allowFrom
+        </MudChip>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public SlackConfig Config { get; set; } = new();
+    
+    [Parameter]
+    public EventCallback<SlackConfig> ConfigChanged { get; set; }
+    
+    private string _newGroupAllowFrom = string.Empty;
+    private string _newDmAllowFrom = string.Empty;
+
+    private void AddGroupAllowFrom()
+    {
+        if (!string.IsNullOrWhiteSpace(_newGroupAllowFrom) && 
+            !Config.GroupAllowFrom.Contains(_newGroupAllowFrom))
+        {
+            var list = Config.GroupAllowFrom.ToList();
+            list.Add(_newGroupAllowFrom);
+            Config.GroupAllowFrom = list;
+            _newGroupAllowFrom = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveGroupAllowFrom(string allowFrom)
+    {
+        var list = Config.GroupAllowFrom.ToList();
+        list.Remove(allowFrom);
+        Config.GroupAllowFrom = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+
+    private void AddDmAllowFrom()
+    {
+        if (!string.IsNullOrWhiteSpace(_newDmAllowFrom) && 
+            !Config.Dm.AllowFrom.Contains(_newDmAllowFrom))
+        {
+            var list = Config.Dm.AllowFrom.ToList();
+            list.Add(_newDmAllowFrom);
+            Config.Dm.AllowFrom = list;
+            _newDmAllowFrom = string.Empty;
+            ConfigChanged.InvokeAsync(Config);
+        }
+    }
+
+    private void RemoveDmAllowFrom(string allowFrom)
+    {
+        var list = Config.Dm.AllowFrom.ToList();
+        list.Remove(allowFrom);
+        Config.Dm.AllowFrom = list;
+        ConfigChanged.InvokeAsync(Config);
+    }
+}

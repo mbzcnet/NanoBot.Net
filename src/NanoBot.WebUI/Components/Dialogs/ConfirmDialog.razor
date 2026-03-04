@@ -1,0 +1,30 @@
+@using MudBlazor
+@rendermode InteractiveServer
+
+<MudDialog>
+    <DialogContent>
+        <MudText>@ContentText</MudText>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">取消</MudButton>
+        <MudButton Color="@Color" Variant="Variant.Filled" OnClick="Submit">@ButtonText</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] 
+    public MudBlazor.IDialogReference? MudDialog { get; set; }
+
+    [Parameter]
+    public string ContentText { get; set; } = "确定要执行此操作吗？";
+
+    [Parameter]
+    public string ButtonText { get; set; } = "确定";
+
+    [Parameter]
+    public Color Color { get; set; } = Color.Primary;
+
+    void Cancel() => MudDialog?.Close();
+    
+    void Submit() => MudDialog?.Close(MudBlazor.DialogResult.Ok(true));
+}

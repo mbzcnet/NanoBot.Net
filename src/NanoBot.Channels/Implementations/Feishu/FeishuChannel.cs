@@ -135,10 +135,7 @@ public class FeishuChannel : ChannelBase
         var card = new
         {
             config = new { wide_screen_mode = true },
-            elements = new[]
-            {
-                new { tag = "markdown", content = message.Content }
-            }
+            elements = BuildCardElements(message.Content)
         };
 
         var payload = new
@@ -168,6 +165,20 @@ public class FeishuChannel : ChannelBase
         {
             _logger.LogError(ex, "Error sending Feishu message");
         }
+    }
+
+    private List<Dictionary<string, object?>> BuildCardElements(string content)
+    {
+        var elements = new List<Dictionary<string, object?>>();
+
+        // Simple markdown element for now
+        elements.Add(new Dictionary<string, object?>
+        {
+            ["tag"] = "markdown",
+            ["content"] = content
+        });
+
+        return elements;
     }
 
     private async Task HandleIncomingMessageAsync(JsonElement eventData, CancellationToken cancellationToken)
@@ -207,7 +218,18 @@ public class FeishuChannel : ChannelBase
         }
         else if (msgType == "post")
         {
-            content = ExtractPostContent(message);
+            var (textContent, imageKeys) = ExtractPostContentWithImages(message);
+            content = textContent;
+
+            // Download images from post message
+            foreach (var imageKey in imageKeys)
+            {
+                var (filePath, contentText) = await DownloadImageByKeyAsync(messageId, imageKey, cancellationToken);
+                if (filePath != null)
+                {
+                    mediaPaths.Add(filePath);
+                }
+            }
         }
         else if (msgType == "image" || msgType == "audio" || msgType == "file" || msgType == "media")
         {
@@ -249,32 +271,61 @@ public class FeishuChannel : ChannelBase
         return json.TryGetProperty("text", out var text) ? text.GetString() ?? "" : "";
     }
 
-    private static string ExtractPostContent(JsonElement message)
+    private static (string Text, List<string> ImageKeys) ExtractPostContentWithImages(JsonElement message)
     {
         var content = message.GetProperty("content").GetString() ?? "{}";
         var json = JsonSerializer.Deserialize<JsonElement>(content);
 
         var textParts = new List<string>();
+        var imageKeys = new List<string>();
 
-        if (json.TryGetProperty("zh_cn", out var zhCn))
+        // Handle different payload shapes
+        var root = json;
+
+        // Unwrap optional {"post": ...} envelope
+        if (json.TryGetProperty("post", out var postWrapper))
         {
-            ExtractFromLocalized(zhCn, textParts);
-        }
-        else if (json.TryGetProperty("content", out var directContent))
-        {
-            ExtractFromLocalized(json, textParts);
+            root = postWrapper;
         }
 
-        return string.Join(" ", textParts);
+        // Try known locales first
+        foreach (var locale in new[] { "zh_cn", "en_us", "ja_jp" })
+        {
+            if (root.TryGetProperty(locale, out var localeContent))
+            {
+                ExtractFromLocale(localeContent, textParts, imageKeys);
+                if (textParts.Count > 0 || imageKeys.Count > 0)
+                {
+                    return (string.Join(" ", textParts), imageKeys);
+                }
+            }
+        }
+
+        // Fall back to any dict child
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Value.ValueKind == JsonValueKind.Object)
+            {
+                ExtractFromLocale(prop.Value, textParts, imageKeys);
+                if (textParts.Count > 0 || imageKeys.Count > 0)
+                {
+                    return (string.Join(" ", textParts), imageKeys);
+                }
+            }
+        }
+
+        return (string.Empty, imageKeys);
     }
 
-    private static void ExtractFromLocalized(JsonElement langContent, List<string> textParts)
+    private static void ExtractFromLocale(JsonElement langContent, List<string> textParts, List<string> imageKeys)
     {
+        // Handle title
         if (langContent.TryGetProperty("title", out var title) && title.ValueKind == JsonValueKind.String)
         {
             textParts.Add(title.GetString() ?? "");
         }
 
+        // Handle content array
         if (langContent.TryGetProperty("content", out var content) && content.ValueKind == JsonValueKind.Array)
         {
             foreach (var block in content.EnumerateArray())
@@ -288,12 +339,8 @@ public class FeishuChannel : ChannelBase
                         continue;
 
                     var tag = element.TryGetProperty("tag", out var tagEl) ? tagEl.GetString() : null;
-                    if (tag == "text")
-                    {
-                        if (element.TryGetProperty("text", out var text))
-                            textParts.Add(text.GetString() ?? "");
-                    }
-                    else if (tag == "a")
+
+                    if (tag == "text" || tag == "a")
                     {
                         if (element.TryGetProperty("text", out var text))
                             textParts.Add(text.GetString() ?? "");
@@ -303,9 +350,26 @@ public class FeishuChannel : ChannelBase
                         var userName = element.TryGetProperty("user_name", out var un) ? un.GetString() : "user";
                         textParts.Add($"@{userName}");
                     }
+                    else if (tag == "img")
+                    {
+                        if (element.TryGetProperty("image_key", out var imgKey))
+                        {
+                            var imageKey = imgKey.GetString();
+                            if (!string.IsNullOrEmpty(imageKey))
+                            {
+                                imageKeys.Add(imageKey);
+                            }
+                        }
+                    }
                 }
             }
         }
+    }
+
+    private static string ExtractPostContent(JsonElement message)
+    {
+        var (text, _) = ExtractPostContentWithImages(message);
+        return text;
     }
 
     private async Task<(string? FilePath, string ContentText)> DownloadAndSaveMediaAsync(
@@ -366,6 +430,48 @@ public class FeishuChannel : ChannelBase
         {
             _logger.LogError(ex, "Error downloading {MsgType}", msgType);
             return (null, MsgTypeMap.GetValueOrDefault(msgType, $"[{msgType}]"));
+        }
+    }
+
+    private async Task<(string? FilePath, string? FileName)> DownloadImageByKeyAsync(
+        string messageId,
+        string imageKey,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(_accessToken))
+        {
+            _logger.LogWarning("Feishu access token not available for image download");
+            return (null, null);
+        }
+
+        try
+        {
+            var url = $"https://open.feishu.cn/open-apis/im/v1/messages/{messageId}/resources/{imageKey}?type=image";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Authorization", $"Bearer {_accessToken}");
+
+            var response = await _httpClient.SendAsync(request, cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogError("Failed to download image: status={StatusCode}", response.StatusCode);
+                return (null, null);
+            }
+
+            var fileData = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+            var fileName = response.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? $"{imageKey[..Math.Min(16, imageKey.Length)]}.jpg";
+
+            var filePath = Path.Combine(_mediaDirectory, fileName);
+            await File.WriteAllBytesAsync(filePath, fileData, cancellationToken);
+
+            _logger.LogDebug("Downloaded image {ImageKey} to {FilePath}", imageKey, filePath);
+
+            return (filePath, $"[image: {fileName}]");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error downloading image {ImageKey}", imageKey);
+            return (null, null);
         }
     }
 

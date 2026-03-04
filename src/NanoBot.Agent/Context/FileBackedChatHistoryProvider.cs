@@ -23,24 +23,23 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         _logger = logger;
     }
 
-    protected override async ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
+    protected override ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
         InvokingContext context,
         CancellationToken cancellationToken)
     {
         if (context.Session == null)
         {
-            return [];
+            return ValueTask.FromResult<IEnumerable<ChatMessage>>([]);
         }
 
-        // Try to get messages from session state
         if (context.Session.StateBag.TryGetValue<List<ChatMessage>>(StateKey, out var messages) && messages != null)
         {
             _logger?.LogDebug("Loaded {Count} messages from session state", messages.Count);
-            return messages;
+            return ValueTask.FromResult<IEnumerable<ChatMessage>>(messages);
         }
 
         _logger?.LogDebug("No messages found in session state");
-        return [];
+        return ValueTask.FromResult<IEnumerable<ChatMessage>>([]);
     }
 
     protected override async ValueTask StoreChatHistoryAsync(

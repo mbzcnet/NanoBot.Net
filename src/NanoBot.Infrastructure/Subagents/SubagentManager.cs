@@ -14,6 +14,7 @@ public class SubagentManager : ISubagentManager
 
     private readonly Dictionary<string, SubagentInfo> _subagents = new();
     private readonly Dictionary<string, CancellationTokenSource> _cancellationTokens = new();
+    private readonly Dictionary<string, HashSet<string>> _sessionToSubagentIds = new(); // sessionKey -> subagentIds
     private readonly object _lock = new();
 
     public event EventHandler<SubagentCompletedEventArgs>? SubagentCompleted;
@@ -40,6 +41,9 @@ public class SubagentManager : ISubagentManager
         var id = Guid.NewGuid().ToString("N")[..8];
         var displayLabel = label ?? (task.Length > 30 ? task[..30] + "..." : task);
 
+        // Build session key from origin
+        var sessionKey = $"{originChannel}:{originChatId}";
+
         var info = new SubagentInfo
         {
             Id = id,
@@ -54,6 +58,13 @@ public class SubagentManager : ISubagentManager
         lock (_lock)
         {
             _subagents[id] = info;
+
+            // Track subagent by session
+            if (!_sessionToSubagentIds.ContainsKey(sessionKey))
+            {
+                _sessionToSubagentIds[sessionKey] = new HashSet<string>();
+            }
+            _sessionToSubagentIds[sessionKey].Add(id);
         }
 
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -62,7 +73,7 @@ public class SubagentManager : ISubagentManager
             _cancellationTokens[id] = cts;
         }
 
-        _logger.LogInformation("Spawned subagent [{Id}]: {Label}", id, displayLabel);
+        _logger.LogInformation("Spawned subagent [{Id}]: {Label} for session {SessionKey}", id, displayLabel, sessionKey);
 
         try
         {
@@ -146,6 +157,23 @@ public class SubagentManager : ISubagentManager
             lock (_lock)
             {
                 _cancellationTokens.Remove(id);
+                _subagents.Remove(id);
+                // Remove from session tracking
+                var keysToRemove = new List<string>();
+                foreach (var kvp in _sessionToSubagentIds)
+                {
+                    if (kvp.Value.Remove(id))
+                    {
+                        if (kvp.Value.Count == 0)
+                        {
+                            keysToRemove.Add(kvp.Key);
+                        }
+                    }
+                }
+                foreach (var key in keysToRemove)
+                {
+                    _sessionToSubagentIds.Remove(key);
+                }
             }
         }
     }
@@ -179,6 +207,30 @@ public class SubagentManager : ISubagentManager
                 return true;
             }
             return false;
+        }
+    }
+
+    public bool CancelSession(string sessionKey)
+    {
+        lock (_lock)
+        {
+            if (!_sessionToSubagentIds.TryGetValue(sessionKey, out var subagentIds))
+            {
+                return false;
+            }
+
+            var cancelled = false;
+            foreach (var id in subagentIds)
+            {
+                if (_cancellationTokens.TryGetValue(id, out var cts))
+                {
+                    cts.Cancel();
+                    cancelled = true;
+                    _logger?.LogInformation("Cancelled subagent [{Id}] for session {SessionKey}", id, sessionKey);
+                }
+            }
+
+            return cancelled;
         }
     }
 

@@ -27,8 +27,9 @@ class Nbot < Formula
   end
 
   def install
-    bin.install "nbot"
-    pkgshare.install "workspace"
+    platform_dir = Dir.glob("nbot-*").first
+    bin.install "#{platform_dir}/nbot"
+    bin.install "#{platform_dir}/webui"
   end
 
   test do

@@ -1,0 +1,50 @@
+@using NanoBot.Core.Configuration
+
+<div class="nb-channel-config-editor">
+    <MudTextField @bind-Value="Config.Homeserver"
+                  Label="Homeserver"
+                  Variant="Variant.Outlined"
+                  HelperText="Matrix Homeserver 地址"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.AccessToken"
+                  Label="Access Token"
+                  Variant="Variant.Outlined"
+                  InputType="InputType.Password"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.UserId"
+                  Label="User ID"
+                  Variant="Variant.Outlined"
+                  HelperText="@("例如: @@user:server.com")"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.DeviceId"
+                  Label="Device ID"
+                  Variant="Variant.Outlined"
+                  Class="mb-3" />
+    
+    <MudTextField @bind-Value="Config.RoomId"
+                  Label="Room ID"
+                  Variant="Variant.Outlined"
+                  HelperText="默认房间 ID"
+                  Class="mb-3" />
+    
+    <MudCheckBox @bind-Checked="Config.EncryptRooms"
+                 Label="加密房间"
+                 T="bool"
+                 Class="mb-2" />
+    
+    <MudCheckBox @bind-Checked="Config.SyncPresence"
+                 Label="同步在线状态"
+                 T="bool"
+                 Class="mb-3" />
+</div>
+
+@code {
+    [Parameter]
+    public MatrixConfig Config { get; set; } = new();
+    
+    [Parameter]
+    public EventCallback<MatrixConfig> ConfigChanged { get; set; }
+}

@@ -11,4 +11,6 @@ public interface IFileStorageService
     bool FileExists(string relativePath);
     
     string GetFileUrl(string relativePath);
+
+    Task<bool> DeleteSessionDirectoryAsync(string sessionId, CancellationToken cancellationToken = default);
 }

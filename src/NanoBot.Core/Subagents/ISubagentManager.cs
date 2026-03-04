@@ -15,5 +15,7 @@ public interface ISubagentManager
 
     bool Cancel(string id);
 
+    bool CancelSession(string sessionKey);
+
     event EventHandler<SubagentCompletedEventArgs>? SubagentCompleted;
 }

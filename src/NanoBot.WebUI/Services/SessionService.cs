@@ -1,41 +1,53 @@
 using NanoBot.Agent;
+using NanoBot.Core.Sessions;
+using NanoBot.Core.Storage;
 using NanoBot.Core.Workspace;
+using System.Text.Json;
 
 namespace NanoBot.WebUI.Services;
 
 public class SessionService : ISessionService
 {
     private readonly ILogger<SessionService> _logger;
-    private readonly ISessionManager _agentSessionManager;
+    private readonly ISessionManager _sessionManager;
     private readonly IWorkspaceManager _workspace;
+    private readonly IFileStorageService _fileStorage;
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     public SessionService(
         ILogger<SessionService> logger,
-        ISessionManager agentSessionManager,
-        IWorkspaceManager workspace)
+        ISessionManager sessionManager,
+        IWorkspaceManager workspace,
+        IFileStorageService fileStorage)
     {
         _logger = logger;
-        _agentSessionManager = agentSessionManager;
+        _sessionManager = sessionManager;
         _workspace = workspace;
+        _fileStorage = fileStorage;
     }
 
     public Task<List<SessionInfo>> GetSessionsAsync()
     {
         try
         {
-            var agentSessions = _agentSessionManager.ListSessions()
+            var sessions = _sessionManager.ListSessions()
                 .Where(s => s.Key.StartsWith("webui:"))
                 .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt ?? DateTimeOffset.MinValue)
                 .Select(s => new SessionInfo
                 {
                     Id = s.Key.Replace("webui:", ""),
-                    Title = GetSessionTitle(s.Key),
+                    Title = s.Title ?? GenerateDefaultTitle(s.Key),
                     CreatedAt = (s.CreatedAt ?? DateTimeOffset.Now).DateTime,
-                    UpdatedAt = (s.UpdatedAt ?? DateTimeOffset.Now).DateTime
+                    UpdatedAt = (s.UpdatedAt ?? DateTimeOffset.Now).DateTime,
+                    ProfileId = s.ProfileId
                 })
                 .ToList();
-            
-            return Task.FromResult(agentSessions);
+
+            return Task.FromResult(sessions);
         }
         catch (Exception ex)
         {
@@ -43,73 +55,25 @@ public class SessionService : ISessionService
             return Task.FromResult(new List<SessionInfo>());
         }
     }
-    
-    private string GetSessionTitle(string sessionKey)
-    {
-        try
-        {
-            // 尝试从会话文件的第一条用户消息提取标题
-            var sessionsPath = _workspace.GetSessionsPath();
-            var sessionFile = Path.Combine(sessionsPath, $"{sessionKey}.jsonl");
-            
-            if (File.Exists(sessionFile))
-            {
-                var lines = File.ReadAllLines(sessionFile);
-                foreach (var line in lines)
-                {
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("{\"metadata\":"))
-                        continue;
-                    
-                    try
-                    {
-                        var msg = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(line);
-                        if (msg.TryGetProperty("role", out var roleElement) && 
-                            msg.TryGetProperty("content", out var contentElement))
-                        {
-                            var role = roleElement.GetString()?.ToLower();
-                            if (role == "user")
-                            {
-                                var content = contentElement.GetString() ?? string.Empty;
-                                // 提取前30个字符作为标题
-                                if (content.Length > 30)
-                                    return content.Substring(0, 30) + "...";
-                                return content;
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // 忽略解析错误
-                    }
-                }
-            }
-        }
-        catch
-        {
-            // 如果读取失败，使用默认标题
-        }
-        
-        // 默认标题
-        var sessionId = sessionKey.Replace("webui:", "");
-        return $"会话 {sessionId.Substring(0, Math.Min(8, sessionId.Length))}";
-    }
 
     public async Task<SessionInfo?> GetSessionAsync(string sessionId)
     {
         try
         {
             var sessionKey = $"webui:{sessionId}";
-            var agentSession = await _agentSessionManager.GetOrCreateSessionAsync(sessionKey);
-            
+            var agentSession = _sessionManager.ListSessions()
+                .FirstOrDefault(s => s.Key == sessionKey);
+
             if (agentSession == null)
                 return null;
-            
+
             return new SessionInfo
             {
                 Id = sessionId,
-                Title = GetSessionTitle(sessionKey),
-                CreatedAt = DateTime.Now,
-                UpdatedAt = DateTime.Now
+                Title = agentSession.Title ?? GenerateDefaultTitle(sessionKey),
+                CreatedAt = (agentSession.CreatedAt ?? DateTimeOffset.Now).DateTime,
+                UpdatedAt = (agentSession.UpdatedAt ?? DateTimeOffset.Now).DateTime,
+                ProfileId = agentSession.ProfileId
             };
         }
         catch (Exception ex)
@@ -119,22 +83,34 @@ public class SessionService : ISessionService
         }
     }
 
-    public async Task<SessionInfo> CreateSessionAsync(string? title = null)
+    public async Task<SessionInfo> CreateSessionAsync(string? title = null, string? profileId = null)
     {
         var sessionId = Guid.NewGuid().ToString("N");
         var sessionKey = $"webui:{sessionId}";
-        
+
         try
         {
-            // 创建 Agent 会话
-            await _agentSessionManager.GetOrCreateSessionAsync(sessionKey);
-            
+            var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
+
+            var now = DateTime.Now;
+            var sessionTitle = title ?? $"会话 {now:MM-dd HH:mm}";
+
+            _sessionManager.SetSessionTitle(sessionKey, sessionTitle);
+            if (!string.IsNullOrEmpty(profileId))
+            {
+                _sessionManager.SetSessionProfileId(sessionKey, profileId);
+            }
+
+            // 立即保存会话到文件，确保 ListSessions 可以读取到
+            await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
+
             var session = new SessionInfo
             {
                 Id = sessionId,
-                Title = title ?? $"会话 {DateTime.Now:MM-dd HH:mm}",
-                CreatedAt = DateTime.Now,
-                UpdatedAt = DateTime.Now
+                Title = sessionTitle,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ProfileId = profileId
             };
 
             _logger.LogInformation("Created new session: {SessionId}", sessionId);
@@ -147,42 +123,124 @@ public class SessionService : ISessionService
         }
     }
 
+    public async Task RenameSessionAsync(string sessionId, string newTitle)
+    {
+        try
+        {
+            var sessionKey = $"webui:{sessionId}";
+            var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
+            _sessionManager.SetSessionTitle(sessionKey, newTitle);
+            await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
+            
+            _logger.LogInformation("Renamed session {SessionId} to {NewTitle}", sessionId, newTitle);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error renaming session {SessionId}", sessionId);
+            throw;
+        }
+    }
+
+    public async Task SetSessionProfileAsync(string sessionId, string profileId)
+    {
+        try
+        {
+            var sessionKey = $"webui:{sessionId}";
+            var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
+            _sessionManager.SetSessionProfileId(sessionKey, profileId);
+            await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
+            _logger.LogInformation("Set session profile {ProfileId} for session {SessionId}", profileId, sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error setting profile {ProfileId} for session {SessionId}", profileId, sessionId);
+            throw;
+        }
+    }
+
+    public async Task DeleteSessionAsync(string sessionId)
+    {
+        try
+        {
+            var sessionKey = $"webui:{sessionId}";
+            await _sessionManager.ClearSessionAsync(sessionKey);
+            await _fileStorage.DeleteSessionDirectoryAsync(sessionId);
+
+            _logger.LogInformation("Deleted session: {SessionId}", sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error deleting session {SessionId}", sessionId);
+            throw;
+        }
+    }
+
     public async Task<List<MessageInfo>> GetMessagesAsync(string sessionId)
     {
         try
         {
             var sessionKey = $"webui:{sessionId}";
-            
-            // 确保会话存在
-            await _agentSessionManager.GetOrCreateSessionAsync(sessionKey);
-            
-            // 从会话文件读取消息（如果存在）
+            await _sessionManager.GetOrCreateSessionAsync(sessionKey);
+
             var sessionsPath = _workspace.GetSessionsPath();
-            var sessionFile = Path.Combine(sessionsPath, $"{sessionKey}.jsonl");
-            
+            var sessionFile = Path.Combine(sessionsPath, $"{sessionKey.Replace(":", "_")}.jsonl");
+
             if (!File.Exists(sessionFile))
                 return new List<MessageInfo>();
-            
-            var messages = new List<MessageInfo>();
+
+            var messagesList = new List<MessageInfo>();
             var lines = await File.ReadAllLinesAsync(sessionFile);
-            
+
             foreach (var line in lines)
             {
-                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("{\"metadata\":"))
+                if (string.IsNullOrWhiteSpace(line))
                     continue;
-                
+
                 try
                 {
-                    var msg = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(line);
-                    if (msg.TryGetProperty("role", out var roleElement) && 
-                        msg.TryGetProperty("content", out var contentElement))
+                    var msg = JsonSerializer.Deserialize<JsonElement>(line);
+                    
+                    // 跳过 metadata 行
+                    if (msg.TryGetProperty("_type", out var typeElement) && typeElement.GetString() == "metadata")
+                        continue;
+
+                    string role = "user";
+                    string content = string.Empty;
+                    
+                    // 解析消息 - 支持两种格式
+                    // 格式1: { "role": "user", "content": "text" }
+                    // 格式2: { "role": "user", "contents": [{"$type": "text", "text": "..."}] }
+                    
+                    if (msg.TryGetProperty("role", out var roleElement))
                     {
-                        var role = roleElement.GetString()?.ToLower() ?? "user";
-                        var content = contentElement.GetString() ?? string.Empty;
+                        role = roleElement.GetString()?.ToLower() ?? "user";
                         
-                        messages.Add(new MessageInfo
+                        if (msg.TryGetProperty("content", out var contentElement))
                         {
-                            Id = $"{sessionId}_{messages.Count}",
+                            // 简单格式：content 是字符串
+                            if (contentElement.ValueKind == JsonValueKind.String)
+                            {
+                                content = contentElement.GetString() ?? string.Empty;
+                            }
+                            // 复杂格式：contents 是数组
+                            else if (contentElement.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var item in contentElement.EnumerateArray())
+                                {
+                                    if (item.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
+                                    {
+                                        content += textElement.GetString() ?? string.Empty;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if (!string.IsNullOrWhiteSpace(content))
+                    {
+                        messagesList.Add(new MessageInfo
+                        {
+                            Id = $"{sessionId}_{messagesList.Count}",
                             SessionId = sessionId,
                             Role = role,
                             Content = content,
@@ -192,11 +250,10 @@ public class SessionService : ISessionService
                 }
                 catch
                 {
-                    // 忽略无法解析的行
                 }
             }
-            
-            return messages;
+
+            return messagesList;
         }
         catch (Exception ex)
         {
@@ -205,35 +262,36 @@ public class SessionService : ISessionService
         }
     }
 
-    public Task<MessageInfo> AddMessageAsync(string sessionId, string role, string content)
-    {
-        // 消息现在通过 AgentService 处理并自动保存到会话中
-        // 这个方法只返回一个占位符，实际消息会在 Agent 处理后出现在历史中
-        var message = new MessageInfo
-        {
-            Id = Guid.NewGuid().ToString("N"),
-            SessionId = sessionId,
-            Role = role,
-            Content = content,
-            Timestamp = DateTime.Now
-        };
-
-        _logger.LogInformation("Message placeholder created for session {SessionId}: {Role}", sessionId, role);
-        return Task.FromResult(message);
-    }
-
-    public async Task DeleteSessionAsync(string sessionId)
+    public Task<MessageInfo> AddMessageAsync(string sessionId, string role, string content, List<AttachmentInfo>? attachments = null)
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
-            await _agentSessionManager.ClearSessionAsync(sessionKey);
-            _logger.LogInformation("Deleted session: {SessionId}", sessionId);
+            var now = DateTime.Now;
+            var messageId = Guid.NewGuid().ToString("N");
+            
+            var message = new MessageInfo
+            {
+                Id = messageId,
+                SessionId = sessionId,
+                Role = role,
+                Content = content,
+                Timestamp = now,
+                Attachments = attachments ?? new List<AttachmentInfo>()
+            };
+
+            _logger.LogInformation("Message created for session {SessionId}: {Role}", sessionId, role);
+            return Task.FromResult(message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting session {SessionId}", sessionId);
+            _logger.LogError(ex, "Error adding message for session {SessionId}", sessionId);
             throw;
         }
+    }
+
+    private string GenerateDefaultTitle(string sessionKey)
+    {
+        var sessionId = sessionKey.Replace("webui:", "");
+        return $"会话 {sessionId.Substring(0, Math.Min(8, sessionId.Length))}";
     }
 }

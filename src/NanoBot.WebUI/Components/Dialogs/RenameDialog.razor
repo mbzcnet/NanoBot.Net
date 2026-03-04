@@ -1,0 +1,43 @@
+@using MudBlazor
+@rendermode InteractiveServer
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">重命名会话</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="Title"
+                      Label="会话标题"
+                      Variant="Variant.Outlined"
+                      Immediate="true"
+                      AutoFocus="true" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">取消</MudButton>
+        <MudButton Color="Color.Primary" 
+                   Variant="Variant.Filled"
+                   OnClick="Submit"
+                   Disabled="@string.IsNullOrWhiteSpace(Title)">
+            保存
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] 
+    public MudBlazor.IDialogReference? MudDialog { get; set; }
+
+    [Parameter]
+    public string CurrentTitle { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        Title = CurrentTitle;
+    }
+
+    void Cancel() => MudDialog?.Close(DialogResult.Cancel());
+
+    void Submit() => MudDialog?.Close(DialogResult.Ok(Title));
+}
