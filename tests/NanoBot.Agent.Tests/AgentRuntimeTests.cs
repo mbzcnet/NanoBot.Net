@@ -85,7 +85,7 @@ public class AgentRuntimeTests : IDisposable
         _sessionManagerMock.Setup(s => s.GetOrCreateSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(session);
 
-        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50, _loggerMock.Object);
+        var runtime = new AgentRuntime(_agent, _busMock.Object, _sessionManagerMock.Object, _workspaceMock.Object, null, null, 50, null, null, null, _loggerMock.Object);
 
         var response = await runtime.ProcessDirectAsync("Hello");
 

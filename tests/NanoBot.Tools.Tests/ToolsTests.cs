@@ -1,8 +1,10 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Moq;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Browser;
 using NanoBot.Tools.BuiltIn;
 using Xunit;
@@ -50,6 +52,14 @@ public class FileToolsTests
 
 public class BrowserToolsTests
 {
+    private static bool EnsureBrowserIntegrationEnabled()
+    {
+        return string.Equals(
+            Environment.GetEnvironmentVariable("NANOBOT_BROWSER_INTEGRATION"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void CreateBrowserTool_ReturnsAITool()
     {
@@ -266,7 +276,8 @@ public class BrowserToolsTests
     [Fact]
     public async Task BrowserService_StartOpenContentStop_UsesRealPlaywright()
     {
-        using var browserService = new BrowserService();
+        var workspaceMock = new Mock<IWorkspaceManager>();
+        using var browserService = new BrowserService(workspaceMock.Object);
 
         var start = await browserService.StartAsync("openclaw");
         Assert.True(start.Ok);
@@ -319,6 +330,115 @@ public class BrowserToolsTests
 
         var stopped = await browserService.StopAsync("openclaw");
         Assert.True(stopped.Ok);
+    }
+
+    [Fact]
+    public async Task BrowserService_BaiduSnapshot_CanSaveScreenshotToSessionFolder()
+    {
+        if (!EnsureBrowserIntegrationEnabled()) return;
+        var keepArtifacts = string.Equals(
+            Environment.GetEnvironmentVariable("NANOBOT_BROWSER_KEEP_ARTIFACTS"),
+            "1",
+            StringComparison.OrdinalIgnoreCase);
+
+        var workspaceRoot = Path.Combine(Path.GetTempPath(), "nanobot-browser-tests", Guid.NewGuid().ToString("N"));
+        var sessionsPath = Path.Combine(workspaceRoot, "sessions");
+        Directory.CreateDirectory(sessionsPath);
+
+        var workspaceMock = new Mock<IWorkspaceManager>();
+        workspaceMock.Setup(x => x.GetWorkspacePath()).Returns(workspaceRoot);
+        workspaceMock.Setup(x => x.GetSessionsPath()).Returns(sessionsPath);
+        workspaceMock.Setup(x => x.EnsureDirectory(It.IsAny<string>()))
+            .Callback<string>(path => _ = Directory.CreateDirectory(path));
+
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
+        var logger = loggerFactory.CreateLogger<BrowserService>();
+
+        try
+        {
+            using var browserService = new BrowserService(workspaceMock.Object, logger);
+
+            var start = await browserService.StartAsync("openclaw");
+            Assert.True(start.Ok);
+
+            var open = await browserService.OpenTabAsync("https://www.baidu.com", "openclaw");
+            Assert.True(open.Ok);
+            Assert.False(string.IsNullOrWhiteSpace(open.TargetId));
+
+            var response = await browserService.CaptureSnapshotAsync(
+                open.TargetId!,
+                "ai",
+                "openclaw",
+                "webui:baidu-snapshot-test");
+
+            Assert.True(response.Ok);
+            Assert.False(string.IsNullOrWhiteSpace(response.Snapshot));
+            Assert.False(string.IsNullOrWhiteSpace(response.ImagePath));
+
+            var localPath = Path.Combine(sessionsPath, response.ImagePath!.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(localPath), $"Snapshot file not found: {localPath}");
+
+            Console.WriteLine($"Snapshot image relative path: {response.ImagePath}");
+            Console.WriteLine($"Snapshot image local path: {localPath}");
+            Console.WriteLine($"Snapshot image url: /api/files/sessions/{response.ImagePath.Replace('\\', '/')}");
+
+            var stop = await browserService.StopAsync("openclaw");
+            Assert.True(stop.Ok);
+        }
+        finally
+        {
+            if (!keepArtifacts && Directory.Exists(workspaceRoot))
+            {
+                Directory.Delete(workspaceRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BrowserService_SnapshotWithoutSessionKey_UsesFallbackAndSavesScreenshot()
+    {
+        if (!EnsureBrowserIntegrationEnabled()) return;
+
+        var workspaceRoot = Path.Combine(Path.GetTempPath(), "nanobot-browser-tests", Guid.NewGuid().ToString("N"));
+        var sessionsPath = Path.Combine(workspaceRoot, "sessions");
+        Directory.CreateDirectory(sessionsPath);
+
+        var workspaceMock = new Mock<IWorkspaceManager>();
+        workspaceMock.Setup(x => x.GetWorkspacePath()).Returns(workspaceRoot);
+        workspaceMock.Setup(x => x.GetSessionsPath()).Returns(sessionsPath);
+        workspaceMock.Setup(x => x.EnsureDirectory(It.IsAny<string>()))
+            .Callback<string>(path => _ = Directory.CreateDirectory(path));
+
+        using var loggerFactory = LoggerFactory.Create(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Information));
+        var logger = loggerFactory.CreateLogger<BrowserService>();
+
+        try
+        {
+            using var browserService = new BrowserService(workspaceMock.Object, logger);
+
+            var start = await browserService.StartAsync("openclaw");
+            Assert.True(start.Ok);
+
+            var html = "<html><body><main><h1>fallback snapshot</h1></main></body></html>";
+            var targetUrl = "data:text/html," + Uri.EscapeDataString(html);
+            var open = await browserService.OpenTabAsync(targetUrl, "openclaw");
+            Assert.True(open.Ok);
+
+            var response = await browserService.CaptureSnapshotAsync(open.TargetId!, "ai", "openclaw", null);
+            Assert.True(response.Ok);
+            Assert.False(string.IsNullOrWhiteSpace(response.ImagePath));
+            Assert.StartsWith("fallback_openclaw/", response.ImagePath, StringComparison.Ordinal);
+
+            var localPath = Path.Combine(sessionsPath, response.ImagePath!.Replace('/', Path.DirectorySeparatorChar));
+            Assert.True(File.Exists(localPath), $"Snapshot file not found: {localPath}");
+        }
+        finally
+        {
+            if (Directory.Exists(workspaceRoot))
+            {
+                Directory.Delete(workspaceRoot, true);
+            }
+        }
     }
 }
 

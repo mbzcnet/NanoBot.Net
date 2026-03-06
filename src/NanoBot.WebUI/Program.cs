@@ -8,6 +8,7 @@ using NanoBot.Core.Configuration.Validators;
 using NanoBot.Core.Sessions;
 using System.Globalization;
 using Blazored.LocalStorage;
+using Microsoft.AspNetCore.Localization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -117,6 +118,12 @@ var localizationOptions = new RequestLocalizationOptions()
     .SetDefaultCulture(supportedCultures[0])
     .AddSupportedCultures(supportedCultures)
     .AddSupportedUICultures(supportedCultures);
+
+// 使用 Cookie 和查询字符串文化特性选择器
+localizationOptions.RequestCultureProviders.Insert(0, new CookieRequestCultureProvider()
+{
+    CookieName = ".AspNetCore.Culture"
+});
 
 app.UseRequestLocalization(localizationOptions);
 

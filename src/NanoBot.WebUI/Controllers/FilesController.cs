@@ -48,6 +48,37 @@ public class FilesController : ControllerBase
         }
     }
 
+    [HttpGet("local")]
+    public IActionResult GetLocalFile([FromQuery] string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                return BadRequest("File path is required");
+            }
+
+            var fullPath = Path.GetFullPath(path);
+            if (!System.IO.File.Exists(fullPath))
+            {
+                return NotFound();
+            }
+
+            var contentType = GetContentType(fullPath);
+            if (contentType == "application/octet-stream")
+            {
+                return BadRequest("Only image files are supported");
+            }
+
+            return PhysicalFile(fullPath, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error serving local file {Path}", path);
+            return StatusCode(500, "Internal server error");
+        }
+    }
+
     private static string GetContentType(string filePath)
     {
         var extension = Path.GetExtension(filePath).ToLowerInvariant();

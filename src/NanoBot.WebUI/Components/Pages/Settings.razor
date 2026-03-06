@@ -345,8 +345,19 @@
 
                 Snackbar.Add(Localizer["SaveSuccess"], Severity.Success);
 
-                // 提示用户某些设置需要重启才能生效
-                Snackbar.Add("注意：服务器和 CORS 设置需要重启 WebUI 才能生效", Severity.Info);
+                // 如果语言发生变化，提示用户页面将刷新
+                if (localizationConfig.DefaultLanguage != "auto" &&
+                    localizationConfig.DefaultLanguage != System.Threading.Thread.CurrentThread.CurrentCulture.Name)
+                {
+                    Snackbar.Add(Localizer["LanguageChanged"], Severity.Info);
+                    await Task.Delay(1000);
+                    NavigationManager.NavigateTo("/settings", forceLoad: true);
+                }
+                else
+                {
+                    // 提示用户某些设置需要重启才能生效
+                    Snackbar.Add("注意：服务器和 CORS 设置需要重启 WebUI 才能生效", Severity.Info);
+                }
             }
             else
             {

@@ -3,13 +3,18 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Extensions;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Configuration;
 using NanoBot.Core.Memory;
+using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Memory;
+using NanoBot.Providers;
 
 namespace NanoBot.Agent;
 
@@ -21,11 +26,12 @@ public interface IAgentRuntime
     IAsyncEnumerable<AgentResponseUpdate> ProcessDirectStreamingAsync(string content, string sessionKey = "cli:direct", string channel = "cli", string chatId = "direct", CancellationToken cancellationToken = default);
     Task<bool> TryCancelSessionAsync(string sessionKey);
     void SetRuntimeMetadata(string sessionKey, IReadOnlyDictionary<string, string> metadata);
+    void ClearAgentCache();
 }
 
 public sealed class AgentRuntime : IAgentRuntime, IDisposable
 {
-    private readonly ChatClientAgent _agent;
+    private readonly ChatClientAgent _defaultAgent;
     private readonly IMessageBus _bus;
     private readonly ISessionManager _sessionManager;
     private readonly IWorkspaceManager _workspace;
@@ -37,6 +43,12 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private CancellationTokenSource? _runningCts;
     private bool _disposed;
     private bool _stopped;
+
+    // Profile-aware chat client support
+    private readonly IChatClientFactory? _chatClientFactory;
+    private readonly LlmConfig? _llmConfig;
+    private readonly IServiceProvider? _serviceProvider;
+    private readonly ConcurrentDictionary<string, ChatClientAgent> _profileAgents = new(StringComparer.Ordinal);
 
     // Command registry
     private readonly Dictionary<string, CommandDefinition> _commands = new(StringComparer.OrdinalIgnoreCase);
@@ -62,15 +74,21 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         IMemoryStore? memoryStore,
         ISubagentManager? subagentManager,
         int memoryWindow,
+        IChatClientFactory? chatClientFactory = null,
+        LlmConfig? llmConfig = null,
+        IServiceProvider? serviceProvider = null,
         ILogger<AgentRuntime>? logger = null)
     {
-        _agent = agent ?? throw new ArgumentNullException(nameof(agent));
+        _defaultAgent = agent ?? throw new ArgumentNullException(nameof(agent));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
         _memoryStore = memoryStore;
         _subagentManager = subagentManager;
         _memoryWindow = memoryWindow;
+        _chatClientFactory = chatClientFactory;
+        _llmConfig = llmConfig;
+        _serviceProvider = serviceProvider;
         _logger = logger;
         _sessionsDirectory = _workspace.GetSessionsPath();
 
@@ -246,9 +264,9 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         await TryAutoSetSessionTitleAsync(session, sessionKey, content, cancellationToken);
 
         sw.Restart();
-        _logger?.LogInformation("[TIMING] About to call _agent.RunStreamingAsync...");
+        _logger?.LogInformation("[TIMING] About to call GetAgentForSession and RunStreamingAsync...");
 
-        await foreach (var update in StreamWithToolHintsAsync(session, userMessage, sessionCts.Token))
+        await foreach (var update in StreamWithToolHintsAsync(session, userMessage, sessionKey, sessionCts.Token))
         {
             yield return update;
         }
@@ -283,43 +301,67 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private async IAsyncEnumerable<AgentResponseUpdate> StreamWithToolHintsAsync(
         AgentSession session,
         ChatMessage userMessage,
+        string sessionKey,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var swInner = System.Diagnostics.Stopwatch.StartNew();
         var firstChunkReceived = false;
 
-        await foreach (var update in _agent.RunStreamingAsync([userMessage], session, cancellationToken: cancellationToken))
+        var agent = GetAgentForSession(sessionKey);
+        ToolExecutionContext.SetCurrentSessionKey(sessionKey);
+        try
         {
-            swInner.Stop();
-            if (!firstChunkReceived)
+            await foreach (var update in agent.RunStreamingAsync([userMessage], session, cancellationToken: cancellationToken))
             {
-                firstChunkReceived = true;
-                _logger?.LogInformation("[TIMING] ★★★ FIRST CHUNK from _agent.RunStreamingAsync: {ElapsedMs}ms ★★★", swInner.ElapsedMilliseconds);
-            }
-            else
-            {
-                _logger?.LogInformation("[TIMING] Subsequent chunk: {ElapsedMs}ms, text: {Text}", swInner.ElapsedMilliseconds, update.Text?.Length > 50 ? update.Text[..50] + "..." : update.Text);
-            }
-
-            var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
-            if (functionCalls.Any())
-            {
-                var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
-                if (!string.IsNullOrEmpty(toolHint))
+                swInner.Stop();
+                if (!firstChunkReceived)
                 {
-                    var toolHintUpdate = new AgentResponseUpdate
+                    firstChunkReceived = true;
+                    _logger?.LogInformation("[TIMING] ★★★ FIRST CHUNK from agent.RunStreamingAsync: {ElapsedMs}ms ★★★", swInner.ElapsedMilliseconds);
+                }
+                else
+                {
+                    _logger?.LogInformation("[TIMING] Subsequent chunk: {ElapsedMs}ms, text: {Text}", swInner.ElapsedMilliseconds, update.Text?.Length > 50 ? update.Text[..50] + "..." : update.Text);
+                }
+
+                var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
+                if (functionCalls.Any())
+                {
+                    var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
+                    if (!string.IsNullOrEmpty(toolHint))
+                    {
+                        var toolHintUpdate = new AgentResponseUpdate
+                        {
+                            Role = ChatRole.Assistant,
+                            Contents = { new TextContent(toolHint) },
+                            AdditionalProperties = new()
+                        };
+                        toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
+                        yield return toolHintUpdate;
+                    }
+                }
+
+                var imageMarkdown = BuildSnapshotImageMarkdown(update.Contents);
+                if (!string.IsNullOrWhiteSpace(imageMarkdown))
+                {
+                    _logger?.LogInformation("Snapshot markdown injected into streaming response for session {SessionKey}", sessionKey);
+                    var imageUpdate = new AgentResponseUpdate
                     {
                         Role = ChatRole.Assistant,
-                        Contents = { new TextContent(toolHint) },
+                        Contents = { new TextContent(imageMarkdown) },
                         AdditionalProperties = new()
                     };
-                    toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
-                    yield return toolHintUpdate;
+                    imageUpdate.AdditionalProperties["_snapshot_image"] = true;
+                    yield return imageUpdate;
                 }
-            }
 
-            swInner.Restart();
-            yield return update;
+                swInner.Restart();
+                yield return update;
+            }
+        }
+        finally
+        {
+            ToolExecutionContext.SetCurrentSessionKey(null);
         }
 
         swInner.Stop();
@@ -377,9 +419,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         }
 
         AgentResponse response;
+        ToolExecutionContext.SetCurrentSessionKey(sessionKey);
         try
         {
-            response = await _agent.RunAsync([userMessage], session, cancellationToken: sessionCts.Token);
+            var agent = GetAgentForSession(sessionKey);
+            response = await agent.RunAsync([userMessage], session, cancellationToken: sessionCts.Token);
         }
         catch (OperationCanceledException)
         {
@@ -393,12 +437,21 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         }
         finally
         {
+            ToolExecutionContext.SetCurrentSessionKey(null);
             // Clean up session token
             _sessionTokens.TryRemove(sessionKey, out _);
             sessionCts.Dispose();
         }
 
         var responseText = response.Messages.FirstOrDefault()?.Text ?? "I've completed processing but have no response to give.";
+        var snapshotImageMarkdown = BuildSnapshotImageMarkdown(response.Messages.SelectMany(m => m.Contents));
+        if (!string.IsNullOrWhiteSpace(snapshotImageMarkdown))
+        {
+            _logger?.LogInformation("Snapshot markdown injected into non-streaming response for session {SessionKey}", sessionKey);
+            responseText = string.IsNullOrWhiteSpace(responseText)
+                ? snapshotImageMarkdown
+                : $"{responseText}\n\n{snapshotImageMarkdown}";
+        }
 
         preview = responseText.Length > 120 ? responseText[..120] + "..." : responseText;
         _logger?.LogInformation("Response to {Channel}:{SenderId}: {Preview}", msg.Channel, msg.SenderId, preview);
@@ -414,6 +467,216 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             Content = responseText,
             Metadata = msg.Metadata
         };
+    }
+
+    private string? BuildSnapshotImageMarkdown(IEnumerable<AIContent> contents)
+    {
+        var images = new List<(string Url, string LocalPath)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var content in contents)
+        {
+            if (content is not FunctionResultContent functionResult)
+            {
+                continue;
+            }
+
+            var payload = GetFunctionResultPayload(functionResult);
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                _logger?.LogWarning("BuildSnapshotImageMarkdown: Payload is empty");
+                continue;
+            }
+
+            // _logger?.LogInformation("BuildSnapshotImageMarkdown Payload: {Payload}", payload);
+
+                try
+                {
+                    using var document = JsonDocument.Parse(payload);
+                    var rootElement = document.RootElement;
+
+                    // Handle double-serialized JSON (e.g. payload is "{\"action\":...}")
+                    // This can happen when the tool result is a JSON string that gets serialized again by the agent framework
+                    if (rootElement.ValueKind == JsonValueKind.String)
+                    {
+                        var innerJson = rootElement.GetString();
+                        if (!string.IsNullOrWhiteSpace(innerJson))
+                        {
+                            try
+                            {
+                                using var innerDoc = JsonDocument.Parse(innerJson);
+                                ProcessSnapshotJsonElement(innerDoc.RootElement, seen, images);
+                            }
+                            catch (JsonException) { }
+                        }
+                    }
+                    else
+                    {
+                        ProcessSnapshotJsonElement(rootElement, seen, images);
+                    }
+                }
+                catch (JsonException)
+                {
+                }
+            }
+
+            if (images.Count == 0)
+            {
+                return null;
+            }
+
+            var lines = new List<string>();
+            for (var i = 0; i < images.Count; i++)
+            {
+                var (url, localPath) = images[i];
+                lines.Add($"![snapshot-{i + 1}]({url})");
+                lines.Add($"snapshot-file-{i + 1}: {localPath}");
+            }
+
+            return $"\n\n{string.Join("\n", lines)}\n\n";
+        }
+
+    private void ProcessSnapshotJsonElement(JsonElement rootElement, HashSet<string> seen, List<(string Url, string LocalPath)> images)
+    {
+        // Skip if the payload is not a JSON object
+        if (rootElement.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        if (!TryGetJsonString(rootElement, "action", out var action) ||
+            string.IsNullOrWhiteSpace(action))
+        {
+            return;
+        }
+
+        if (!string.Equals(action, "snapshot", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(action, "capture", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        if (!TryGetJsonString(rootElement, "imagePath", out var imagePath) ||
+            string.IsNullOrWhiteSpace(imagePath))
+        {
+            _logger?.LogWarning("BuildSnapshotImageMarkdown: ImagePath not found");
+            return;
+        }
+
+        var imageUrl = ToSessionFileUrl(imagePath);
+        var localPath = ToLocalSessionFilePath(imagePath);
+        if (string.IsNullOrWhiteSpace(imageUrl) || !seen.Add(imageUrl))
+        {
+            return;
+        }
+
+        images.Add((imageUrl, localPath ?? imagePath));
+    }
+
+    private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            value = property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString()
+                : property.Value.GetRawText();
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string? GetFunctionResultPayload(FunctionResultContent functionResult)
+    {
+        if (functionResult.Result == null)
+        {
+            return null;
+        }
+
+        if (functionResult.Result is string text)
+        {
+            return text;
+        }
+
+        if (functionResult.Result is JsonElement jsonElement)
+        {
+            return jsonElement.GetRawText();
+        }
+
+        try
+        {
+            return JsonSerializer.Serialize(functionResult.Result);
+        }
+        catch
+        {
+            return functionResult.Result.ToString();
+        }
+    }
+
+    private string? ToSessionFileUrl(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        var normalized = imagePath.Replace('\\', '/');
+        if (normalized.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        if (Path.IsPathRooted(imagePath))
+        {
+            var sessionsRoot = _workspace.GetSessionsPath().Replace('\\', '/');
+            if (!normalized.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"/api/files/local?path={Uri.EscapeDataString(imagePath)}";
+            }
+
+            normalized = normalized[sessionsRoot.Length..].TrimStart('/');
+        }
+
+        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["sessions/".Length..];
+        }
+
+        normalized = normalized.TrimStart('/');
+        return string.IsNullOrWhiteSpace(normalized) ? null : $"/api/files/sessions/{normalized}";
+    }
+
+    private string? ToLocalSessionFilePath(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        if (Path.IsPathRooted(imagePath))
+        {
+            return imagePath;
+        }
+
+        var normalized = imagePath.Replace('\\', '/').TrimStart('/');
+        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["sessions/".Length..];
+        }
+
+        var sessionsRoot = _workspace.GetSessionsPath();
+        return Path.Combine(sessionsRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
     }
 
     private async Task<OutboundMessage?> ProcessSystemMessageAsync(
@@ -445,7 +708,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         AgentResponse response;
         try
         {
-            response = await _agent.RunAsync([systemMessage], session, cancellationToken: cancellationToken);
+            var agent = GetAgentForSession(sessionKey);
+            response = await agent.RunAsync([systemMessage], session, cancellationToken: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -476,7 +740,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         {
             try
             {
-                var chatClient = GetChatClientFromAgent();
+                var chatClient = GetChatClientFromAgent(sessionKey);
                 if (chatClient != null)
                 {
                     var consolidator = new MemoryConsolidator(
@@ -572,9 +836,14 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         return _runtimeMetadata.TryGetValue(sessionKey, out var metadata) ? metadata : null;
     }
 
-    private IChatClient? GetChatClientFromAgent()
+    private IChatClient? GetChatClientFromAgent(string? sessionKey = null)
     {
-        return _agent.GetChatClient();
+        if (!string.IsNullOrEmpty(sessionKey))
+        {
+            var agent = GetAgentForSession(sessionKey);
+            return agent.GetChatClient();
+        }
+        return _defaultAgent.GetChatClient();
     }
 
     private List<ChatMessage> GetSessionMessages(AgentSession session)
@@ -596,7 +865,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 return;
             }
 
-            var chatClient = GetChatClientFromAgent();
+            var chatClient = GetChatClientFromAgent(sessionKey);
             if (chatClient == null)
             {
                 _logger?.LogWarning("Could not get ChatClient for memory consolidation");
@@ -672,5 +941,98 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         _disposed = true;
 
         _logger?.LogInformation("Agent runtime disposed");
+    }
+
+    /// <summary>
+    /// 清除 agent 缓存，使配置修改后强制重新创建 agent
+    /// </summary>
+    public void ClearAgentCache()
+    {
+        _profileAgents.Clear();
+        _logger?.LogInformation("Agent cache cleared");
+    }
+
+    /// <summary>
+    /// 获取指定 profile 的 ChatClientAgent，如果未指定则使用默认 agent
+    /// </summary>
+    private ChatClientAgent GetAgentForSession(string sessionKey)
+    {
+        // 如果没有配置 profile 支持，直接返回默认 agent
+        if (_chatClientFactory == null || _llmConfig == null)
+        {
+            return _defaultAgent;
+        }
+
+        // 获取会话的 profile ID
+        var profileId = _sessionManager.GetSessionProfileId(sessionKey);
+        if (string.IsNullOrEmpty(profileId))
+        {
+            return _defaultAgent;
+        }
+
+        // 检查是否是默认 profile
+        if (profileId.Equals(_llmConfig.DefaultProfile, StringComparison.OrdinalIgnoreCase) ||
+            (string.IsNullOrEmpty(_llmConfig.DefaultProfile) && profileId == "default"))
+        {
+            return _defaultAgent;
+        }
+
+        // 从缓存获取或创建该 profile 的 agent
+        return _profileAgents.GetOrAdd(profileId, _ => CreateAgentForProfile(profileId));
+    }
+
+    /// <summary>
+    /// 为指定 profile 创建新的 ChatClientAgent
+    /// </summary>
+    private ChatClientAgent CreateAgentForProfile(string profileId)
+    {
+        _logger?.LogInformation("Creating ChatClientAgent for profile: {ProfileId}", profileId);
+
+        if (_llmConfig == null || _chatClientFactory == null || _serviceProvider == null)
+        {
+            _logger?.LogWarning("Required services not available for profile {ProfileId}, using default agent", profileId);
+            return _defaultAgent;
+        }
+
+        if (!_llmConfig.Profiles.TryGetValue(profileId, out var profile))
+        {
+            _logger?.LogWarning("Profile {ProfileId} not found, using default agent", profileId);
+            return _defaultAgent;
+        }
+
+        try
+        {
+            var chatClient = _chatClientFactory.CreateChatClient(
+                profile.Provider ?? "openai",
+                profile.Model,
+                profile.ApiKey,
+                profile.ApiBase);
+
+            var workspace = _serviceProvider.GetRequiredService<IWorkspaceManager>();
+            var skillsLoader = _serviceProvider.GetRequiredService<ISkillsLoader>();
+            var memoryStore = _serviceProvider.GetService<IMemoryStore>();
+            var loggerFactory = _serviceProvider.GetService<ILoggerFactory>();
+
+            var agentOptions = new AgentOptions
+            {
+                Temperature = (float)profile.Temperature,
+                MaxTokens = profile.MaxTokens
+            };
+
+            return NanoBotAgentFactory.Create(
+                chatClient,
+                workspace,
+                skillsLoader,
+                null, // tools will be resolved from DI in factory
+                loggerFactory,
+                agentOptions,
+                memoryStore,
+                _memoryWindow);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Failed to create agent for profile {ProfileId}, using default agent", profileId);
+            return _defaultAgent;
+        }
     }
 }

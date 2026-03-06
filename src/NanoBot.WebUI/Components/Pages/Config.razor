@@ -1,13 +1,17 @@
 @page "/config"
 @inject ISnackbar Snackbar
 @inject ILogger<Config> Logger
+@inject ILocalizationService LocalizationService
+@inject NavigationManager NavigationManager
+@inject NanoBot.Agent.IAgentRuntime AgentRuntime
 @using NanoBot.Core.Configuration
 @using NanoBot.Cli.Services
+@using Microsoft.Extensions.Localization
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - 配置</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Large" Class="mt-4 nb-config-page">
+<MudContainer MaxWidth="MaxWidth.Large" Class="nb-config-page">
     <MudText Typo="Typo.h4" Class="mb-4 nb-config-title">系统配置</MudText>
     
     @if (_isLoading)
@@ -170,6 +174,41 @@
                     </MudSimpleTable>
                 </MudPaper>
             </MudTabPanel>
+
+            <MudTabPanel Text="语言" Icon="@Icons.Material.Filled.Language">
+                <MudPaper Elevation="0" Class="pa-4 mb-4 nb-config-card">
+                    <MudText Typo="Typo.h5" Class="mb-4">语言设置</MudText>
+
+                    <MudGrid>
+                        <MudItem xs="12" md="6">
+                            <MudSelect @bind-Value="_selectedLanguage"
+                                       Label="显示语言"
+                                       Variant="Variant.Outlined"
+                                       Class="mb-3"
+                                       Dense="true">
+                                <MudSelectItem Value="@("auto")">自动 (跟随浏览器)</MudSelectItem>
+                                <MudSelectItem Value="@("zh-CN")">简体中文</MudSelectItem>
+                                <MudSelectItem Value="@("en-US")">English</MudSelectItem>
+                            </MudSelect>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                                更改语言后页面将自动刷新以应用新设置
+                            </MudText>
+                        </MudItem>
+                    </MudGrid>
+
+                    <MudDivider Class="my-4" />
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <MudButton Variant="Variant.Filled"
+                                   Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   Class="nb-config-primary-btn"
+                                   OnClick="SaveLanguageAsync">
+                            保存并应用
+                        </MudButton>
+                    </div>
+                </MudPaper>
+            </MudTabPanel>
         </MudTabs>
     }
 </MudContainer>
@@ -179,10 +218,18 @@
     private string _configPath = string.Empty;
     private bool _isLoading = true;
     private string _selectedDefaultProfile = string.Empty;
+    private string _selectedLanguage = "auto";
 
     protected override void OnInitialized()
     {
         _ = LoadConfigAsync();
+        _ = LoadLanguageAsync();
+    }
+
+    private async Task LoadLanguageAsync()
+    {
+        var savedLanguage = await LocalizationService.GetSavedCultureAsync();
+        _selectedLanguage = savedLanguage ?? "auto";
     }
 
     private async Task LoadConfigAsync()
@@ -228,7 +275,7 @@
     private async Task SaveConfig()
     {
         if (_config == null) return;
-        
+
         try
         {
             var configDir = Path.GetDirectoryName(_configPath);
@@ -236,10 +283,13 @@
             {
                 Directory.CreateDirectory(configDir);
             }
-            
+
             await ConfigurationLoader.SaveAsync(_configPath, _config, CancellationToken.None);
             _selectedDefaultProfile = _config.Llm.DefaultProfile;
-            
+
+            // 清除 agent 缓存，使配置修改立即生效
+            AgentRuntime.ClearAgentCache();
+
             Snackbar.Add("配置已保存", Severity.Success);
         }
         catch (Exception ex)
@@ -349,5 +399,24 @@
 
         _config.Llm.DefaultProfile = _selectedDefaultProfile;
         await SaveConfig();
+    }
+
+    private async Task SaveLanguageAsync()
+    {
+        try
+        {
+            await LocalizationService.SaveCultureAsync(_selectedLanguage);
+            Snackbar.Add("语言设置已保存，页面将刷新", Severity.Success);
+
+            // 延迟一下让用户看到提示
+            await Task.Delay(500);
+
+            // 强制刷新页面以应用新语言设置
+            NavigationManager.NavigateTo("/config", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"保存语言设置失败：{ex.Message}", Severity.Error);
+        }
     }
 }

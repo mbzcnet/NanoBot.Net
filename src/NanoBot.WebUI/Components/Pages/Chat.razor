@@ -23,7 +23,7 @@
     <div class="nb-chat-shell">
         
         <div @ref="_messagesContainerRef" style="flex:1;min-height:0;overflow:auto;">
-            <div class="nb-chat-content" style="max-width: 900px; margin: 0 auto;">
+            <div class="nb-chat-content" style="max-width: 1500px; margin: 0 auto;">
                 @if (_messages == null || !_messages.Any())
                 {
                     <div class="nb-chat-empty">
@@ -87,35 +87,43 @@
                                    accept="image/*"
                                    disabled="@_isGenerating"
                                    style="display:none" />
-                        <MudMenu Dense="true" OpenChanged="HandleProfileMenuOpenChanged">
-                            <ActivatorContent>
-                                <div class="nb-model-btn">
-                                    @_selectedModelLabel
-                                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Class="ml-1" />
-                                </div>
-                            </ActivatorContent>
-                            <ChildContent>
-                                @if (_profileOptions.Any())
+                        <MudSelect T="string"
+                                   Value="@(_selectedProfileId ?? string.Empty)"
+                                   ValueChanged="SelectProfile"
+                                   Dense="true"
+                                   Variant="Variant.Text"
+                                   Class="nb-model-select"
+                                   AdornmentIcon="@Icons.Material.Filled.ExpandMore"
+                                   AnchorOrigin="Origin.BottomLeft"
+                                   TransformOrigin="Origin.TopLeft">
+                            @if (_profileOptions.Any())
+                            {
+                                @foreach (var option in _profileOptions)
                                 {
-                                    @foreach (var option in _profileOptions)
-                                    {
-                                        <MudMenuItem @key="option.ProfileId" OnClick="@(async () => await SelectProfile(option.ProfileId))">
-                                            @option.Display
-                                        </MudMenuItem>
-                                    }
+                                    <MudSelectItem T="string" Value="@option.ProfileId">@option.Display</MudSelectItem>
                                 }
-                                else
-                                {
-                                    <MudMenuItem Disabled="true">未找到可用模型</MudMenuItem>
-                                }
-                            </ChildContent>
-                        </MudMenu>
+                            }
+                            else
+                            {
+                                <MudSelectItem T="string" Value="@string.Empty" Disabled="true">未找到可用模型</MudSelectItem>
+                            }
+                        </MudSelect>
                     </div>
                     <div class="nb-composer-right">
-                        <div class="@($"nb-send-btn{((string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl)) || _isGenerating ? " mud-disabled" : string.Empty)}")"
-                             @onclick="SendMessage">
-                            <MudIcon Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" />
-                        </div>
+                        @if (_isGenerating)
+                        {
+                            <div class="nb-send-btn"
+                                 @onclick="StopGeneration">
+                                <MudIcon Icon="@Icons.Material.Filled.Stop" Size="Size.Small" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="@($"nb-send-btn{((string.IsNullOrWhiteSpace(_inputMessage) && string.IsNullOrWhiteSpace(_attachedImageUrl)) ? " mud-disabled" : string.Empty)}")"
+                                 @onclick="SendMessage">
+                                <MudIcon Icon="@Icons.Material.Filled.ArrowUpward" Size="Size.Small" />
+                            </div>
+                        }
                     </div>
                 </div>
 
@@ -143,19 +151,6 @@
                         <img src="@_attachedImageUrl" alt="preview" style="max-width: 180px; max-height: 180px;" />
                     </MudPaper>
                 }
-
-                @if (_isGenerating)
-                {
-                    <div class="d-flex justify-end mt-2">
-                        <MudButton Variant="Variant.Outlined"
-                                   Color="Color.Error"
-                                   StartIcon="@Icons.Material.Filled.Stop"
-                                   OnClick="StopGeneration"
-                                   Size="Size.Small">
-                            停止
-                        </MudButton>
-                    </div>
-                }
             </div>
         </div>
     </div>
@@ -177,7 +172,6 @@
     private bool _pasteRegistered;
     private readonly List<ProfileOption> _profileOptions = new();
     private string? _selectedProfileId;
-    private string _selectedModelLabel = "未配置模型";
 
     protected override async Task OnInitializedAsync()
     {
@@ -244,7 +238,7 @@
             if (!File.Exists(configPath))
             {
                 _profileOptions.Clear();
-                _selectedModelLabel = "未配置模型";
+                _selectedProfileId = null;
                 return;
             }
 
@@ -252,9 +246,10 @@
             _profileOptions.Clear();
             foreach (var profile in config.Llm.Profiles)
             {
+                var displayName = profile.Value.GetDisplayName();
                 _profileOptions.Add(new ProfileOption(
                     profile.Key,
-                    $"{profile.Value.Model} ({profile.Value.Provider})"));
+                    $"{displayName} ({profile.Value.Model})"));
             }
 
             var session = await SessionService.GetSessionAsync(SessionId);
@@ -265,17 +260,13 @@
             if (string.IsNullOrWhiteSpace(preferredProfileId))
             {
                 _selectedProfileId = null;
-                _selectedModelLabel = "未配置模型";
                 return;
             }
 
             _selectedProfileId = preferredProfileId;
-            var selected = _profileOptions.FirstOrDefault(p => p.ProfileId == preferredProfileId);
-            _selectedModelLabel = selected?.Display ?? preferredProfileId;
         }
         catch (Exception ex)
         {
-            _selectedModelLabel = "模型读取失败";
             Logger.LogError(ex, "Failed to load profile options for chat");
         }
     }
@@ -284,29 +275,18 @@
     {
         _selectedProfileId = profileId;
         var selected = _profileOptions.FirstOrDefault(p => p.ProfileId == profileId);
-        _selectedModelLabel = selected?.Display ?? profileId;
+        var displayLabel = selected?.Display ?? profileId;
 
         try
         {
             await SessionService.SetSessionProfileAsync(SessionId, profileId);
-            Snackbar.Add($"已切换模型：{_selectedModelLabel}", Severity.Success);
+            Snackbar.Add($"已切换模型：{displayLabel}", Severity.Success);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to set session profile for chat");
             Snackbar.Add($"切换模型失败: {ex.Message}", Severity.Error);
         }
-    }
-
-    private async Task HandleProfileMenuOpenChanged(bool open)
-    {
-        if (!open)
-        {
-            return;
-        }
-
-        await LoadProfileOptionsAsync();
-        await InvokeAsync(StateHasChanged);
     }
 
     private async Task SendMessage()
@@ -368,7 +348,31 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error sending message for session {SessionId}", SessionId);
-            Snackbar.Add($"发送失败: {ex.Message}", Severity.Error);
+
+            // 获取配置信息用于显示
+            var sessionInfo = await SessionService.GetSessionAsync(SessionId);
+            var profileId = sessionInfo?.ProfileId ?? "default";
+
+            // 尝试加载配置获取模型信息
+            var modelInfo = "";
+            try
+            {
+                var configPath = GetConfigPath();
+                if (File.Exists(configPath))
+                {
+                    var config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+                    if (config.Llm.Profiles.TryGetValue(profileId, out var profile))
+                    {
+                        modelInfo = $" [{profile.Provider}: {profile.Model}]";
+                    }
+                }
+            }
+            catch
+            {
+                // 忽略配置加载错误
+            }
+
+            Snackbar.Add($"发送失败: {ex.Message} (Profile: {profileId}){modelInfo}", Severity.Error);
         }
         finally
         {

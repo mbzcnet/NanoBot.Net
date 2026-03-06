@@ -216,24 +216,70 @@ public class SessionService : ISessionService
                         role = roleElement.GetString()?.ToLower() ?? "user";
                         
                         if (msg.TryGetProperty("content", out var contentElement))
+                    {
+                        // 简单格式：content 是字符串
+                        if (contentElement.ValueKind == JsonValueKind.String)
                         {
-                            // 简单格式：content 是字符串
-                            if (contentElement.ValueKind == JsonValueKind.String)
+                            content = contentElement.GetString() ?? string.Empty;
+                        }
+                        // 复杂格式：contents 是数组（目前 SessionManager 没有使用这种格式，但保留兼容）
+                        else if (contentElement.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var item in contentElement.EnumerateArray())
                             {
-                                content = contentElement.GetString() ?? string.Empty;
-                            }
-                            // 复杂格式：contents 是数组
-                            else if (contentElement.ValueKind == JsonValueKind.Array)
-                            {
-                                foreach (var item in contentElement.EnumerateArray())
+                                if (item.ValueKind == JsonValueKind.String)
                                 {
-                                    if (item.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
-                                    {
-                                        content += textElement.GetString() ?? string.Empty;
-                                    }
+                                     content += item.GetString();
+                                }
+                                else if (item.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
+                                {
+                                    content += textElement.GetString() ?? string.Empty;
                                 }
                             }
                         }
+                    }
+
+                    // 增加对 tool_calls 的解析，以便在 UI 中显示工具调用参数
+                    if (msg.TryGetProperty("tool_calls", out var toolCallsElement) && toolCallsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var call in toolCallsElement.EnumerateArray())
+                        {
+                            if (call.TryGetProperty("function", out var funcElement))
+                            {
+                                var funcName = funcElement.GetProperty("name").GetString();
+                                var funcArgs = funcElement.GetProperty("arguments").GetString();
+                                
+                                // 将工具调用参数格式化为 markdown 代码块追加到 content
+                                if (!string.IsNullOrEmpty(funcName))
+                                {
+                                    if (!string.IsNullOrEmpty(content)) content += "\n\n";
+                                    content += $"> **Tool Call**: `{funcName}`\n```json\n{funcArgs}\n```";
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 增加对 tool_call_id (FunctionResult) 的特殊处理
+                    // 如果是 tool 角色，且 content 是 JSON 格式的结果，尝试美化显示或提取关键信息
+                    if (role == "tool" && !string.IsNullOrWhiteSpace(content))
+                    {
+                        // 尝试解析 JSON 结果
+                        try 
+                        {
+                             // 简单的 JSON 格式化，如果已经是 JSON 字符串
+                             if (content.TrimStart().StartsWith("{"))
+                             {
+                                 var resultObj = JsonSerializer.Deserialize<JsonElement>(content);
+                                 
+                                 // 如果是 snapshot 结果，提取 imagePath 并追加图片链接
+                                 // 注意：这里只是为了让 Tool 消息本身更好看。AgentRuntime 会在 Assistant 消息中注入图片。
+                                 // 但如果 AgentRuntime 失败，或者用户想直接看 Tool 结果，这里是一个补救。
+                                 
+                                 // 无论是否 snapshot，都尝试格式化 JSON 以便阅读
+                                 content = $"```json\n{JsonSerializer.Serialize(resultObj, new JsonSerializerOptions { WriteIndented = true })}\n```";
+                             }
+                        }
+                        catch { /* 忽略解析错误，保持原样 */ }
                     }
                     
                     if (!string.IsNullOrWhiteSpace(content))
@@ -247,6 +293,7 @@ public class SessionService : ISessionService
                             Timestamp = DateTime.Now
                         });
                     }
+                }
                 }
                 catch
                 {

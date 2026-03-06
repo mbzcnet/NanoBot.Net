@@ -2,7 +2,10 @@ namespace NanoBot.Core.Configuration;
 
 public class LlmProfile
 {
-    public string Name { get; set; } = "default";
+    /// <summary>
+    /// 显示名称，用于UI展示。为空时默认使用 "{Provider}-{Model}"
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
 
     public string Model { get; set; } = string.Empty;
 
@@ -17,6 +20,12 @@ public class LlmProfile
     public int MaxTokens { get; set; } = 4096;
 
     public string? SystemPrompt { get; set; }
+
+    /// <summary>
+    /// 获取显示名称，优先使用 Name 属性，为空则返回 "{Provider}-{Model}"
+    /// </summary>
+    public string GetDisplayName() =>
+        string.IsNullOrWhiteSpace(Name) ? $"{Provider}-{Model}" : Name;
 }
 
 public class LlmConfig

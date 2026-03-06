@@ -9,6 +9,14 @@
 <MudSnackbarProvider />
 
 <MudLayout Class="nb-layout">
+    <div class="nb-menu-toggle-container">
+        <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
+                       Color="Color.Inherit"
+                       OnClick="ToggleDrawer"
+                       Size="Size.Small"
+                       Class="nb-menu-toggle-btn" />
+    </div>
+
     <MudDrawer @bind-Open="_drawerOpen"
                Elevation="1"
                ClipMode="DrawerClipMode.Never"
@@ -49,12 +57,6 @@
     </MudDrawer>
 
     <MudMainContent Class="@GetMainContentClass()">
-        <div class="nb-menu-toggle-btn">
-            <MudIconButton Icon="@(_drawerOpen ? Icons.Material.Filled.MenuOpen : Icons.Material.Filled.Menu)"
-                           Color="Color.Inherit"
-                           OnClick="ToggleDrawer"
-                           Size="Size.Small" />
-        </div>
         <MudContainer MaxWidth="MaxWidth.False" Class="nb-main-container">
             @Body
         </MudContainer>

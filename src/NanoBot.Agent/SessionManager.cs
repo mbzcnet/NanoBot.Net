@@ -301,6 +301,17 @@ public sealed class SessionManager : ISessionManager
                     }
                 }
 
+                // Restore profile_id from metadata
+                if (metadataLine.TryGetPropertyValue("profile_id", out var profileNode) && profileNode != null)
+                {
+                    var profileId = profileNode.GetValue<string?>();
+                    if (!string.IsNullOrEmpty(profileId))
+                    {
+                        SetSessionProfileId(sessionKey, profileId);
+                        _logger?.LogDebug("Restored profile_id {ProfileId} for session {SessionKey}", profileId, sessionKey);
+                    }
+                }
+
                 var raw = agentSessionNode.ToJsonString(_jsonOptions);
                 var jsonElement = JsonSerializer.Deserialize<JsonElement>(raw, _jsonOptions);
                 var session = await _agent.DeserializeSessionAsync(jsonElement, cancellationToken: cancellationToken);
@@ -493,9 +504,31 @@ public sealed class SessionManager : ISessionManager
             else if (c is FunctionResultContent frc)
             {
                 toolCallId ??= frc.CallId;
-                // FunctionResultContent 没有 Name 属性，使用空字符串
+                
+                // Ensure tool result is saved in content
+                if (string.IsNullOrEmpty(content))
+                {
+                    if (frc.Result is string strResult)
+                    {
+                        content = strResult;
+                    }
+                    else if (frc.Result != null)
+                    {
+                        try
+                        {
+                            content = JsonSerializer.Serialize(frc.Result, _jsonOptions);
+                        }
+                        catch
+                        {
+                            content = frc.Result.ToString() ?? string.Empty;
+                        }
+                    }
+                }
             }
         }
+        
+        // 确保 content 不为 null，否则 JsonObject 会抛出异常或序列化为 null
+        content ??= string.Empty;
 
         var obj = new JsonObject
         {

@@ -22,6 +22,8 @@ public interface IBrowserService : IDisposable
 
     Task<BrowserToolResponse> GetSnapshotAsync(string targetId, string format, string profile, CancellationToken cancellationToken = default);
 
+    Task<BrowserToolResponse> CaptureSnapshotAsync(string targetId, string format, string profile, string? sessionKey, CancellationToken cancellationToken = default);
+
     Task<BrowserToolResponse> GetContentAsync(string targetId, string? selector, int? maxChars, string profile, CancellationToken cancellationToken = default);
 
     Task<BrowserToolResponse> ExecuteActionAsync(BrowserActionRequest request, string targetId, string profile, CancellationToken cancellationToken = default);

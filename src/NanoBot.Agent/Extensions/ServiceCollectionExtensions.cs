@@ -9,6 +9,7 @@ using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Workspace;
+using NanoBot.Providers;
 
 namespace NanoBot.Agent;
 
@@ -56,6 +57,10 @@ public static class ServiceCollectionExtensions
             var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
 
+            // Get profile-aware dependencies if available
+            var chatClientFactory = sp.GetService<IChatClientFactory>();
+            var llmConfig = sp.GetService<LlmConfig>();
+
             return new AgentRuntime(
                 agent,
                 bus,
@@ -64,6 +69,9 @@ public static class ServiceCollectionExtensions
                 memoryStore,
                 subagentManager,
                 memoryWindow,
+                chatClientFactory,
+                llmConfig,
+                sp,
                 logger);
         });
 

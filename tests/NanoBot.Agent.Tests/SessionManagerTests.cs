@@ -149,6 +149,67 @@ public class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveSessionAsync_SavesToolResults()
+    {
+        var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
+        var sessionKey = "test:tool_results";
+        var session = await manager.GetOrCreateSessionAsync(sessionKey);
+        
+        // Manually inject message into session state for testing
+        // We use "ChatHistoryProvider" as a fallback key that GetAllMessages checks
+        // Assuming session.StateBag is accessible and mutable
+        if (!session.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var list) || list == null)
+        {
+            list = new List<ChatMessage>();
+            session.StateBag.SetValue("ChatHistoryProvider", list);
+        }
+        
+        // Add a message with tool call
+        // FunctionCallContent(string callId, string name, IDictionary<string, object?>? arguments = null)
+        var args = new Dictionary<string, object?> { { "arg1", "value1" } };
+        var toolCall = new FunctionCallContent("call_1", "test_tool", args);
+        var callMessage = new ChatMessage(ChatRole.Assistant, [toolCall]);
+        list.Add(callMessage);
+
+        // Add a message with tool result
+        var toolResult = new FunctionResultContent("call_1", new { success = true, value = 123 });
+        var message = new ChatMessage(ChatRole.Tool, [toolResult]);
+        
+        list.Add(message);
+        
+        await manager.SaveSessionAsync(session, sessionKey);
+        
+        // Read file content
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_tool_results.jsonl");
+        Assert.True(File.Exists(sessionFile));
+        
+        var lines = await File.ReadAllLinesAsync(sessionFile);
+        // Expect 3 lines (system prompt + 2 added messages) or more
+        Assert.True(lines.Length >= 2);
+        
+        // Check tool call (second to last)
+        var callJson = JsonSerializer.Deserialize<JsonElement>(lines[lines.Length - 2]);
+        Assert.Equal("assistant", callJson.GetProperty("role").GetString());
+        var toolCalls = callJson.GetProperty("tool_calls");
+        Assert.Equal(1, toolCalls.GetArrayLength());
+        var call = toolCalls[0];
+        Assert.Equal("call_1", call.GetProperty("id").GetString());
+        Assert.Equal("test_tool", call.GetProperty("function").GetProperty("name").GetString());
+        Assert.Contains("\"arg1\":\"value1\"", call.GetProperty("function").GetProperty("arguments").GetString());
+
+        // Check tool result (last)
+        var json = JsonSerializer.Deserialize<JsonElement>(lines.Last());
+        
+        Assert.Equal("tool", json.GetProperty("role").GetString());
+        Assert.Equal("call_1", json.GetProperty("tool_call_id").GetString());
+        
+        // Check content contains the result
+        var content = json.GetProperty("content").GetString();
+        Assert.Contains("\"success\":true", content);
+        Assert.Contains("\"value\":123", content);
+    }
+
+    [Fact]
     public void Constructor_ThrowsOnNullAgent()
     {
         Assert.Throws<ArgumentNullException>(() =>

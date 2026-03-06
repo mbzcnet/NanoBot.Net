@@ -1,8 +1,12 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Workspace;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 
 namespace NanoBot.Infrastructure.Browser;
 
@@ -14,6 +18,14 @@ public sealed class BrowserService : IBrowserService
     private readonly ConcurrentDictionary<string, ProfileState> _profiles = new(StringComparer.OrdinalIgnoreCase);
     private IPlaywright? _playwright;
     private readonly ConcurrentDictionary<string, BrowserRefSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly IWorkspaceManager _workspace;
+    private readonly ILogger<BrowserService>? _logger;
+
+    public BrowserService(IWorkspaceManager workspace, ILogger<BrowserService>? logger = null)
+    {
+        _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
+        _logger = logger;
+    }
 
     public async Task<bool> IsStartedAsync(string profile, CancellationToken cancellationToken = default)
     {
@@ -235,62 +247,116 @@ public sealed class BrowserService : IBrowserService
         var normalized = NormalizeProfile(profile);
         var page = await GetPageAsync(normalized, targetId, cancellationToken);
 
-        var nodesJson = await page.EvaluateAsync<string>(@"() => JSON.stringify((() => {
-            const elements = Array.from(document.querySelectorAll('a, button, input, textarea, select, [role], [tabindex]'));
-            const visible = elements.filter((el) => {
-                if (!(el instanceof HTMLElement)) return false;
-                const rect = el.getBoundingClientRect();
-                const style = window.getComputedStyle(el);
-                return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
-            }).slice(0, 150);
-
-            return visible.map((el, index) => {
-                const ref = String(index + 1);
-                el.setAttribute('data-nbot-ref', ref);
-                const tag = el.tagName.toLowerCase();
-                const role = el.getAttribute('role') || '';
-                const text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ');
-                return {
-                    ref,
-                    role,
-                    tag,
-                    text: text.slice(0, 120)
-                };
-            });
-        })())") ?? "[]";
-
+        var useAriaSnapshot = string.Equals(format, "aria", StringComparison.OrdinalIgnoreCase);
+        var ariaSnapshot = useAriaSnapshot ? await page.Locator(":root").AriaSnapshotAsync() : null;
+        
         var refs = new Dictionary<string, string>(StringComparer.Ordinal);
         var lines = new List<string>();
 
-        using var nodesDoc = JsonDocument.Parse(nodesJson);
-        foreach (var node in nodesDoc.RootElement.EnumerateArray())
+        if (useAriaSnapshot && !string.IsNullOrWhiteSpace(ariaSnapshot))
         {
-            if (!node.TryGetProperty("ref", out var refElement))
+            var snapshotLines = ariaSnapshot.Split('\n');
+            var refCounter = 0;
+            var roleTracker = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var line in snapshotLines)
             {
-                continue;
-            }
+                var trimmedLine = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmedLine))
+                {
+                    continue;
+                }
 
-            var nodeRef = refElement.GetString();
-            if (string.IsNullOrWhiteSpace(nodeRef))
+                var match = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"^-\s*(\w+)(?:\s+""([^""]*)"")?");
+                if (!match.Success)
+                {
+                    lines.Add(line);
+                    continue;
+                }
+
+                var role = match.Groups[1].Value.ToLowerInvariant();
+                var name = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+                var isInteractive = IsInteractiveRole(role);
+                if (isInteractive)
+                {
+                    refCounter++;
+                    var refId = $"e{refCounter}";
+                    
+                    var roleKey = string.IsNullOrEmpty(name) ? role : $"{role}:{name}";
+                    if (!roleTracker.ContainsKey(roleKey))
+                    {
+                        roleTracker[roleKey] = 0;
+                    }
+                    roleTracker[roleKey]++;
+
+                    refs[refId] = $"[data-nbot-ref=\"{refId}\"]";
+                    
+                    var lineWithRef = $"{line} [ref={refId}]";
+                    lines.Add(lineWithRef);
+                }
+                else
+                {
+                    lines.Add(line);
+                }
+            }
+        }
+        else
+        {
+            var nodesJson = await page.EvaluateAsync<string>(@"() => JSON.stringify((() => {
+                const elements = Array.from(document.querySelectorAll('a, button, input, textarea, select, [role], [tabindex]'));
+                const visible = elements.filter((el) => {
+                    if (!(el instanceof HTMLElement)) return false;
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                }).slice(0, 150);
+
+                return visible.map((el, index) => {
+                    const ref = String(index + 1);
+                    el.setAttribute('data-nbot-ref', ref);
+                    const tag = el.tagName.toLowerCase();
+                    const role = el.getAttribute('role') || '';
+                    const text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ');
+                    return {
+                        ref,
+                        role,
+                        tag,
+                        text: text.slice(0, 120)
+                    };
+                });
+            })())") ?? "[]";
+
+            using var nodesDoc = JsonDocument.Parse(nodesJson);
+            foreach (var node in nodesDoc.RootElement.EnumerateArray())
             {
-                continue;
+                if (!node.TryGetProperty("ref", out var refElement))
+                {
+                    continue;
+                }
+
+                var nodeRef = refElement.GetString();
+                if (string.IsNullOrWhiteSpace(nodeRef))
+                {
+                    continue;
+                }
+
+                refs[nodeRef] = $"[data-nbot-ref=\"{nodeRef}\"]";
+
+                var nodeRole = node.TryGetProperty("role", out var roleElement)
+                    ? roleElement.GetString()
+                    : null;
+                var nodeTag = node.TryGetProperty("tag", out var tagElement)
+                    ? tagElement.GetString()
+                    : null;
+                var nodeText = node.TryGetProperty("text", out var textElement)
+                    ? textElement.GetString()
+                    : null;
+
+                var rolePart = string.IsNullOrWhiteSpace(nodeRole) ? (nodeTag ?? "element") : nodeRole;
+                var textPart = string.IsNullOrWhiteSpace(nodeText) ? "(no text)" : nodeText;
+                lines.Add($"[{nodeRef}] {rolePart}: {textPart}");
             }
-
-            refs[nodeRef] = $"[data-nbot-ref=\"{nodeRef}\"]";
-
-            var nodeRole = node.TryGetProperty("role", out var roleElement)
-                ? roleElement.GetString()
-                : null;
-            var nodeTag = node.TryGetProperty("tag", out var tagElement)
-                ? tagElement.GetString()
-                : null;
-            var nodeText = node.TryGetProperty("text", out var textElement)
-                ? textElement.GetString()
-                : null;
-
-            var rolePart = string.IsNullOrWhiteSpace(nodeRole) ? (nodeTag ?? "element") : nodeRole;
-            var textPart = string.IsNullOrWhiteSpace(nodeText) ? "(no text)" : nodeText;
-            lines.Add($"[{nodeRef}] {rolePart}: {textPart}");
         }
 
         var snapshotText = lines.Count == 0
@@ -313,10 +379,224 @@ public sealed class BrowserService : IBrowserService
             Url = page.Url,
             Snapshot = snapshotText,
             Refs = refs,
-            Message = string.Equals(format, "aria", StringComparison.OrdinalIgnoreCase)
-                ? "ARIA format fallback: returned simplified interactive snapshot"
-                : "Snapshot captured"
+            Message = useAriaSnapshot
+                ? "ARIA snapshot captured using Playwright ARIA Snapshot API"
+                : "Snapshot captured using DOM query"
         };
+    }
+
+    public async Task<BrowserToolResponse> CaptureSnapshotAsync(string targetId, string format, string profile, string? sessionKey, CancellationToken cancellationToken = default)
+    {
+        var normalized = NormalizeProfile(profile);
+        var page = await GetPageAsync(normalized, targetId, cancellationToken);
+        // Use underscore instead of colon to avoid path issues on Windows and URL encoding issues
+        var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey)
+            ? $"fallback_{normalized}"
+            : sessionKey;
+
+        string? imageRelativePath = null;
+
+        if (string.IsNullOrWhiteSpace(sessionKey))
+        {
+            _logger?.LogWarning("Snapshot called without sessionKey. Fallback key applied: {SessionKey}", effectiveSessionKey);
+        }
+
+        try
+        {
+            var screenshotsDir = GetSessionScreenshotsPath(effectiveSessionKey);
+            Directory.CreateDirectory(screenshotsDir);
+
+            var timestamp = DateTimeOffset.UtcNow.ToString("yyyyMMdd_HHmmssfff");
+            var screenshotFileName = $"snapshot_{timestamp}.png";
+            var screenshotPath = Path.Combine(screenshotsDir, screenshotFileName);
+
+            var screenshotBytes = await page.ScreenshotAsync(new PageScreenshotOptions
+            {
+                FullPage = true,
+                Type = ScreenshotType.Png
+            });
+
+            var imagePath = await CompressAndSaveImageAsync(screenshotBytes, screenshotPath);
+            imageRelativePath = Path.GetRelativePath(_workspace.GetSessionsPath(), imagePath);
+            var imageUrl = $"/api/files/sessions/{imageRelativePath.Replace('\\', '/')}";
+            _logger?.LogInformation("Snapshot image saved. sessionKey={SessionKey}, filePath={FilePath}, relativePath={RelativePath}, url={Url}", effectiveSessionKey, imagePath, imageRelativePath, imageUrl);
+        }
+        catch (Exception ex)
+        {
+            imageRelativePath = null;
+            _logger?.LogWarning(ex, "Snapshot image save failed. sessionKey={SessionKey}, targetId={TargetId}, profile={Profile}", effectiveSessionKey, targetId, normalized);
+        }
+
+        var useAriaSnapshot = string.Equals(format, "aria", StringComparison.OrdinalIgnoreCase);
+        var ariaSnapshot = useAriaSnapshot ? await page.Locator(":root").AriaSnapshotAsync() : null;
+        
+        var refs = new Dictionary<string, string>(StringComparer.Ordinal);
+        var lines = new List<string>();
+
+        if (useAriaSnapshot && !string.IsNullOrWhiteSpace(ariaSnapshot))
+        {
+            var snapshotLines = ariaSnapshot.Split('\n');
+            var refCounter = 0;
+            var roleTracker = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var line in snapshotLines)
+            {
+                var trimmedLine = line.Trim();
+                if (string.IsNullOrWhiteSpace(trimmedLine))
+                {
+                    continue;
+                }
+
+                var match = System.Text.RegularExpressions.Regex.Match(trimmedLine, @"^-\s*(\w+)(?:\s+""([^""]*)"")?");
+                if (!match.Success)
+                {
+                    lines.Add(line);
+                    continue;
+                }
+
+                var role = match.Groups[1].Value.ToLowerInvariant();
+                var name = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+                var isInteractive = IsInteractiveRole(role);
+                if (isInteractive)
+                {
+                    refCounter++;
+                    var refId = $"e{refCounter}";
+                    
+                    var roleKey = string.IsNullOrEmpty(name) ? role : $"{role}:{name}";
+                    if (!roleTracker.ContainsKey(roleKey))
+                    {
+                        roleTracker[roleKey] = 0;
+                    }
+                    roleTracker[roleKey]++;
+
+                    refs[refId] = $"[data-nbot-ref=\"{refId}\"]";
+                    
+                    var lineWithRef = $"{line} [ref={refId}]";
+                    lines.Add(lineWithRef);
+                }
+                else
+                {
+                    lines.Add(line);
+                }
+            }
+        }
+        else
+        {
+            var nodesJson = await page.EvaluateAsync<string>(@"() => JSON.stringify((() => {
+                const elements = Array.from(document.querySelectorAll('a, button, input, textarea, select, [role], [tabindex]'));
+                const visible = elements.filter((el) => {
+                    if (!(el instanceof HTMLElement)) return false;
+                    const rect = el.getBoundingClientRect();
+                    const style = window.getComputedStyle(el);
+                    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+                }).slice(0, 150);
+
+                return visible.map((el, index) => {
+                    const ref = String(index + 1);
+                    el.setAttribute('data-nbot-ref', ref);
+                    const tag = el.tagName.toLowerCase();
+                    const role = el.getAttribute('role') || '';
+                    const text = (el.innerText || el.getAttribute('aria-label') || el.getAttribute('value') || '').trim().replace(/\s+/g, ' ');
+                    return {
+                        ref,
+                        role,
+                        tag,
+                        text: text.slice(0, 120)
+                    };
+                });
+            })())") ?? "[]";
+
+            using var nodesDoc = JsonDocument.Parse(nodesJson);
+            foreach (var node in nodesDoc.RootElement.EnumerateArray())
+            {
+                if (!node.TryGetProperty("ref", out var refElement))
+                {
+                    continue;
+                }
+
+                var nodeRef = refElement.GetString();
+                if (string.IsNullOrWhiteSpace(nodeRef))
+                {
+                    continue;
+                }
+
+                refs[nodeRef] = $"[data-nbot-ref=\"{nodeRef}\"]";
+
+                var nodeRole = node.TryGetProperty("role", out var roleElement)
+                    ? roleElement.GetString()
+                    : null;
+                var nodeTag = node.TryGetProperty("tag", out var tagElement)
+                    ? tagElement.GetString()
+                    : null;
+                var nodeText = node.TryGetProperty("text", out var textElement)
+                    ? textElement.GetString()
+                    : null;
+
+                var rolePart = string.IsNullOrWhiteSpace(nodeRole) ? (nodeTag ?? "element") : nodeRole;
+                var textPart = string.IsNullOrWhiteSpace(nodeText) ? "(no text)" : nodeText;
+                lines.Add($"[{nodeRef}] {rolePart}: {textPart}");
+            }
+        }
+
+        var snapshotText = lines.Count == 0
+            ? "No interactive elements found."
+            : string.Join("\n", lines);
+
+        _snapshots[SnapshotKey(normalized, targetId)] = new BrowserRefSnapshot
+        {
+            TargetId = targetId,
+            Refs = refs,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        var message = string.IsNullOrWhiteSpace(imageRelativePath)
+            ? (useAriaSnapshot ? "ARIA snapshot captured using Playwright ARIA Snapshot API" : "Snapshot captured using DOM query")
+            : $"Snapshot captured with screenshot: {Path.GetFileName(imageRelativePath)}";
+
+        return new BrowserToolResponse
+        {
+            Ok = true,
+            Action = "snapshot",
+            Profile = normalized,
+            TargetId = targetId,
+            Url = page.Url,
+            Snapshot = snapshotText,
+            Refs = refs,
+            ImagePath = imageRelativePath,
+            Message = message
+        };
+    }
+
+    private string GetSessionScreenshotsPath(string sessionKey)
+    {
+        var safeKey = sessionKey.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            safeKey = safeKey.Replace(c, '_');
+        }
+        return Path.Combine(_workspace.GetSessionsPath(), safeKey, "screenshots");
+    }
+
+    private async Task<string> CompressAndSaveImageAsync(byte[] originalBytes, string outputPath)
+    {
+        try
+        {
+            await using var inputStream = new MemoryStream(originalBytes);
+            using var image = await Image.LoadAsync(inputStream);
+            var newWidth = Math.Max(1, (int)Math.Round(image.Width * 0.5));
+            var newHeight = Math.Max(1, (int)Math.Round(image.Height * 0.5));
+
+            image.Mutate(ctx => ctx.Resize(newWidth, newHeight));
+            await image.SaveAsPngAsync(outputPath);
+            return outputPath;
+        }
+        catch (Exception ex)
+        {
+            await File.WriteAllBytesAsync(outputPath, originalBytes);
+            _logger?.LogWarning(ex, "Image resize with ImageSharp failed, fallback to original bytes. outputPath={OutputPath}", outputPath);
+            return outputPath;
+        }
     }
 
     public async Task<BrowserToolResponse> GetContentAsync(string targetId, string? selector, int? maxChars, string profile, CancellationToken cancellationToken = default)
@@ -650,10 +930,17 @@ public sealed class BrowserService : IBrowserService
             throw new InvalidOperationException("Snapshot not found. Run action=snapshot first.");
         }
 
-        var normalized = reference.Trim().TrimStart('e');
+        var normalized = reference.Trim();
+        
         if (snapshot.Refs.TryGetValue(normalized, out var selector))
         {
             return selector;
+        }
+
+        var trimmedRef = normalized.TrimStart('e');
+        if (snapshot.Refs.TryGetValue(trimmedRef, out var trimmedSelector))
+        {
+            return trimmedSelector;
         }
 
         throw new InvalidOperationException($"Unknown ref: {reference}. Run action=snapshot again.");
@@ -679,6 +966,31 @@ public sealed class BrowserService : IBrowserService
                 state.Pages.TryRemove(entry.Key, out _);
             }
         }
+    }
+
+    private static bool IsInteractiveRole(string role)
+    {
+        var interactiveRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "button",
+            "link",
+            "textbox",
+            "checkbox",
+            "radio",
+            "combobox",
+            "listbox",
+            "menuitem",
+            "menuitemcheckbox",
+            "menuitemradio",
+            "option",
+            "searchbox",
+            "slider",
+            "spinbutton",
+            "switch",
+            "tab",
+            "treeitem"
+        };
+        return interactiveRoles.Contains(role);
     }
 
     private sealed class ProfileState

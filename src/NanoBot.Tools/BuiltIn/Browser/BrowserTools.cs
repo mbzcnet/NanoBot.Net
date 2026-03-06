@@ -1,20 +1,26 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using NanoBot.Core.Tools;
 using NanoBot.Core.Tools.Browser;
 
 namespace NanoBot.Tools.BuiltIn;
 
 public static class BrowserTools
 {
+    public static void SetCurrentSessionKey(string? sessionKey)
+    {
+        ToolExecutionContext.SetCurrentSessionKey(sessionKey);
+    }
+
     public static AITool CreateBrowserTool(IBrowserService? browserService)
     {
         return AIFunctionFactory.Create(
-            (string action, string? profile, string? targetId, string? targetUrl, string? snapshotFormat, string? kind, string? reference, string? text, string? textGone, string? key, int? timeoutMs, int? scrollBy, string? selector, int? maxChars, string? loadState) =>
-                ExecuteAsync(action, profile, targetId, targetUrl, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, browserService),
+            (string action, string? profile = null, string? targetId = null, string? targetUrl = null, string? snapshotFormat = null, string? kind = null, string? reference = null, string? text = null, string? textGone = null, string? key = null, int? timeoutMs = null, int? scrollBy = null, string? selector = null, int? maxChars = null, string? loadState = null, string? sessionKey = null) =>
+                ExecuteAsync(action, profile, targetId, targetUrl, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService),
             new AIFunctionFactoryOptions
             {
                 Name = "browser",
-                Description = "Control browser tabs with actions: status, start, stop, tabs, open, navigate, close, snapshot, content, act. Recommended flow: open/navigate -> snapshot -> act -> content."
+                Description = "Control browser tabs with actions: status, start, stop, tabs, open, navigate, close, snapshot, capture, content, act. Recommended flow: open/navigate -> snapshot/capture -> act -> content. Use capture for screenshot with image output."
             });
     }
 
@@ -34,6 +40,7 @@ public static class BrowserTools
         string? selector,
         int? maxChars,
         string? loadState,
+        string? sessionKey,
         IBrowserService? browserService)
     {
         if (browserService == null)
@@ -43,6 +50,8 @@ public static class BrowserTools
 
         var resolvedAction = action?.Trim().ToLowerInvariant();
         var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
+
+        var resolvedSessionKey = sessionKey ?? ToolExecutionContext.CurrentSessionKey;
 
         try
         {
@@ -68,10 +77,16 @@ public static class BrowserTools
                 "close" => JsonSerializer.Serialize(await browserService.CloseTabAsync(
                     Require(targetId, "targetId"),
                     resolvedProfile)),
-                "snapshot" => JsonSerializer.Serialize(await browserService.GetSnapshotAsync(
+                "snapshot" => JsonSerializer.Serialize(await browserService.CaptureSnapshotAsync(
                     Require(targetId, "targetId"),
                     string.IsNullOrWhiteSpace(snapshotFormat) ? "ai" : snapshotFormat,
-                    resolvedProfile)),
+                    resolvedProfile,
+                    resolvedSessionKey)),
+                "capture" => JsonSerializer.Serialize(await browserService.CaptureSnapshotAsync(
+                    Require(targetId, "targetId"),
+                    string.IsNullOrWhiteSpace(snapshotFormat) ? "ai" : snapshotFormat,
+                    resolvedProfile,
+                    resolvedSessionKey)),
                 "content" => JsonSerializer.Serialize(await browserService.GetContentAsync(
                     Require(targetId, "targetId"),
                     selector,

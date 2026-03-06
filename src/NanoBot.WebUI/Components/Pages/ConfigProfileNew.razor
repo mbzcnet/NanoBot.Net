@@ -2,13 +2,14 @@
 @inject NavigationManager NavigationManager
 @inject ISnackbar Snackbar
 @inject ILogger<ConfigProfileNew> Logger
+@inject NanoBot.Agent.IAgentRuntime AgentRuntime
 @using NanoBot.Core.Configuration
 @using NanoBot.Cli.Services
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - 新建 LLM Profile</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4 nb-profile-form-page">
+<MudContainer MaxWidth="MaxWidth.Medium" Class="nb-profile-form-page">
     <MudBreadcrumbs Items="_breadcrumbItems" Class="nb-page-breadcrumb" />
     
     <MudText Typo="Typo.h4" Class="mb-4">新建 LLM Profile</MudText>
@@ -22,12 +23,19 @@
         <MudPaper Elevation="0" Class="pa-4 nb-profile-form-card">
             <MudForm @ref="_form" @bind-IsValid="@_isFormValid">
                 <MudTextField @bind-Value="_profileName"
-                              Label="Profile 名称"
+                              Label="Profile 标识"
                               Required="true"
-                              RequiredError="请输入 Profile 名称"
+                              RequiredError="请输入 Profile 标识"
                               Variant="Variant.Outlined"
+                              HelperText="配置的唯一标识符（如：default, openai-gpt4）"
                               Class="mb-4" />
-                
+
+                <MudTextField @bind-Value="_newProfile.Name"
+                              Label="显示名称"
+                              Variant="Variant.Outlined"
+                              HelperText="用于标识此配置的名称（如：OpenAI GPT-4）。留空则使用 'Provider-Model' 格式"
+                              Class="mb-4" />
+
                 <MudSelect @bind-Value="_newProfile.Provider"
                            Label="Provider"
                            Required="true"
@@ -162,12 +170,14 @@
         
         try
         {
-            _newProfile.Name = _profileName;
             _config.Llm.Profiles[_profileName] = _newProfile;
-            
+
             var configPath = GetConfigPath();
             await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
-            
+
+            // 清除 agent 缓存，使新配置可用
+            AgentRuntime.ClearAgentCache();
+
             Snackbar.Add($"Profile '{_profileName}' 已创建", Severity.Success);
             NavigationManager.NavigateTo("/config/profiles");
         }

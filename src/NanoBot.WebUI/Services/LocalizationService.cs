@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Localization;
 using Blazored.LocalStorage;
+using Microsoft.AspNetCore.Http;
 
 namespace NanoBot.WebUI.Services;
 
@@ -28,18 +29,6 @@ public class LocalizationService : ILocalizationService
 
     public string GetSavedCulture()
     {
-        // 首先尝试从 HTTP 上下文获取文化设置（SSR 场景）
-        var httpContext = _httpContextAccessor.HttpContext;
-        if (httpContext != null)
-        {
-            // 尝试从请求的文化特性中获取
-            var requestCulture = httpContext.Features.Get<Microsoft.AspNetCore.Localization.IRequestCultureFeature>();
-            if (requestCulture != null)
-            {
-                return requestCulture.RequestCulture.Culture.Name;
-            }
-        }
-
         // 在服务端渲染时，localStorage 可能不可用，使用 try-catch 保护
         try
         {
@@ -56,6 +45,27 @@ public class LocalizationService : ILocalizationService
     public void SaveCulture(string culture)
     {
         _localStorage.SetItem(StorageKey, culture);
+
+        // 同时设置 Cookie，以便服务器端本地化能够读取
+        SetCultureCookie(culture);
+    }
+
+    private void SetCultureCookie(string culture)
+    {
+        var httpContext = _httpContextAccessor.HttpContext;
+        if (httpContext != null)
+        {
+            // 设置 ASP.NET Core 本地化中间件能够识别的 Cookie 格式
+            httpContext.Response.Cookies.Append(
+                ".AspNetCore.Culture",
+                $"c={culture}|u={culture}",
+                new CookieOptions
+                {
+                    Expires = DateTimeOffset.UtcNow.AddYears(1),
+                    SameSite = SameSiteMode.Lax,
+                    Path = "/"
+                });
+        }
     }
 
     public async Task<string> GetCurrentCultureAsync()

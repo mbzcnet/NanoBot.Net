@@ -7,10 +7,19 @@
     "DefaultProfile": "default",
     "Profiles": {
       "default": {
+        "Name": "OpenAI GPT-4 Mini",
         "Provider": "openai",
         "Model": "gpt-4o-mini",
         "ApiKey": "${OPENAI_API_KEY}",
         "ApiBase": "https://api.openai.com/v1",
+        "Temperature": 0.7,
+        "MaxTokens": 4096
+      },
+      "ollama_local": {
+        "Name": "Ollama Local",
+        "Provider": "ollama",
+        "Model": "llama3.2",
+        "ApiBase": "http://localhost:11434",
         "Temperature": 0.7,
         "MaxTokens": 4096
       }

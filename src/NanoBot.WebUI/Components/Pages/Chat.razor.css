@@ -29,7 +29,7 @@
 /* Message bubbles - Grok style */
 .nb-message-row {
     display: flex;
-    margin-bottom: 8px;
+    margin-bottom: 15px;
 }
 
 .nb-message-row-user {
@@ -42,7 +42,7 @@
 
 .nb-message-bubble {
     max-width: 85%;
-    padding: 12px 16px;
+    padding: 35px 55px;
     border-radius: 12px;
 }
 
@@ -54,6 +54,7 @@
 .nb-message-bubble-assistant {
     background: rgba(30, 41, 59, 0.6);
     border: none;
+    padding: 20px 24px;
 }
 
 .nb-message-header {
@@ -66,7 +67,7 @@
 /* Composer - Grok style bottom input */
 .nb-composer-container {
     padding: 16px 24px 24px;
-    background: linear-gradient(to top, rgba(17, 24, 39, 1) 0%, rgba(17, 24, 39, 0.95) 70%, rgba(17, 24, 39, 0) 100%);
+    background: linear-gradient(to top, rgba(17, 24, 39, 0.92) 0%, rgba(17, 24, 39, 0.75) 50%, rgba(17, 24, 39, 0.4) 80%, transparent 100%);
 }
 
 .nb-composer-shell {
@@ -124,10 +125,38 @@
 }
 
 .nb-model-btn {
-    text-transform: none;
-    min-width: 0;
-    color: rgba(255, 255, 255, 0.6);
+    text-transform: none !important;
+    min-width: 0 !important;
+    color: rgba(255, 255, 255, 0.6) !important;
+    font-size: 0.875rem !important;
+    padding: 4px 8px !important;
+}
+
+::deep .nb-model-btn .mud-button-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+::deep .nb-model-menu-popover {
+    z-index: 9999 !important;
+}
+
+::deep .nb-model-select {
+    min-width: 200px;
+}
+
+::deep .nb-model-select .mud-input {
+    color: rgba(255, 255, 255, 0.6) !important;
     font-size: 0.875rem;
+}
+
+::deep .nb-model-select .mud-input-slot {
+    text-transform: none;
+}
+
+::deep .nb-model-select .mud-input-adornment-end .mud-icon-root {
+    color: rgba(255, 255, 255, 0.6);
 }
 
 .nb-send-btn {

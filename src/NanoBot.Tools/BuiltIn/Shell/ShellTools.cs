@@ -40,7 +40,7 @@ public static class ShellTools
             .ToList();
 
         return AIFunctionFactory.Create(
-            (string command, int timeoutSeconds, string? workingDir) => ExecuteAsync(
+            (string command, int timeoutSeconds = 30, string? workingDir = null) => ExecuteAsync(
                 command, timeoutSeconds, workingDir, options, denyPatterns, allowPatterns),
             new AIFunctionFactoryOptions
             {
@@ -55,7 +55,7 @@ public static class ShellTools
         var blocked = new HashSet<string>(blockedCommands ?? [], StringComparer.OrdinalIgnoreCase);
 
         return AIFunctionFactory.Create(
-            (string command, int timeoutSeconds) => ExecuteSimpleAsync(command, timeoutSeconds, blocked),
+            (string command, int timeoutSeconds = 30) => ExecuteSimpleAsync(command, timeoutSeconds, blocked),
             new AIFunctionFactoryOptions
             {
                 Name = "exec",

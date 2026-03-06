@@ -23,4 +23,6 @@ public sealed class BrowserToolResponse
     public IReadOnlyList<BrowserTabInfo>? Tabs { get; set; }
 
     public Dictionary<string, string>? Refs { get; set; }
+
+    public string? ImagePath { get; set; }
 }

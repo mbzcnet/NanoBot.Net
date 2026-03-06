@@ -238,6 +238,10 @@ public static class ServiceCollectionExtensions
             var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
 
+            // Get profile-aware dependencies for WebUI support
+            var chatClientFactory = sp.GetService<IChatClientFactory>();
+            var llmConfig = sp.GetService<LlmConfig>();
+
             return new AgentRuntime(
                 agent,
                 bus,
@@ -246,6 +250,9 @@ public static class ServiceCollectionExtensions
                 memoryStore,
                 subagentManager,
                 memoryWindow,
+                chatClientFactory,
+                llmConfig,
+                sp,
                 logger);
         });
 

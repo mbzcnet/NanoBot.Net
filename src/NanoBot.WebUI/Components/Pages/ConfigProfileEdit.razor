@@ -2,13 +2,14 @@
 @inject NavigationManager NavigationManager
 @inject ISnackbar Snackbar
 @inject ILogger<ConfigProfileEdit> Logger
+@inject NanoBot.Agent.IAgentRuntime AgentRuntime
 @using NanoBot.Core.Configuration
 @using NanoBot.Cli.Services
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - 编辑 LLM Profile</PageTitle>
 
-<MudContainer MaxWidth="MaxWidth.Medium" Class="mt-4 nb-profile-form-page">
+<MudContainer MaxWidth="MaxWidth.Medium" Class="nb-profile-form-page">
     <MudBreadcrumbs Items="_breadcrumbItems" Class="nb-page-breadcrumb" />
     
     <MudText Typo="Typo.h4" Class="mb-4">编辑 LLM Profile: @ProfileName</MudText>
@@ -25,6 +26,21 @@
     {
         <MudPaper Elevation="0" Class="pa-4 nb-profile-form-card">
             <MudForm @ref="_form" @bind-IsValid="@_isFormValid">
+                <MudTextField @bind-Value="_newProfileName"
+                              Label="Profile 标识"
+                              Required="true"
+                              RequiredError="请输入 Profile 标识"
+                              Variant="Variant.Outlined"
+                              HelperText="配置的唯一标识符，仅限字母、数字、小数点、横线、下划线（如：default, openai-gpt4）"
+                              Validation="ValidateProfileName"
+                              Class="mb-4" />
+
+                <MudTextField @bind-Value="_profile.Name"
+                              Label="显示名称"
+                              Variant="Variant.Outlined"
+                              HelperText="用于标识此配置的名称（如：OpenAI GPT-4）。留空则使用 'Provider-Model' 格式"
+                              Class="mb-4" />
+
                 <MudSelect @bind-Value="_profile.Provider"
                            Label="Provider"
                            Required="true"
@@ -103,10 +119,14 @@
     
     private AgentConfig? _config;
     private LlmProfile? _profile;
+    private string _newProfileName = string.Empty;
     private bool _isLoading = true;
     private bool _isFormValid = false;
     private MudForm? _form;
     private List<BreadcrumbItem> _breadcrumbItems = new();
+
+    private static readonly System.Text.RegularExpressions.Regex ProfileNameRegex = new(
+        @"^[a-zA-Z0-9._-]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,6 +150,7 @@
             {
                 _config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
                 _profile = _config.Llm.Profiles.GetValueOrDefault(ProfileName);
+                _newProfileName = ProfileName;
             }
         }
         catch (Exception ex)
@@ -146,19 +167,46 @@
 
     private async Task SaveProfile()
     {
-        if (_config == null || _profile == null)
+        if (_config == null || _profile == null || string.IsNullOrWhiteSpace(_newProfileName))
         {
             return;
         }
-        
+
+        if (!ProfileNameRegex.IsMatch(_newProfileName))
+        {
+            Snackbar.Add("Profile 标识格式无效，仅限字母、数字、小数点、横线、下划线", Severity.Warning);
+            return;
+        }
+
+        // 如果 key 变了，检查新 key 是否已存在
+        if (_newProfileName != ProfileName && _config.Llm.Profiles.ContainsKey(_newProfileName))
+        {
+            Snackbar.Add($"Profile '{_newProfileName}' 已存在", Severity.Warning);
+            return;
+        }
+
         try
         {
-            _config.Llm.Profiles[ProfileName] = _profile;
-            
+            // 如果 key 变了，删除旧的并添加新的
+            if (_newProfileName != ProfileName)
+            {
+                _config.Llm.Profiles.Remove(ProfileName);
+
+                // 如果修改的是 default_profile，需要更新 default_profile 引用
+                if (_config.Llm.DefaultProfile == ProfileName)
+                {
+                    _config.Llm.DefaultProfile = _newProfileName;
+                }
+            }
+            _config.Llm.Profiles[_newProfileName] = _profile;
+
             var configPath = GetConfigPath();
             await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
-            
-            Snackbar.Add($"Profile '{ProfileName}' 已保存", Severity.Success);
+
+            // 清除 agent 缓存，使配置修改立即生效
+            AgentRuntime.ClearAgentCache();
+
+            Snackbar.Add($"Profile '{_newProfileName}' 已保存", Severity.Success);
             NavigationManager.NavigateTo("/config/profiles");
         }
         catch (Exception ex)
@@ -166,6 +214,17 @@
             Logger.LogError(ex, "Failed to save profile");
             Snackbar.Add($"保存 Profile 失败: {ex.Message}", Severity.Error);
         }
+    }
+
+    private static string? ValidateProfileName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "请输入 Profile 标识";
+
+        if (!ProfileNameRegex.IsMatch(value))
+            return "格式无效，仅限字母、数字、小数点、横线、下划线";
+
+        return null;
     }
 
     private void Cancel()

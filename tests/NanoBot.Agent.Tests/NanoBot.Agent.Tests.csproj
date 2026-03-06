@@ -26,6 +26,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\NanoBot.Agent\NanoBot.Agent.csproj" />
+    <ProjectReference Include="..\..\src\NanoBot.Tools\NanoBot.Tools.csproj" />
+    <ProjectReference Include="..\..\src\NanoBot.Infrastructure\NanoBot.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\NanoBot.Core\NanoBot.Core.csproj" />
   </ItemGroup>
 
 </Project>
