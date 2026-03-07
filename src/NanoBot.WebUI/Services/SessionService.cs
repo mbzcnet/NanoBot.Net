@@ -2,12 +2,23 @@ using NanoBot.Agent;
 using NanoBot.Core.Sessions;
 using NanoBot.Core.Storage;
 using NanoBot.Core.Workspace;
+using System.Net;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 
 namespace NanoBot.WebUI.Services;
 
 public class SessionService : ISessionService
 {
+    private sealed record SessionImageItem(
+        string OriginalUrl,
+        string ThumbnailUrl,
+        string Summary,
+        int Width,
+        int Height,
+        string ContentType,
+        long FileSize);
+
     private readonly ILogger<SessionService> _logger;
     private readonly ISessionManager _sessionManager;
     private readonly IWorkspaceManager _workspace;
@@ -206,6 +217,8 @@ public class SessionService : ISessionService
 
                     string role = "user";
                     string content = string.Empty;
+                    var timestamp = DateTime.Now;
+                    var attachments = new List<AttachmentInfo>();
                     
                     // 解析消息 - 支持两种格式
                     // 格式1: { "role": "user", "content": "text" }
@@ -214,22 +227,28 @@ public class SessionService : ISessionService
                     if (msg.TryGetProperty("role", out var roleElement))
                     {
                         role = roleElement.GetString()?.ToLower() ?? "user";
-                        
-                        if (msg.TryGetProperty("content", out var contentElement))
+                    }
+
+                    if (msg.TryGetProperty("timestamp", out var timestampElement) &&
+                        timestampElement.ValueKind == JsonValueKind.String &&
+                        DateTime.TryParse(timestampElement.GetString(), out var parsedTimestamp))
                     {
-                        // 简单格式：content 是字符串
+                        timestamp = parsedTimestamp;
+                    }
+
+                    if (msg.TryGetProperty("content", out var contentElement))
+                    {
                         if (contentElement.ValueKind == JsonValueKind.String)
                         {
                             content = contentElement.GetString() ?? string.Empty;
                         }
-                        // 复杂格式：contents 是数组（目前 SessionManager 没有使用这种格式，但保留兼容）
                         else if (contentElement.ValueKind == JsonValueKind.Array)
                         {
                             foreach (var item in contentElement.EnumerateArray())
                             {
                                 if (item.ValueKind == JsonValueKind.String)
                                 {
-                                     content += item.GetString();
+                                    content += item.GetString();
                                 }
                                 else if (item.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
                                 {
@@ -239,49 +258,86 @@ public class SessionService : ISessionService
                         }
                     }
 
-                    // 增加对 tool_calls 的解析，以便在 UI 中显示工具调用参数
                     if (msg.TryGetProperty("tool_calls", out var toolCallsElement) && toolCallsElement.ValueKind == JsonValueKind.Array)
                     {
+                        var toolCalls = new List<FunctionCallContent>();
                         foreach (var call in toolCallsElement.EnumerateArray())
                         {
-                            if (call.TryGetProperty("function", out var funcElement))
+                            if (!call.TryGetProperty("function", out var functionElement))
                             {
-                                var funcName = funcElement.GetProperty("name").GetString();
-                                var funcArgs = funcElement.GetProperty("arguments").GetString();
-                                
-                                // 将工具调用参数格式化为 markdown 代码块追加到 content
-                                if (!string.IsNullOrEmpty(funcName))
+                                continue;
+                            }
+
+                            var functionName = functionElement.TryGetProperty("name", out var nameElement)
+                                ? nameElement.GetString()
+                                : null;
+                            var argsString = functionElement.TryGetProperty("arguments", out var argsElement)
+                                ? argsElement.GetString()
+                                : null;
+
+                            Dictionary<string, object?>? arguments = null;
+                            if (!string.IsNullOrWhiteSpace(argsString))
+                            {
+                                try
                                 {
-                                    if (!string.IsNullOrEmpty(content)) content += "\n\n";
-                                    content += $"> **Tool Call**: `{funcName}`\n```json\n{funcArgs}\n```";
+                                    arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsString);
+                                }
+                                catch
+                                {
+                                    arguments = null;
                                 }
                             }
+
+                            if (!string.IsNullOrWhiteSpace(functionName))
+                            {
+                                var callId = call.TryGetProperty("id", out var idElement)
+                                    ? idElement.GetString() ?? string.Empty
+                                    : string.Empty;
+                                toolCalls.Add(new FunctionCallContent(callId, functionName, arguments));
+                            }
+                        }
+
+                        var toolHint = ToolHintFormatter.FormatToolHint(toolCalls);
+                        if (!string.IsNullOrWhiteSpace(toolHint))
+                        {
+                            var toolHintBlock = WrapToolHintAsHtml(toolHint);
+                            content = string.IsNullOrWhiteSpace(content)
+                                ? toolHintBlock
+                                : $"{content}\n\n{toolHintBlock}";
                         }
                     }
-                    
-                    // 增加对 tool_call_id (FunctionResult) 的特殊处理
-                    // 如果是 tool 角色，且 content 是 JSON 格式的结果，尝试美化显示或提取关键信息
+
                     if (role == "tool" && !string.IsNullOrWhiteSpace(content))
                     {
-                        // 尝试解析 JSON 结果
-                        try 
+                        if (TryExtractSnapshotImageUrl(content, out var snapshotImageUrl))
                         {
-                             // 简单的 JSON 格式化，如果已经是 JSON 字符串
-                             if (content.TrimStart().StartsWith("{"))
-                             {
-                                 var resultObj = JsonSerializer.Deserialize<JsonElement>(content);
-                                 
-                                 // 如果是 snapshot 结果，提取 imagePath 并追加图片链接
-                                 // 注意：这里只是为了让 Tool 消息本身更好看。AgentRuntime 会在 Assistant 消息中注入图片。
-                                 // 但如果 AgentRuntime 失败，或者用户想直接看 Tool 结果，这里是一个补救。
-                                 
-                                 // 无论是否 snapshot，都尝试格式化 JSON 以便阅读
-                                 content = $"```json\n{JsonSerializer.Serialize(resultObj, new JsonSerializerOptions { WriteIndented = true })}\n```";
-                             }
+                            content = $"![snapshot]({snapshotImageUrl})";
                         }
-                        catch { /* 忽略解析错误，保持原样 */ }
+                        else
+                        {
+                            content = string.Empty;
+                        }
                     }
-                    
+
+                    if (TryExtractSessionImages(msg, out var sessionImages))
+                    {
+                        foreach (var image in sessionImages)
+                        {
+                            attachments.Add(new AttachmentInfo
+                            {
+                                Id = Guid.NewGuid().ToString("N"),
+                                MessageId = $"{sessionId}_{messagesList.Count}",
+                                FileType = image.ContentType,
+                                RelativePath = image.ThumbnailUrl,
+                                FileSize = image.FileSize,
+                                Url = image.OriginalUrl,
+                                Summary = image.Summary
+                            });
+                        }
+
+                        content = AppendImageSummaries(content, sessionImages);
+                    }
+
                     if (!string.IsNullOrWhiteSpace(content))
                     {
                         messagesList.Add(new MessageInfo
@@ -290,17 +346,67 @@ public class SessionService : ISessionService
                             SessionId = sessionId,
                             Role = role,
                             Content = content,
-                            Timestamp = DateTime.Now
+                            Timestamp = timestamp,
+                            Attachments = attachments
                         });
                     }
-                }
                 }
                 catch
                 {
                 }
             }
 
-            return messagesList;
+            // 合并连续的 Assistant/Tool 消息，以模拟流式输出时的单一气泡体验
+            var consolidatedList = new List<MessageInfo>();
+            MessageInfo? currentResponse = null;
+
+            foreach (var msg in messagesList)
+            {
+                // 用户和系统消息总是独立气泡
+                if (msg.Role == "user" || msg.Role == "system")
+                {
+                    consolidatedList.Add(msg);
+                    currentResponse = null;
+                }
+                else // assistant 或 tool
+                {
+                    if (currentResponse != null)
+                    {
+                        // 合并到当前响应气泡
+                        if (!string.IsNullOrWhiteSpace(msg.Content))
+                        {
+                            if (!string.IsNullOrWhiteSpace(currentResponse.Content))
+                            {
+                                currentResponse.Content += "\n\n";
+                            }
+                            currentResponse.Content += msg.Content;
+                        }
+                        
+                        // 合并附件
+                        if (msg.Attachments != null && msg.Attachments.Count > 0)
+                        {
+                            currentResponse.Attachments.AddRange(msg.Attachments);
+                        }
+                        
+                        // 更新时间戳为最新
+                        currentResponse.Timestamp = msg.Timestamp;
+                    }
+                    else
+                    {
+                        // 开始新的响应气泡
+                        // 如果是 tool 角色（且没有前置 assistant），强制转为 assistant 以便正确渲染气泡样式
+                        if (msg.Role == "tool") 
+                        {
+                            msg.Role = "assistant";
+                        }
+                        
+                        consolidatedList.Add(msg);
+                        currentResponse = msg;
+                    }
+                }
+            }
+
+            return consolidatedList;
         }
         catch (Exception ex)
         {
@@ -340,5 +446,242 @@ public class SessionService : ISessionService
     {
         var sessionId = sessionKey.Replace("webui:", "");
         return $"会话 {sessionId.Substring(0, Math.Min(8, sessionId.Length))}";
+    }
+
+    private string? GetSnapshotUrl(string? imagePath)
+    {
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return null;
+        }
+
+        var normalized = imagePath.Replace('\\', '/');
+        if (normalized.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        if (Path.IsPathRooted(imagePath))
+        {
+            var sessionsRoot = _workspace.GetSessionsPath().Replace('\\', '/');
+            if (!normalized.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"/api/files/local?path={Uri.EscapeDataString(imagePath)}";
+            }
+
+            normalized = normalized[sessionsRoot.Length..].TrimStart('/');
+        }
+
+        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = normalized["sessions/".Length..];
+        }
+
+        normalized = normalized.TrimStart('/');
+        return string.IsNullOrWhiteSpace(normalized) ? null : $"/api/files/sessions/{normalized}";
+    }
+
+    private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
+    {
+        value = null;
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            value = property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString()
+                : property.Value.GetRawText();
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryExtractSnapshotImageUrl(string toolContent, out string imageUrl)
+    {
+        imageUrl = string.Empty;
+        if (string.IsNullOrWhiteSpace(toolContent))
+        {
+            return false;
+        }
+
+        if (!TryParseToolResultJson(toolContent, out var rootElement))
+        {
+            return false;
+        }
+
+        if (!TryGetJsonString(rootElement, "action", out var action) ||
+            string.IsNullOrWhiteSpace(action))
+        {
+            return false;
+        }
+
+        if (!string.Equals(action, "snapshot", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(action, "capture", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!TryGetJsonString(rootElement, "imagePath", out var imagePath) ||
+            string.IsNullOrWhiteSpace(imagePath))
+        {
+            return false;
+        }
+
+        var resolved = GetSnapshotUrl(imagePath);
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            return false;
+        }
+
+        imageUrl = resolved;
+        return true;
+    }
+
+    private static bool TryParseToolResultJson(string raw, out JsonElement rootElement)
+    {
+        rootElement = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var normalized = raw.Trim();
+        if (!TryParseJsonWithRepair(normalized, out var firstPass))
+        {
+            return false;
+        }
+
+        if (firstPass.ValueKind == JsonValueKind.String)
+        {
+            var inner = firstPass.GetString();
+            if (string.IsNullOrWhiteSpace(inner))
+            {
+                return false;
+            }
+
+            return TryParseJsonWithRepair(inner, out rootElement) && rootElement.ValueKind == JsonValueKind.Object;
+        }
+
+        if (firstPass.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        rootElement = firstPass;
+        return true;
+    }
+
+    private static bool TryParseJsonWithRepair(string raw, out JsonElement rootElement)
+    {
+        rootElement = default;
+        var normalized = raw.Trim();
+
+        try
+        {
+            rootElement = JsonSerializer.Deserialize<JsonElement>(normalized);
+            return true;
+        }
+        catch (JsonException)
+        {
+            if (!normalized.Contains("\\u0022", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            try
+            {
+                rootElement = JsonSerializer.Deserialize<JsonElement>(normalized.Replace("\\u0022", "\""));
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    private static string WrapToolHintAsHtml(string toolHint)
+    {
+        var normalized = toolHint.Trim();
+        var encoded = WebUtility.HtmlEncode(normalized);
+        return $"<div class=\"nb-tool-hint\">{encoded}</div>";
+    }
+
+    private static bool TryExtractSessionImages(JsonElement message, out List<SessionImageItem> images)
+    {
+        images = [];
+        if (!message.TryGetProperty("images", out var imagesElement) || imagesElement.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (var image in imagesElement.EnumerateArray())
+        {
+            var originalUrl = image.TryGetProperty("original_url", out var originalElement)
+                ? originalElement.GetString() ?? string.Empty
+                : string.Empty;
+            var thumbnailUrl = image.TryGetProperty("thumbnail_url", out var thumbnailElement)
+                ? thumbnailElement.GetString() ?? string.Empty
+                : string.Empty;
+            var summary = image.TryGetProperty("summary", out var summaryElement)
+                ? summaryElement.GetString() ?? string.Empty
+                : string.Empty;
+            var width = image.TryGetProperty("width", out var widthElement) && widthElement.ValueKind == JsonValueKind.Number
+                ? widthElement.GetInt32()
+                : 0;
+            var height = image.TryGetProperty("height", out var heightElement) && heightElement.ValueKind == JsonValueKind.Number
+                ? heightElement.GetInt32()
+                : 0;
+            var contentType = image.TryGetProperty("content_type", out var contentTypeElement)
+                ? contentTypeElement.GetString() ?? string.Empty
+                : string.Empty;
+            var fileSize = image.TryGetProperty("file_size", out var fileSizeElement) && fileSizeElement.ValueKind == JsonValueKind.Number
+                ? fileSizeElement.GetInt64()
+                : 0;
+
+            if (string.IsNullOrWhiteSpace(originalUrl) || string.IsNullOrWhiteSpace(thumbnailUrl))
+            {
+                continue;
+            }
+
+            images.Add(new SessionImageItem(
+                OriginalUrl: originalUrl,
+                ThumbnailUrl: thumbnailUrl,
+                Summary: summary,
+                Width: width,
+                Height: height,
+                ContentType: contentType,
+                FileSize: fileSize));
+        }
+
+        return images.Count > 0;
+    }
+
+    private static string AppendImageSummaries(string content, List<SessionImageItem> images)
+    {
+        if (images.Count == 0)
+        {
+            return content;
+        }
+
+        var blocks = images
+            .Select(image =>
+            {
+                var summary = string.IsNullOrWhiteSpace(image.Summary) ? "未提供概述" : image.Summary;
+                var encoded = WebUtility.HtmlEncode(summary);
+                return $"<div class=\"nb-image-summary\">图片概述：{encoded}</div>";
+            });
+
+        var summaryBlock = string.Join("\n", blocks);
+        return string.IsNullOrWhiteSpace(content) ? summaryBlock : $"{content}\n\n{summaryBlock}";
     }
 }

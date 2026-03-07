@@ -7,7 +7,6 @@ using NanoBot.Core.Configuration;
 using NanoBot.Core.Configuration.Validators;
 using NanoBot.Core.Sessions;
 using System.Globalization;
-using Blazored.LocalStorage;
 using Microsoft.AspNetCore.Localization;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -64,8 +63,6 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
-
-builder.Services.AddBlazoredLocalStorage();
 
 builder.Services.AddCors(options =>
 {

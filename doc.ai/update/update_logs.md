@@ -15,3 +15,22 @@
 - 增加 sessionKey 兜底：snapshot 在缺失 sessionKey 时自动使用 `fallback:{profile}` 保存截图，避免因上下文缺失导致不落盘。
 - 增强注入可观测性：在 AgentRuntime 增加 snapshot markdown 注入日志，并为图片块添加前后空行，降低与工具提示文本相互影响的概率。
 - 新增回归测试：`BrowserService_SnapshotWithoutSessionKey_UsesFallbackAndSavesScreenshot`，验证无 sessionKey 场景仍可落盘并生成可访问相对路径。
+
+# 2026-03-06
+
+- 修复 snapshot 消息展示：移除 `snapshot-file-*` 本地路径文本输出，图片消息仅保留 Markdown 图片块并与后续文本使用空行分隔。
+- 修复会话重载一致性：WebUI 重载时将 `tool_calls` 重建为工具提示文本，隐藏非 snapshot 的 tool JSON 结果，并合并连续 assistant/tool 消息为单气泡。
+- 修复消息时间回放：重载消息优先读取 jsonl 中的 `timestamp`，避免刷新后时间全部变为当前时间。
+- 修复流式中断落盘：`ProcessDirectStreamingAsync` 在 `finally` 中持久化会话，确保取消/异常场景下已产生内容可被重载恢复。
+- 修复截图目录归属：browser 工具对空白 `sessionKey` 回退上下文会话键，`BrowserService` 对 `webui:{sessionId}` 归一化为 `{sessionId}/screenshots` 目录，避免写入 `fallback_openclaw`。
+- 统一工具提示分段渲染：流式注入与历史回放均改为 `nb-tool-hint` HTML 块，避免 Markdown 软换行吞并造成工具调用与正文粘连。
+- 收紧 tool 结果回放策略：重载时仅保留 snapshot/capture 对应图片，其他 tool 纯文本与错误内容不再回放到对话气泡，提升与实时视图一致性。
+- 修复重载图片丢失：会话回放解析 tool 结果时新增双层 JSON 与 `\u0022` 转义修复，兼容 `"{\"action\":\"snapshot\"...}"` 与 `{\\u0022action\\u0022...}` 格式并正确提取 `imagePath`。
+
+# 2026-03-07
+
+- 修复多模态图片注入：AgentRuntime 解析用户消息中的 Markdown 图片 URL，并将会话本地图片作为二进制内容附加到用户消息，确保模型可真实接收图片输入。
+- 优化历史会话图片持久化：SessionManager 在保存用户消息时自动生成缩略图，历史记录中将原图替换为“缩略图可点击打开原图”的 Markdown 链接。
+- 增强历史图片元数据：SessionManager 为消息新增 `images` 元数据字段，记录原图 URL、缩略图 URL、概述摘要、尺寸、MIME 与文件大小。
+- 增强历史回放展示：SessionService 解析 `images` 元数据并在消息中追加“图片概述”展示块，同时将图片元数据映射到消息附件结构。
+- 优化聊天图片展示尺寸：Markdown 图片样式新增 `max-height` 与 `object-fit` 限制，避免对话中按原图尺寸撑开界面。

@@ -9,4 +9,5 @@ public class AttachmentInfo
     public string RelativePath { get; set; } = string.Empty;
     public long FileSize { get; set; }
     public string Url { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
 }

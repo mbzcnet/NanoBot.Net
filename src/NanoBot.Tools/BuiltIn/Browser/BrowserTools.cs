@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using NanoBot.Core.Tools;
@@ -7,6 +8,12 @@ namespace NanoBot.Tools.BuiltIn;
 
 public static class BrowserTools
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     public static void SetCurrentSessionKey(string? sessionKey)
     {
         ToolExecutionContext.SetCurrentSessionKey(sessionKey);
@@ -51,47 +58,49 @@ public static class BrowserTools
         var resolvedAction = action?.Trim().ToLowerInvariant();
         var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
 
-        var resolvedSessionKey = sessionKey ?? ToolExecutionContext.CurrentSessionKey;
+        var resolvedSessionKey = string.IsNullOrWhiteSpace(sessionKey)
+            ? ToolExecutionContext.CurrentSessionKey
+            : sessionKey.Trim();
 
         try
         {
             return resolvedAction switch
             {
-                "status" => JsonSerializer.Serialize(await browserService.GetStatusAsync(resolvedProfile)),
-                "start" => JsonSerializer.Serialize(await browserService.StartAsync(resolvedProfile)),
-                "stop" => JsonSerializer.Serialize(await browserService.StopAsync(resolvedProfile)),
+                "status" => JsonSerializer.Serialize(await browserService.GetStatusAsync(resolvedProfile), JsonOptions),
+                "start" => JsonSerializer.Serialize(await browserService.StartAsync(resolvedProfile), JsonOptions),
+                "stop" => JsonSerializer.Serialize(await browserService.StopAsync(resolvedProfile), JsonOptions),
                 "tabs" => JsonSerializer.Serialize(new BrowserToolResponse
                 {
                     Ok = true,
                     Action = "tabs",
                     Profile = resolvedProfile,
                     Tabs = await browserService.GetTabsAsync(resolvedProfile)
-                }),
+                }, JsonOptions),
                 "open" => JsonSerializer.Serialize(await browserService.OpenTabAsync(
                     targetUrl ?? string.Empty,
-                    resolvedProfile)),
+                    resolvedProfile), JsonOptions),
                 "navigate" => JsonSerializer.Serialize(await browserService.NavigateAsync(
                     Require(targetId, "targetId"),
                     targetUrl ?? string.Empty,
-                    resolvedProfile)),
+                    resolvedProfile), JsonOptions),
                 "close" => JsonSerializer.Serialize(await browserService.CloseTabAsync(
                     Require(targetId, "targetId"),
-                    resolvedProfile)),
+                    resolvedProfile), JsonOptions),
                 "snapshot" => JsonSerializer.Serialize(await browserService.CaptureSnapshotAsync(
                     Require(targetId, "targetId"),
                     string.IsNullOrWhiteSpace(snapshotFormat) ? "ai" : snapshotFormat,
                     resolvedProfile,
-                    resolvedSessionKey)),
+                    resolvedSessionKey), JsonOptions),
                 "capture" => JsonSerializer.Serialize(await browserService.CaptureSnapshotAsync(
                     Require(targetId, "targetId"),
                     string.IsNullOrWhiteSpace(snapshotFormat) ? "ai" : snapshotFormat,
                     resolvedProfile,
-                    resolvedSessionKey)),
+                    resolvedSessionKey), JsonOptions),
                 "content" => JsonSerializer.Serialize(await browserService.GetContentAsync(
                     Require(targetId, "targetId"),
                     selector,
                     maxChars,
-                    resolvedProfile)),
+                    resolvedProfile), JsonOptions),
                 "act" => JsonSerializer.Serialize(await browserService.ExecuteActionAsync(
                     new BrowserActionRequest
                     {
@@ -105,7 +114,7 @@ public static class BrowserTools
                         LoadState = loadState
                     },
                     Require(targetId, "targetId"),
-                    resolvedProfile)),
+                    resolvedProfile), JsonOptions),
                 _ => $"Error: Unknown action: {action}"
             };
         }

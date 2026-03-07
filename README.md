@@ -86,15 +86,16 @@ dotnet run --project src/NanoBot.Cli -- --version
 ### 1. Run Configuration Wizard
 
 ```bash
-nbot configure
+nbot config -i
 ```
 
 This launches an interactive wizard to set up your LLM provider and API key.
 
-For non-interactive setup:
+For non-interactive setup, use `nbot config --set`:
 
 ```bash
-nbot configure --non-interactive --provider openai --api-key YOUR_API_KEY
+nbot config --set llm.profiles.default.provider=openai
+nbot config --set llm.profiles.default.apikey=YOUR_API_KEY
 ```
 
 ### 2. Start Chatting
@@ -109,7 +110,7 @@ Or send a single message:
 nbot agent -m "Hello, what can you do?"
 ```
 
-> **Note**: If configuration is incomplete, the agent will prompt you to run `nbot configure` first.
+> **Note**: If configuration is incomplete, the agent will prompt you to run `nbot config -i` first.
 
 ### 3. Launch the WebUI
 
@@ -119,32 +120,32 @@ nbot webui
 
 This command boots the Blazor-based WebUI. Useful options:
 
-- `-p, --port <number>`: change the listening port (default `5000`).
+- `-p, --port <number>`: change the listening port (default `18888`).
 - `-c, --config <path>`: specify a custom configuration file (defaults to `~/.nbot/config.json`).
 - `--no-browser`: skip automatically opening the browser (helpful on headless servers).
 
 If you prefer running directly from source without installing the global tool:
 
 ```bash
-dotnet run --project src/NanoBot.Cli -- webui --port 5073
+dotnet run --project src/NanoBot.Cli -- webui --port 18888
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `nbot configure` | Interactive configuration wizard |
-| `nbot configure -p openai -k YOUR_KEY` | Quick non-interactive setup |
-| `nbot onboard` | Initialize workspace (legacy) |
+| `nbot onboard` | Initialize workspace |
 | `nbot agent` | Start interactive chat |
 | `nbot agent -m "..."` | Send a single message |
-| `nbot webui` | Start the WebUI server (see options above) |
+| `nbot webui` | Start the WebUI server |
 | `nbot gateway` | Start gateway service mode |
 | `nbot status` | Show agent status |
 | `nbot config` | Manage configuration |
 | `nbot session` | Manage sessions |
 | `nbot cron` | Manage scheduled tasks |
 | `nbot mcp` | Manage MCP servers |
+| `nbot channels` | Manage channels |
+| `nbot provider` | Manage OAuth providers |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
@@ -155,7 +156,7 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 The easiest way to configure NanoBot.Net is using the interactive wizard:
 
 ```bash
-nbot configure
+nbot config -i
 ```
 
 This will guide you through:
@@ -164,18 +165,16 @@ This will guide you through:
 3. **API Key** - Secure input with masking (or use environment variables)
 4. **Workspace Path** - Where to store sessions and memory
 
-For CI/CD or scripts, use non-interactive mode:
+For CI/CD or scripts, set values directly:
 
 ```bash
-# Minimal setup
-nbot configure --non-interactive --provider openai --api-key YOUR_KEY
+# Set LLM profile
+nbot config --set llm.profiles.default.provider=openai
+nbot config --set llm.profiles.default.model=gpt-4o-mini
+nbot config --set llm.profiles.default.apikey=YOUR_KEY
 
-# Full setup
-nbot configure --non-interactive \
-  --provider openrouter \
-  --model anthropic/claude-3.5-sonnet \
-  --api-key YOUR_KEY \
-  --workspace ~/my-workspace
+# Or view current config
+nbot config --list
 ```
 
 ### Configuration Loading

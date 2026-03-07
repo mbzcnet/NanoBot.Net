@@ -69,9 +69,11 @@
             <div class="nb-composer-shell">
                 <div class="nb-composer-main">
                     <MudTextField @bind-Value="_inputMessage"
-                                  Placeholder="输入消息..."
+                                  Placeholder="输入消息... (Shift+Enter 换行)"
                                   Variant="Variant.Text"
-                                  Lines="1"
+                                  Lines="3"
+                                  MaxLines="8"
+                                  AutoGrow="true"
                                   Class="nb-composer-input"
                                   Disabled="@_isGenerating"
                                   OnKeyDown="HandleKeyDown"
@@ -546,10 +548,12 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
+        // Enter 发送消息，Shift+Enter 换行（不发送）
         if (e.Key == "Enter" && !e.ShiftKey)
         {
             await SendMessage();
         }
+        // Shift+Enter 时只阻止发送，让 MudTextField 处理换行
     }
 
     private async Task ScrollToBottom()

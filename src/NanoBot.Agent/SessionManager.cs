@@ -1,10 +1,13 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Extensions;
 using NanoBot.Core.Workspace;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Processing;
 
 namespace NanoBot.Agent;
 
@@ -37,6 +40,7 @@ public record SessionFileInfo(
 
 public sealed class SessionManager : ISessionManager
 {
+    private static readonly Regex MarkdownImageRegex = new(@"!\[(?<alt>[^\]]*)\]\((?<url>[^)\s]+)(?:\s+""(?<title>[^""]*)"")?\)", RegexOptions.Compiled);
     private readonly ChatClientAgent _agent;
     private readonly IWorkspaceManager _workspace;
     private readonly ILogger<SessionManager>? _logger;
@@ -47,6 +51,15 @@ public sealed class SessionManager : ISessionManager
     private readonly string _legacySessionsDirectory;
 
     private readonly Dictionary<string, int> _lastConsolidatedBySessionKey;
+
+    private sealed record SessionImageMetadata(
+        string OriginalUrl,
+        string ThumbnailUrl,
+        string Summary,
+        int Width,
+        int Height,
+        string ContentType,
+        long FileSize);
 
     public SessionManager(
         ChatClientAgent agent,
@@ -61,7 +74,8 @@ public sealed class SessionManager : ISessionManager
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false
+            WriteIndented = false,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
         _sessionsDirectory = _workspace.GetSessionsPath();
 
@@ -527,8 +541,12 @@ public sealed class SessionManager : ISessionManager
             }
         }
         
-        // 确保 content 不为 null，否则 JsonObject 会抛出异常或序列化为 null
         content ??= string.Empty;
+        List<SessionImageMetadata>? sessionImages = null;
+        if (role == "user" && !string.IsNullOrWhiteSpace(content))
+        {
+            content = BuildHistoryImageContent(content, out sessionImages);
+        }
 
         var obj = new JsonObject
         {
@@ -552,6 +570,186 @@ public sealed class SessionManager : ISessionManager
             obj["name"] = name;
         }
 
+        if (sessionImages is { Count: > 0 })
+        {
+            var imagesArray = new JsonArray();
+            foreach (var image in sessionImages)
+            {
+                imagesArray.Add(new JsonObject
+                {
+                    ["original_url"] = image.OriginalUrl,
+                    ["thumbnail_url"] = image.ThumbnailUrl,
+                    ["summary"] = image.Summary,
+                    ["width"] = image.Width,
+                    ["height"] = image.Height,
+                    ["content_type"] = image.ContentType,
+                    ["file_size"] = image.FileSize
+                });
+            }
+
+            obj["images"] = imagesArray;
+        }
+
         return obj;
+    }
+
+    private string BuildHistoryImageContent(string content, out List<SessionImageMetadata>? metadataList)
+    {
+        metadataList = null;
+        var matches = MarkdownImageRegex.Matches(content);
+        if (matches.Count == 0)
+        {
+            return content;
+        }
+
+        var updatedContent = content;
+        var images = new List<SessionImageMetadata>();
+        foreach (Match match in matches)
+        {
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var fullMatch = match.Value;
+            var alt = match.Groups["alt"].Value;
+            var title = match.Groups["title"].Value;
+            var url = match.Groups["url"].Value.Trim();
+            if (!TryCreateThumbnail(url, alt, title, out var metadata))
+            {
+                continue;
+            }
+
+            var linkText = string.IsNullOrWhiteSpace(alt) ? "图片" : alt;
+            var replacement = $"[![{linkText}]({metadata.ThumbnailUrl})]({metadata.OriginalUrl})";
+            updatedContent = updatedContent.Replace(fullMatch, replacement, StringComparison.Ordinal);
+            images.Add(metadata);
+        }
+
+        metadataList = images.Count == 0 ? null : images;
+        return updatedContent;
+    }
+
+    private bool TryCreateThumbnail(string imageUrl, string alt, string title, out SessionImageMetadata metadata)
+    {
+        metadata = default!;
+        if (!TryResolveSessionImagePath(imageUrl, out var fullPath, out var relativePath))
+        {
+            return false;
+        }
+
+        if (!File.Exists(fullPath))
+        {
+            return false;
+        }
+
+        var sessionsRoot = _workspace.GetSessionsPath();
+        var sessionId = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var image = Image.Load(fullPath);
+            var width = image.Width;
+            var height = image.Height;
+            var maxEdge = Math.Max(width, height);
+            var ratio = maxEdge <= 320 ? 1d : 320d / maxEdge;
+            var newWidth = Math.Max(1, (int)Math.Round(width * ratio));
+            var newHeight = Math.Max(1, (int)Math.Round(height * ratio));
+
+            var thumbFileName = $"{Path.GetFileNameWithoutExtension(fullPath)}_thumb.jpg";
+            var thumbRelative = Path.Combine(sessionId, "thumbnails", thumbFileName).Replace('\\', '/');
+            var thumbFullPath = Path.Combine(sessionsRoot, thumbRelative.Replace('/', Path.DirectorySeparatorChar));
+
+            var thumbDirectory = Path.GetDirectoryName(thumbFullPath);
+            if (!string.IsNullOrWhiteSpace(thumbDirectory))
+            {
+                Directory.CreateDirectory(thumbDirectory);
+            }
+
+            if (!File.Exists(thumbFullPath))
+            {
+                image.Mutate(ctx => ctx.Resize(newWidth, newHeight));
+                image.SaveAsJpeg(thumbFullPath);
+            }
+
+            var summaryText = !string.IsNullOrWhiteSpace(alt)
+                ? alt
+                : !string.IsNullOrWhiteSpace(title)
+                    ? title
+                    : $"图片 {Path.GetFileName(fullPath)}（{width}×{height}）";
+
+            var fileSize = new FileInfo(fullPath).Length;
+            metadata = new SessionImageMetadata(
+                OriginalUrl: ToSessionFileUrl(relativePath),
+                ThumbnailUrl: ToSessionFileUrl(thumbRelative),
+                Summary: summaryText,
+                Width: width,
+                Height: height,
+                ContentType: GetContentType(fullPath),
+                FileSize: fileSize);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to create thumbnail for session image {ImageUrl}", imageUrl);
+            return false;
+        }
+    }
+
+    private bool TryResolveSessionImagePath(string imageUrl, out string fullPath, out string relativePath)
+    {
+        fullPath = string.Empty;
+        relativePath = string.Empty;
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return false;
+        }
+
+        var raw = imageUrl.Trim();
+        if (raw.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            relativePath = raw["/api/files/sessions/".Length..].TrimStart('/');
+            fullPath = Path.Combine(_workspace.GetSessionsPath(), relativePath.Replace('/', Path.DirectorySeparatorChar));
+            return true;
+        }
+
+        if (Path.IsPathRooted(raw))
+        {
+            var sessionsRoot = _workspace.GetSessionsPath();
+            if (!raw.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            fullPath = raw;
+            relativePath = Path.GetRelativePath(sessionsRoot, raw).Replace('\\', '/');
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string GetContentType(string filePath)
+    {
+        return Path.GetExtension(filePath).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" => "image/jpeg",
+            ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private static string ToSessionFileUrl(string relativePath)
+    {
+        return $"/api/files/sessions/{relativePath.Replace('\\', '/')}";
     }
 }

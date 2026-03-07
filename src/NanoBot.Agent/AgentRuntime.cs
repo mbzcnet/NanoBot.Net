@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,6 +33,7 @@ public interface IAgentRuntime
 
 public sealed class AgentRuntime : IAgentRuntime, IDisposable
 {
+    private static readonly Regex MarkdownImageRegex = new(@"!\[(?<alt>[^\]]*)\]\((?<url>[^)\s]+)(?:\s+""[^""]*"")?\)", RegexOptions.Compiled);
     private readonly ChatClientAgent _defaultAgent;
     private readonly IMessageBus _bus;
     private readonly ISessionManager _sessionManager;
@@ -255,7 +258,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         _sessionTokens.AddOrUpdate(sessionKey, _ => sessionCts, (_, _) => sessionCts);
 
         sw.Restart();
-        var userMessage = new ChatMessage(ChatRole.User, content);
+        var userMessage = BuildUserMessage(content);
         userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
         _logger?.LogInformation("[DEBUG] Created user message with content length: {Length}, source type: External", content.Length);
         _logger?.LogInformation("[TIMING] Create user message: {ElapsedMs}ms", sw.ElapsedMilliseconds);
@@ -266,36 +269,40 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         sw.Restart();
         _logger?.LogInformation("[TIMING] About to call GetAgentForSession and RunStreamingAsync...");
 
-        await foreach (var update in StreamWithToolHintsAsync(session, userMessage, sessionKey, sessionCts.Token))
-        {
-            yield return update;
-        }
-
-        _sessionTokens.TryRemove(sessionKey, out _);
-        sessionCts.Dispose();
-
-        sw.Stop();
-        _logger?.LogInformation("[TIMING] RunStreamingAsync completed: {ElapsedMs}ms", sw.ElapsedMilliseconds);
-
-        // 保存会话到文件
         try
         {
-            await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-            _logger?.LogInformation("[TIMING] Session saved after streaming");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to save session after streaming for {SessionKey}", sessionKey);
-        }
+            await foreach (var update in StreamWithToolHintsAsync(session, userMessage, sessionKey, sessionCts.Token))
+            {
+                yield return update;
+            }
 
-        _ = TryConsolidateMemoryAsync(session, sessionKey, CancellationToken.None).ContinueWith(t =>
+            sw.Stop();
+            _logger?.LogInformation("[TIMING] RunStreamingAsync completed: {ElapsedMs}ms", sw.ElapsedMilliseconds);
+        }
+        finally
         {
-            if (t.IsFaulted)
-                _logger?.LogWarning(t.Exception, "Background memory consolidation failed");
-        }, TaskContinuationOptions.OnlyOnFaulted);
+            _sessionTokens.TryRemove(sessionKey, out _);
+            sessionCts.Dispose();
 
-        swTotal.Stop();
-        _logger?.LogInformation("[TIMING] ProcessDirectStreamingAsync total: {ElapsedMs}ms", swTotal.ElapsedMilliseconds);
+            try
+            {
+                await _sessionManager.SaveSessionAsync(session, sessionKey, CancellationToken.None);
+                _logger?.LogInformation("[TIMING] Session saved after streaming");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Failed to save session after streaming for {SessionKey}", sessionKey);
+            }
+
+            _ = TryConsolidateMemoryAsync(session, sessionKey, CancellationToken.None).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                    _logger?.LogWarning(t.Exception, "Background memory consolidation failed");
+            }, TaskContinuationOptions.OnlyOnFaulted);
+
+            swTotal.Stop();
+            _logger?.LogInformation("[TIMING] ProcessDirectStreamingAsync total: {ElapsedMs}ms", swTotal.ElapsedMilliseconds);
+        }
     }
 
     private async IAsyncEnumerable<AgentResponseUpdate> StreamWithToolHintsAsync(
@@ -330,10 +337,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
                     if (!string.IsNullOrEmpty(toolHint))
                     {
+                        var toolHintHtml = WrapToolHintAsHtml(toolHint);
                         var toolHintUpdate = new AgentResponseUpdate
                         {
                             Role = ChatRole.Assistant,
-                            Contents = { new TextContent(toolHint) },
+                            Contents = { new TextContent(toolHintHtml) },
                             AdditionalProperties = new()
                         };
                         toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
@@ -402,21 +410,12 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _sessionTokens.AddOrUpdate(sessionKey, _ => sessionCts, (_, _) => sessionCts);
 
-        var userMessage = new ChatMessage(ChatRole.User, msg.Content);
+        var imageUrls = msg.Media?.Where(static m => !string.IsNullOrWhiteSpace(m)).ToArray();
+        var userMessage = BuildUserMessage(msg.Content, imageUrls);
         userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
 
         // 自动提取标题：如果是第一条用户消息，使用消息内容作为标题
         await TryAutoSetSessionTitleAsync(session, sessionKey, msg.Content, cancellationToken);
-
-        if (msg.Media != null && msg.Media.Count > 0)
-        {
-            var contents = new List<AIContent> { new TextContent(msg.Content) };
-            foreach (var mediaPath in msg.Media)
-            {
-                contents.Add(new TextContent($"[Media: {mediaPath}]"));
-            }
-            userMessage = new ChatMessage(ChatRole.User, contents);
-        }
 
         AgentResponse response;
         ToolExecutionContext.SetCurrentSessionKey(sessionKey);
@@ -471,7 +470,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
     private string? BuildSnapshotImageMarkdown(IEnumerable<AIContent> contents)
     {
-        var images = new List<(string Url, string LocalPath)>();
+        var images = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var content in contents)
@@ -528,15 +527,21 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             var lines = new List<string>();
             for (var i = 0; i < images.Count; i++)
             {
-                var (url, localPath) = images[i];
+                var url = images[i];
                 lines.Add($"![snapshot-{i + 1}]({url})");
-                lines.Add($"snapshot-file-{i + 1}: {localPath}");
             }
 
-            return $"\n\n{string.Join("\n", lines)}\n\n";
+            return $"\n\n{string.Join("\n\n", lines)}\n\n";
         }
 
-    private void ProcessSnapshotJsonElement(JsonElement rootElement, HashSet<string> seen, List<(string Url, string LocalPath)> images)
+    private static string WrapToolHintAsHtml(string toolHint)
+    {
+        var normalized = toolHint.Trim();
+        var encoded = WebUtility.HtmlEncode(normalized);
+        return $"\n\n<div class=\"nb-tool-hint\">{encoded}</div>\n\n";
+    }
+
+    private void ProcessSnapshotJsonElement(JsonElement rootElement, HashSet<string> seen, List<string> images)
     {
         // Skip if the payload is not a JSON object
         if (rootElement.ValueKind != JsonValueKind.Object)
@@ -564,13 +569,12 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         }
 
         var imageUrl = ToSessionFileUrl(imagePath);
-        var localPath = ToLocalSessionFilePath(imagePath);
         if (string.IsNullOrWhiteSpace(imageUrl) || !seen.Add(imageUrl))
         {
             return;
         }
 
-        images.Add((imageUrl, localPath ?? imagePath));
+        images.Add(imageUrl);
     }
 
     private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
@@ -664,8 +668,20 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             return null;
         }
 
+        if (imagePath.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
+        {
+            var relative = imagePath["/api/files/sessions/".Length..].TrimStart('/');
+            return Path.Combine(_workspace.GetSessionsPath(), relative.Replace('/', Path.DirectorySeparatorChar));
+        }
+
         if (Path.IsPathRooted(imagePath))
         {
+            var rootPath = _workspace.GetSessionsPath();
+            if (!imagePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
             return imagePath;
         }
 
@@ -677,6 +693,112 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         var sessionsRoot = _workspace.GetSessionsPath();
         return Path.Combine(sessionsRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
+    }
+
+    private ChatMessage BuildUserMessage(string content, IEnumerable<string>? extraImageUrls = null)
+    {
+        var contents = new List<AIContent>();
+        if (!string.IsNullOrWhiteSpace(content))
+        {
+            contents.Add(new TextContent(content));
+        }
+
+        var imageUrls = ExtractMarkdownImageUrls(content);
+        if (extraImageUrls != null)
+        {
+            imageUrls.AddRange(extraImageUrls.Where(static u => !string.IsNullOrWhiteSpace(u)));
+        }
+
+        foreach (var imageUrl in imageUrls.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!TryLoadImageContent(imageUrl, out var imageContent))
+            {
+                continue;
+            }
+
+            contents.Add(imageContent);
+        }
+
+        return contents.Count switch
+        {
+            0 => new ChatMessage(ChatRole.User, string.Empty),
+            1 when contents[0] is TextContent text => new ChatMessage(ChatRole.User, text.Text),
+            _ => new ChatMessage(ChatRole.User, contents)
+        };
+    }
+
+    private List<string> ExtractMarkdownImageUrls(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return [];
+        }
+
+        var urls = new List<string>();
+        var matches = MarkdownImageRegex.Matches(content);
+        foreach (Match match in matches)
+        {
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var url = match.Groups["url"].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                urls.Add(url);
+            }
+        }
+
+        return urls;
+    }
+
+    private bool TryLoadImageContent(string imageUrl, out DataContent imageContent)
+    {
+        imageContent = default!;
+        if (string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return false;
+        }
+
+        var localPath = ToLocalSessionFilePath(imageUrl);
+        if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            var bytes = File.ReadAllBytes(localPath);
+            if (bytes.Length == 0)
+            {
+                return false;
+            }
+
+            var mediaType = GetImageMediaType(localPath);
+            imageContent = new DataContent(bytes, mediaType);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to load image content for LLM request: {ImageUrl}", imageUrl);
+            return false;
+        }
+    }
+
+    private string GetImageMediaType(string path)
+    {
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" => "image/jpeg",
+            ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "image/png"
+        };
     }
 
     private async Task<OutboundMessage?> ProcessSystemMessageAsync(

@@ -570,7 +570,13 @@ public sealed class BrowserService : IBrowserService
 
     private string GetSessionScreenshotsPath(string sessionKey)
     {
-        var safeKey = sessionKey.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
+        var normalizedSessionFolder = sessionKey;
+        if (sessionKey.StartsWith("webui:", StringComparison.OrdinalIgnoreCase))
+        {
+            normalizedSessionFolder = sessionKey["webui:".Length..];
+        }
+
+        var safeKey = normalizedSessionFolder.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
         foreach (var c in Path.GetInvalidFileNameChars())
         {
             safeKey = safeKey.Replace(c, '_');

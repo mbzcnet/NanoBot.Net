@@ -36,6 +36,10 @@ public class MemoryContextProvider : AIContextProvider
             {
                 memoryContent = await _memoryStore.LoadAsync(cancellationToken);
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger?.LogWarning(ex, "Failed to load memory from IMemoryStore");
@@ -54,6 +58,10 @@ public class MemoryContextProvider : AIContextProvider
             try
             {
                 memoryContent = await File.ReadAllTextAsync(memoryPath, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
