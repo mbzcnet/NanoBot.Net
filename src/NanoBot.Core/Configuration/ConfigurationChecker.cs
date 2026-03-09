@@ -165,12 +165,20 @@ public static class ConfigurationChecker
             };
         }
 
+        // 检查是否有配置的 LLM profile
+        var hasProfiles = config.Llm.Profiles.Count > 0;
         var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
         var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
-        
+
         var hasModel = profile != null && !string.IsNullOrWhiteSpace(profile.Model);
         var hasProvider = profile != null && !string.IsNullOrWhiteSpace(profile.Provider);
         var hasApiKey = CheckApiKey(config, profileName);
+
+        // 如果没有配置任何 profile，直接返回错误
+        if (!hasProfiles)
+        {
+            missingFields.Add("llm.profiles (no profiles configured)");
+        }
 
         if (!hasModel)
         {
@@ -190,7 +198,7 @@ public static class ConfigurationChecker
         return new ConfigurationCheckResult
         {
             ConfigExists = true,
-            HasValidLlm = hasModel,
+            HasValidLlm = hasModel && hasProfiles,
             HasApiKey = hasApiKey,
             ConfigPath = path,
             MissingFields = missingFields,

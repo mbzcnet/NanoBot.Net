@@ -43,7 +43,11 @@ public class LlmProfileConfigService
         var modelInput = Console.ReadLine()?.Trim();
         profile.Model = string.IsNullOrWhiteSpace(modelInput) ? defaultModel : modelInput;
 
-        if (provider != "ollama")
+        if (provider == "ollama")
+        {
+            profile.ApiKey = "ollama";
+        }
+        else
         {
             var apiKey = await PromptApiKeyAsync(provider, cancellationToken);
             if (apiKey != null)

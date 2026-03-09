@@ -176,13 +176,16 @@ public class OnboardCommand : ICliCommand
         string? apiBase,
         string? workspace)
     {
-        var profileName = config.Llm.DefaultProfile ?? "default";
+        // 如果没有配置 LLM profile，创建 default profile
+        var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
         if (!config.Llm.Profiles.ContainsKey(profileName))
         {
             config.Llm.Profiles[profileName] = new LlmProfile { Name = profileName };
+            config.Llm.DefaultProfile = profileName;
         }
         var profile = config.Llm.Profiles[profileName];
-        
+
+        // 如果提供了 provider，才进行配置
         if (!string.IsNullOrEmpty(provider))
         {
             profile.Provider = provider.ToLowerInvariant();
@@ -292,8 +295,9 @@ public class OnboardCommand : ICliCommand
         if (!hasDefaultProfile)
         {
             Console.WriteLine("No profiles configured yet. Let's create the default profile.\n");
-            var profileName = config.Llm.DefaultProfile ?? "default";
+            var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
             await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
+            config.Llm.DefaultProfile = profileName;
         }
 
         Console.Write("\nConfigure additional profiles? [y/N]: ");
@@ -398,9 +402,16 @@ public class OnboardCommand : ICliCommand
         Console.WriteLine("  • Single message: nbot agent -m \"Hello!\"");
         Console.WriteLine("  • View config: nbot config --list");
 
+        // 如果没有配置 LLM profile，提示用户配置
+        if (string.IsNullOrEmpty(config.Llm.DefaultProfile) || config.Llm.Profiles.Count == 0)
+        {
+            Console.WriteLine("\nNote: No LLM profile configured. Run 'nbot onboard' to configure your LLM provider.");
+            return;
+        }
+
         var profileName = config.Llm.DefaultProfile ?? "default";
         var profile = config.Llm.Profiles.GetValueOrDefault(profileName);
-        
+
         if (profile != null && string.IsNullOrEmpty(profile.ApiKey) && profile.Provider != "ollama")
         {
             var envKey = ConfigurationChecker.ProviderEnvKeys.TryGetValue(profile.Provider ?? "", out var key)
@@ -544,12 +555,16 @@ This file stores important information that should persist across sessions.
         config.WebUI.Server.Host = "127.0.0.1";
         config.WebUI.Server.Port = 18888;
         config.WebUI.Auth.Mode = "token";
-        config.WebUI.Auth.Token = GenerateRandomToken();
+        config.WebUI.Auth.Token = GenerateRandomToken() ?? string.Empty;
         config.WebUI.Auth.AllowLocalhost = true;
         config.WebUI.Cors.AllowedOrigins.Add("http://localhost:18888");
         config.WebUI.Security.EnableHttps = false;
         config.WebUI.Features.FileUpload = true;
         config.WebUI.Features.MaxFileSize = "10MB";
+
+        // 不创建空的 default LLM profile，让用户在 onboard 交互中配置
+        config.Llm.Profiles.Clear();
+        config.Llm.DefaultProfile = null;
 
         return config;
     }

@@ -69,9 +69,8 @@ public class GatewayCommand : ICliCommand
         var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath, cancellationToken);
 
         var services = new ServiceCollection();
-        var configuration = BuildConfiguration(configPath);
 
-        services.AddNanoBot(configuration);
+        services.AddNanoBot(config);
 
         if (verbose)
         {

@@ -28,8 +28,7 @@ public static class Program
         var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath);
 
         var services = new ServiceCollection();
-        var configuration = BuildConfiguration(configPath);
-        services.AddNanoBot(configuration);
+        services.AddNanoBot(config);
 
         var provider = services.BuildServiceProvider();
         NanoBotCommandBase.Initialize(provider, config, configPath);

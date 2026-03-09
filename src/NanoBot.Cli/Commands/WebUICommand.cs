@@ -93,7 +93,23 @@ public class WebUICommand : ICliCommand
             return;
         }
 
-        // 验证WebUI配置
+        // 检查 LLM 配置
+        var configCheck = await ConfigurationChecker.CheckAsync(actualConfigPath, cancellationToken);
+        if (!configCheck.IsReady)
+        {
+            Console.WriteLine();
+            Console.WriteLine("⚠️  LLM configuration is incomplete!");
+            Console.WriteLine("   The following fields are missing:");
+            foreach (var field in configCheck.MissingFields)
+            {
+                Console.WriteLine($"     • {field}");
+            }
+            Console.WriteLine();
+            Console.WriteLine("Please run 'nbot onboard' to configure your LLM provider.");
+            return;
+        }
+
+        // 验证 WebUI 配置
         var validationResult = WebUIConfigValidator.Validate(agentConfig.WebUI);
         if (!validationResult.IsValid)
         {

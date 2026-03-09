@@ -128,6 +128,13 @@ public static class ConfigurationLoader
             config.Workspace.Path = workspace;
         }
 
+        // 确保 default profile 存在
+        if (!config.Llm.Profiles.ContainsKey("default"))
+        {
+            config.Llm.Profiles["default"] = new LlmProfile { Name = "default" };
+            config.Llm.DefaultProfile = "default";
+        }
+
         var model = GetString(agentDefaults, "model") ?? GetString(agentDefaults, "Model");
         if (!string.IsNullOrWhiteSpace(model))
         {

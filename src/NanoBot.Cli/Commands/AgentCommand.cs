@@ -119,7 +119,6 @@ public class AgentCommand : ICliCommand
         var config = await LoadConfigAsync(resolvedConfigPath, cancellationToken);
 
         var services = new ServiceCollection();
-        var configuration = BuildConfiguration(resolvedConfigPath);
 
         // Configure NLog - load from executable directory for correct path when running from any cwd
         var nlogPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
@@ -134,7 +133,7 @@ public class AgentCommand : ICliCommand
             builder.AddNLog();
         });
 
-        services.AddNanoBot(configuration);
+        services.AddNanoBot(config);
 
         if (!showLogs)
         {
@@ -195,6 +194,8 @@ public class AgentCommand : ICliCommand
         Console.WriteLine();
         Console.WriteLine("Or with options (non-interactive):");
         Console.WriteLine("  nbot onboard --non-interactive --provider openai --model gpt-4o-mini --api-key YOUR_KEY");
+        Console.WriteLine();
+        Console.WriteLine("  nbot onboard --non-interactive --provider ollama --model qwen3.5:4b --api-base http://localhost:11434/v1");
     }
 
     private static async Task<AgentConfig> LoadConfigAsync(string? configPath, CancellationToken cancellationToken)

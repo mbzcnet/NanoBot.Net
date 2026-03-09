@@ -338,38 +338,78 @@ public static class ServiceCollectionExtensions
     private static LlmConfig BindLlmConfig(IConfiguration configuration)
     {
         var llm = new LlmConfig();
-        
-        var defaultProfile = new LlmProfile();
 
-        var model = configuration["llm:model"] ?? configuration["llm:Model"];
-        if (!string.IsNullOrEmpty(model))
-            defaultProfile.Model = model;
+        // Read DefaultProfile
+        llm.DefaultProfile = configuration["llm:default_profile"] ?? configuration["llm:DefaultProfile"];
 
-        var apiKey = configuration["llm:api_key"] ?? configuration["llm:ApiKey"] ?? configuration["llm:apiKey"];
-        if (!string.IsNullOrEmpty(apiKey))
-            defaultProfile.ApiKey = apiKey;
+        // Read Profiles section
+        var profilesSection = configuration.GetSection("llm:profiles");
+        foreach (var profileSection in profilesSection.GetChildren())
+        {
+            var profileName = profileSection.Key;
+            var profile = new LlmProfile
+            {
+                Name = profileSection["name"] ?? profileSection["Name"] ?? profileName,
+                Model = profileSection["model"] ?? profileSection["Model"] ?? string.Empty,
+                ApiKey = profileSection["api_key"] ?? profileSection["apiKey"] ?? profileSection["ApiKey"],
+                ApiBase = profileSection["api_base"] ?? profileSection["apiBase"] ?? profileSection["ApiBase"],
+                Provider = profileSection["provider"] ?? profileSection["Provider"],
+                SystemPrompt = profileSection["system_prompt"] ?? profileSection["systemPrompt"] ?? profileSection["SystemPrompt"]
+            };
 
-        var apiBase = configuration["llm:api_base"] ?? configuration["llm:ApiBase"] ?? configuration["llm:apiBase"];
-        if (!string.IsNullOrEmpty(apiBase))
-            defaultProfile.ApiBase = apiBase;
+            if (double.TryParse(profileSection["temperature"] ?? profileSection["Temperature"], out var temp))
+            {
+                profile.Temperature = temp;
+            }
 
-        var provider = configuration["llm:provider"] ?? configuration["llm:Provider"];
-        if (!string.IsNullOrEmpty(provider))
-            defaultProfile.Provider = provider;
+            if (int.TryParse(profileSection["max_tokens"] ?? profileSection["maxTokens"] ?? profileSection["MaxTokens"], out var maxTokens))
+            {
+                profile.MaxTokens = maxTokens;
+            }
 
-        var temperatureStr = configuration["llm:temperature"] ?? configuration["llm:Temperature"];
-        if (double.TryParse(temperatureStr, out var temperature))
-            defaultProfile.Temperature = temperature;
+            llm.Profiles[profileName] = profile;
+        }
 
-        var maxTokensStr = configuration["llm:max_tokens"] ?? configuration["llm:MaxTokens"];
-        if (int.TryParse(maxTokensStr, out var maxTokens))
-            defaultProfile.MaxTokens = maxTokens;
+        // If no profiles were loaded, fallback to flat keys (legacy format)
+        if (llm.Profiles.Count == 0)
+        {
+            var defaultProfile = new LlmProfile
+            {
+                Name = "default"
+            };
 
-        var systemPrompt = configuration["llm:system_prompt"] ?? configuration["llm:SystemPrompt"];
-        if (!string.IsNullOrEmpty(systemPrompt))
-            defaultProfile.SystemPrompt = systemPrompt;
+            var model = configuration["llm:model"] ?? configuration["llm:Model"];
+            if (!string.IsNullOrEmpty(model))
+                defaultProfile.Model = model;
 
-        llm.Profiles["default"] = defaultProfile;
+            var apiKey = configuration["llm:api_key"] ?? configuration["llm:ApiKey"] ?? configuration["llm:apiKey"];
+            if (!string.IsNullOrEmpty(apiKey))
+                defaultProfile.ApiKey = apiKey;
+
+            var apiBase = configuration["llm:api_base"] ?? configuration["llm:ApiBase"] ?? configuration["llm:apiBase"];
+            if (!string.IsNullOrEmpty(apiBase))
+                defaultProfile.ApiBase = apiBase;
+
+            var provider = configuration["llm:provider"] ?? configuration["llm:Provider"];
+            if (!string.IsNullOrEmpty(provider))
+                defaultProfile.Provider = provider;
+
+            var temperatureStr = configuration["llm:temperature"] ?? configuration["llm:Temperature"];
+            if (double.TryParse(temperatureStr, out var temperature))
+                defaultProfile.Temperature = temperature;
+
+            var maxTokensStr = configuration["llm:max_tokens"] ?? configuration["llm:MaxTokens"];
+            if (int.TryParse(maxTokensStr, out var maxTokens))
+                defaultProfile.MaxTokens = maxTokens;
+
+            var systemPrompt = configuration["llm:system_prompt"] ?? configuration["llm:SystemPrompt"];
+            if (!string.IsNullOrEmpty(systemPrompt))
+                defaultProfile.SystemPrompt = systemPrompt;
+
+            llm.Profiles["default"] = defaultProfile;
+            llm.DefaultProfile ??= "default";
+        }
+
         return llm;
     }
 
