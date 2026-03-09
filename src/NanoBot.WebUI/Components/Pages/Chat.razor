@@ -310,6 +310,10 @@
             Timestamp = DateTime.Now
         });
 
+        // 每次发送前创建新的 CancellationTokenSource，确保可以正确取消
+        _cancellationTokenSource?.Dispose();
+        _cancellationTokenSource = new CancellationTokenSource();
+
         _isGenerating = true;
         StateHasChanged();
         await Task.Yield();
@@ -318,7 +322,7 @@
         try
         {
             Logger.LogInformation("Sending message to Agent for session {SessionId}", SessionId);
-            
+
             // 使用流式响应
             var assistantMessage = new ChatMessage
             {
@@ -327,14 +331,14 @@
                 Timestamp = DateTime.Now
             };
             _messages.Add(assistantMessage);
-            
-            await foreach (var chunk in AgentService.SendMessageStreamingAsync(SessionId, userContent, _cancellationTokenSource?.Token ?? default))
+
+            await foreach (var chunk in AgentService.SendMessageStreamingAsync(SessionId, userContent, _cancellationTokenSource.Token))
             {
                 assistantMessage.Content += chunk.Content;
                 StateHasChanged();
                 await Task.Yield();
                 await ScrollToBottom();
-                
+
                 if (chunk.IsComplete)
                 {
                     Logger.LogInformation("Message complete for session {SessionId}", SessionId);
@@ -378,6 +382,8 @@
         }
         finally
         {
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
             _isGenerating = false;
             StateHasChanged();
             await Task.Yield();

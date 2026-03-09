@@ -191,10 +191,24 @@ public class AgentService : IAgentService
     {
         _logger.LogInformation("Stopping generation for session {SessionId}", sessionId);
 
+        // 使用正确的 sessionKey 格式，与 AgentRuntime 保持一致
+        var sessionKey = $"webui:{sessionId}";
+
+        // 取消 AgentService 管理的 CTS
         if (_activeSessions.TryRemove(sessionId, out var cts))
         {
             cts.Cancel();
             cts.Dispose();
+        }
+
+        // 同时尝试取消 AgentRuntime 中的会话
+        try
+        {
+            _agentRuntime.TryCancelSessionAsync(sessionKey).Wait(TimeSpan.FromMilliseconds(100));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to cancel AgentRuntime session {SessionKey}", sessionKey);
         }
     }
 

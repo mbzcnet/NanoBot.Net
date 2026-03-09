@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git submodule status)",
+      "Bash(git rm --cached -r Temp/)",
+      "Bash(git reset HEAD Temp/)",
+      "Bash(git rm --cached Temp/agent-framework Temp/openclaw)",
+      "Bash(git rm --cached -r --ignore-unmatch Temp/)",
+      "Bash(git reset HEAD)"
+    ]
+  }
+}

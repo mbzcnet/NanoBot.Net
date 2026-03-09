@@ -34,3 +34,4 @@
 - 增强历史图片元数据：SessionManager 为消息新增 `images` 元数据字段，记录原图 URL、缩略图 URL、概述摘要、尺寸、MIME 与文件大小。
 - 增强历史回放展示：SessionService 解析 `images` 元数据并在消息中追加“图片概述”展示块，同时将图片元数据映射到消息附件结构。
 - 优化聊天图片展示尺寸：Markdown 图片样式新增 `max-height` 与 `object-fit` 限制，避免对话中按原图尺寸撑开界面。
+- 修复样式未命中问题：MarkdownRenderer 在 CSS 隔离场景下改用 `::deep .markdown-content img` 规则，确保动态渲染的 Markdown 图片也能应用最大高度限制。
