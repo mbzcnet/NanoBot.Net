@@ -337,11 +337,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
                     if (!string.IsNullOrEmpty(toolHint))
                     {
-                        var toolHintHtml = WrapToolHintAsHtml(toolHint);
+                        var toolHintMarkdown = WrapToolHintAsMarkdown(toolHint);
                         var toolHintUpdate = new AgentResponseUpdate
                         {
                             Role = ChatRole.Assistant,
-                            Contents = { new TextContent(toolHintHtml) },
+                            Contents = { new TextContent(toolHintMarkdown) },
                             AdditionalProperties = new()
                         };
                         toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
@@ -534,11 +534,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             return $"\n\n{string.Join("\n\n", lines)}\n\n";
         }
 
-    private static string WrapToolHintAsHtml(string toolHint)
+    private static string WrapToolHintAsMarkdown(string toolHint)
     {
-        var normalized = toolHint.Trim();
-        var encoded = WebUtility.HtmlEncode(normalized);
-        return $"\n\n<div class=\"nb-tool-hint\">{encoded}</div>\n\n";
+        // 直接返回 Markdown 格式
+        // 格式: [TABLET_TOOL_CALL]tool_name("args")|||tool_name2("args")[/TABLET_TOOL_CALL]
+        return $"\n{toolHint}\n";
     }
 
     private void ProcessSnapshotJsonElement(JsonElement rootElement, HashSet<string> seen, List<string> images)

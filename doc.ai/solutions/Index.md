@@ -18,6 +18,7 @@
 | [CLI.md](./design/CLI.md)                       | **CLI 命令层**：CLI 命令接口、命令清单                                                        | 开发者 G   |
 | [Installation.md](./design/Installation.md)     | **安装程序**：Homebrew、Winget、安装脚本、发布配置                                            | DevOps     |
 | [Testing.md](./design/Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
+| [Model-Benchmark.md](./design/Model-Benchmark.md) | **模型评测工具**：模型可用性评测工具设计，测试题库、评分规则、CLI 命令                        | 开发者 H   |
 
 ---
 

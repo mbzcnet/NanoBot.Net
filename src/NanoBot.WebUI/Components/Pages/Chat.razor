@@ -48,18 +48,46 @@
                                     </div>
                                 }
 
-                                @* 显示工具调用信息 *@
+                                @* 显示工具调用信息 (从 AgentService 获取) *@
                                 @if (message.ToolCall != null)
                                 {
                                     <div class="nb-tool-call-display">
                                         <div class="nb-tool-call-header">
                                             <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Class="mr-1" />
-                                            <span>执行命令: @message.ToolCall.Name</span>
+                                            <span>@message.ToolCall.Name</span>
                                         </div>
-                                        @if (!string.IsNullOrEmpty(message.ToolCall.Arguments))
+                                        @if (!string.IsNullOrEmpty(message.ToolCall.Arguments) && message.ToolCall.Arguments != "{}")
                                         {
                                             <div class="nb-tool-call-args">
                                                 <code>@message.ToolCall.Arguments</code>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                @* 显示消息内容 - 先从内容中提取工具调用 *@
+                                @{
+                                    var toolCallsFromContent = ExtractToolCallsFromContent(message.Content);
+                                    var cleanedContent = CleanContent(message.Content);
+                                }
+
+                                @* 显示从内容中提取的工具调用 *@
+                                @if (toolCallsFromContent.Any())
+                                {
+                                    <div class="nb-tool-calls-container">
+                                        @foreach (var toolCall in toolCallsFromContent)
+                                        {
+                                            <div class="nb-tool-call-display">
+                                                <div class="nb-tool-call-header">
+                                                    <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Class="mr-1" />
+                                                    <span>@toolCall.Name</span>
+                                                </div>
+                                                @if (!string.IsNullOrEmpty(toolCall.Arguments) && toolCall.Arguments != "{}")
+                                                {
+                                                    <div class="nb-tool-call-args">
+                                                        <code>@toolCall.Arguments</code>
+                                                    </div>
+                                                }
                                             </div>
                                         }
                                     </div>
@@ -74,10 +102,10 @@
                                         <MessagePartComponent Part="part" />
                                     }
                                 }
-                                else if (!string.IsNullOrEmpty(message.Content))
+                                else if (!string.IsNullOrEmpty(cleanedContent))
                                 {
                                     @* 回退到 Markdown 渲染 *@
-                                    <MarkdownRenderer Content="@message.Content" />
+                                    <MarkdownRenderer Content="@cleanedContent" />
                                 }
                             </div>
                         </div>
@@ -614,6 +642,91 @@
         {
             // ignore scrolling errors
         }
+    }
+
+    /// <summary>
+    /// 从内容中提取工具调用信息
+    /// 格式: [TABLET_TOOL_CALL]tool_name("args")|||tool_name2("args")[/TABLET_TOOL_CALL]
+    /// </summary>
+    private List<ToolCallInfo> ExtractToolCallsFromContent(string content)
+    {
+        var toolCalls = new List<ToolCallInfo>();
+
+        if (string.IsNullOrEmpty(content))
+            return toolCalls;
+
+        // 匹配 [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
+        var pattern = @"\[TABLET_TOOL_CALL\](.*?)\[/TABLET_TOOL_CALL\]";
+        var match = System.Text.RegularExpressions.Regex.Match(content, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        if (match.Success && match.Groups.Count > 1)
+        {
+            var toolCallText = match.Groups[1].Value;
+            var toolParts = toolCallText.Split("|||", StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var part in toolParts)
+            {
+                var trimmed = part.Trim();
+                if (string.IsNullOrEmpty(trimmed))
+                    continue;
+
+                // 解析 tool_name("args") 格式
+                var parseResult = ParseToolCallString(trimmed);
+                if (parseResult != null)
+                {
+                    toolCalls.Add(parseResult);
+                }
+            }
+        }
+
+        return toolCalls;
+    }
+
+    /// <summary>
+    /// 解析工具调用字符串 "tool_name(\"args\")" 或 "tool_name()"
+    /// </summary>
+    private ToolCallInfo? ParseToolCallString(string toolCallStr)
+    {
+        if (string.IsNullOrEmpty(toolCallStr))
+            return null;
+
+        try
+        {
+            // 匹配 tool_name("args") 格式
+            var match = System.Text.RegularExpressions.Regex.Match(
+                toolCallStr,
+                @"^(\w+)\(""([^""]*)""\)$|^(\w+)\(\)$|^(\w+)\(\.\.\.\)$");
+
+            if (match.Success)
+            {
+                string? name = match.Groups[1].Value ?? match.Groups[3].Value ?? match.Groups[4].Value;
+                string? args = match.Groups[2].Success ? match.Groups[2].Value : null;
+
+                if (!string.IsNullOrEmpty(name))
+                {
+                    return new ToolCallInfo(name, args ?? "{}", null);
+                }
+            }
+        }
+        catch
+        {
+            // 解析失败
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// 清理内容，移除工具调用标记
+    /// </summary>
+    private string CleanContent(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+            return content;
+
+        // 移除 [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
+        var pattern = @"\[TABLET_TOOL_CALL\].*?\[/TABLET_TOOL_CALL\]";
+        return System.Text.RegularExpressions.Regex.Replace(content, pattern, "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
     }
 
     private string GetMessageRowStyle(string role)

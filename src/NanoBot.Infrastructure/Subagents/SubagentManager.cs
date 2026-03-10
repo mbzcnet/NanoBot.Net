@@ -159,7 +159,7 @@ public class SubagentManager : ISubagentManager
             lock (_lock)
             {
                 _cancellationTokens.Remove(id);
-                if (_subagents.TryGetValue(id, out var info))
+                if (_subagents.TryGetValue(id, out _))
                 {
                     _subagents.Remove(id);
                     _completedSubagents[id] = info; // Keep for retrieval

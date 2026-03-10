@@ -195,16 +195,29 @@ public class AgentService : IAgentService
 
     private static string GetUpdateText(Microsoft.Agents.AI.AgentResponseUpdate update)
     {
+        // 首先检查 Text 属性
         if (!string.IsNullOrWhiteSpace(update.Text))
         {
             return update.Text;
         }
 
-        var textParts = update.Contents
-            .OfType<Microsoft.Extensions.AI.TextContent>()
-            .Select(c => c.Text)
-            .Where(t => !string.IsNullOrWhiteSpace(t))
-            .ToList();
+        // 尝试从 Contents 中提取文本 - 支持多种文本内容类型
+        var textParts = new List<string>();
+        foreach (var content in update.Contents)
+        {
+            if (content == null) continue;
+
+            // 尝试获取 Text 属性（适用于 TextContent、StringContent 等）
+            var textProperty = content.GetType().GetProperty("Text");
+            if (textProperty != null)
+            {
+                var text = textProperty.GetValue(content) as string;
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    textParts.Add(text);
+                }
+            }
+        }
 
         return textParts.Count == 0 ? string.Empty : string.Join(string.Empty, textParts);
     }
