@@ -45,6 +45,24 @@
                                         <MudText Typo="Typo.caption">@GetMessageSender(message.Role)</MudText>
                                     </div>
                                 }
+
+                                @* 显示工具调用信息 *@
+                                @if (message.ToolCall != null)
+                                {
+                                    <div class="nb-tool-call-display">
+                                        <div class="nb-tool-call-header">
+                                            <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Class="mr-1" />
+                                            <span>执行命令: @message.ToolCall.Name</span>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(message.ToolCall.Arguments))
+                                        {
+                                            <div class="nb-tool-call-args">
+                                                <code>@message.ToolCall.Arguments</code>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
                                 <MarkdownRenderer Content="@message.Content" />
                             </div>
                         </div>
@@ -334,6 +352,15 @@
 
             await foreach (var chunk in AgentService.SendMessageStreamingAsync(SessionId, userContent, _cancellationTokenSource.Token))
             {
+                // 记录工具调用信息（如果有）
+                if (chunk.ToolCallDetails != null)
+                {
+                    Logger.LogInformation("Tool call detected: {ToolName} with args: {Args}",
+                        chunk.ToolCallDetails.Name, chunk.ToolCallDetails.Arguments);
+                    // 保存工具调用信息到消息中
+                    assistantMessage.ToolCall = chunk.ToolCallDetails;
+                }
+
                 assistantMessage.Content += chunk.Content;
                 StateHasChanged();
                 await Task.Yield();
@@ -619,6 +646,7 @@
         public string Role { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
+        public ToolCallInfo? ToolCall { get; set; }
     }
 
     private sealed record ProfileOption(string ProfileId, string Display);

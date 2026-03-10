@@ -4,6 +4,7 @@ using NanoBot.Core.Bus;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Tools.BuiltIn;
 using NanoBot.Tools.Mcp;
 
 namespace NanoBot.Tools;
@@ -32,7 +33,7 @@ public static class ToolProvider
         tools.Add(BuiltIn.FileTools.CreateEditFileTool(allowedDir));
         tools.Add(BuiltIn.FileTools.CreateListDirTool(allowedDir));
 
-        tools.Add(BuiltIn.ShellTools.CreateExecTool((IEnumerable<string>?)null));
+        tools.Add(BuiltIn.ShellTools.CreateExecTool(new ShellToolOptions()));
 
         tools.Add(BuiltIn.WebTools.CreateWebSearchTool(httpClient));
         tools.Add(BuiltIn.WebTools.CreateWebFetchTool(httpClient));

@@ -1,11 +1,15 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Sessions;
 
 namespace NanoBot.WebUI.Services;
+
+// ToolCallInfo 在 Core 项目中定义
+// AgentResponseChunk 在 Core 项目中定义
 
 public class AgentService : IAgentService
 {
@@ -131,12 +135,27 @@ public class AgentService : IAgentService
 
                 var update = enumerator.Current;
                 var text = GetUpdateText(update);
-                var toolCall = update.Contents.OfType<Microsoft.Extensions.AI.FunctionCallContent>().FirstOrDefault()?.Name;
+                var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
+                var toolCall = functionCalls.FirstOrDefault()?.Name;
+
+                // 构建详细的工具调用信息
+                ToolCallInfo? toolCallDetails = null;
+                if (functionCalls.Any())
+                {
+                    var firstCall = functionCalls.First();
+                    var argsJson = firstCall.Arguments?.ToString() ?? "{}";
+                    toolCallDetails = new ToolCallInfo(
+                        Name: firstCall.Name ?? "",
+                        Arguments: argsJson,
+                        CallId: firstCall.Id
+                    );
+                }
 
                 yield return new AgentResponseChunk(
                     Content: text,
                     IsComplete: false,
-                    ToolCall: toolCall
+                    ToolCall: toolCall,
+                    ToolCallDetails: toolCallDetails
                 );
             }
 

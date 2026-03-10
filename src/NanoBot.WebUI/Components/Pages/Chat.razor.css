@@ -195,3 +195,38 @@
 ::deep .nb-composer-input .mud-input {
     background: transparent;
 }
+
+/* Tool call display */
+.nb-tool-call-display {
+    margin: 8px 0;
+    padding: 12px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.nb-tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #f59e0b;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.85em;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.nb-tool-call-args {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    overflow-x: auto;
+}
+
+.nb-tool-call-args code {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8em;
+    color: #e2e8f0;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

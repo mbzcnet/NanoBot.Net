@@ -1,5 +1,11 @@
 namespace NanoBot.Core.Sessions;
 
+public record ToolCallInfo(
+    string Name,
+    string? Arguments,
+    string? CallId = null
+);
+
 public interface IAgentService
 {
     Task<string> SendMessageAsync(string sessionId, string message, CancellationToken cancellationToken = default);
@@ -10,4 +16,6 @@ public interface IAgentService
 public record AgentResponseChunk(
     string Content,
     bool IsComplete,
-    string? ToolCall = null);
+    string? ToolCall = null,
+    ToolCallInfo? ToolCallDetails = null
+);
