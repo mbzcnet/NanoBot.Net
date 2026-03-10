@@ -121,59 +121,9 @@ public static class NanoBotAgentFactory
         IWorkspaceManager workspace,
         ISkillsLoader skillsLoader,
         IReadOnlyList<AITool> tools,
-        ILoggerFactory loggerFactory)
-    {
-        var contextProviders = new List<AIContextProvider>
-        {
-            new BootstrapContextProvider(workspace),
-            new MemoryContextProvider(workspace),
-            new SkillsContextProvider(skillsLoader)
-        };
+        ILoggerFactory loggerFactory);
 
-        var historyProvider = new FileBackedChatHistoryProvider(workspace);
-
-        var instructions = BuildInstructions(workspace);
-
-        return new ChatClientAgent(
-            chatClient,
-            new ChatClientAgentOptions
-            {
-                Name = "NanoBot",
-                Description = "A personal AI assistant",
-                ChatOptions = new ChatOptions
-                {
-                    Instructions = instructions,
-                    Tools = tools
-                },
-                AIContextProviders = contextProviders,
-                ChatHistoryProvider = historyProvider
-            },
-            loggerFactory);
-    }
-
-    private static string BuildInstructions(IWorkspaceManager workspace)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("You are NanoBot, a personal AI assistant.");
-        sb.AppendLine();
-        
-        var agentsPath = workspace.GetFilePath("AGENTS.md");
-        if (File.Exists(agentsPath))
-        {
-            sb.AppendLine("## Agent Configuration");
-            sb.AppendLine(File.ReadAllText(agentsPath));
-            sb.AppendLine();
-        }
-        
-        var soulPath = workspace.GetFilePath("SOUL.md");
-        if (File.Exists(soulPath))
-        {
-            sb.AppendLine("## Personality");
-            sb.AppendLine(File.ReadAllText(soulPath));
-        }
-        
-        return sb.ToString();
-    }
+    private static string BuildInstructions(IWorkspaceManager workspace);
 }
 ```
 
@@ -195,62 +145,17 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
 
     public FileBackedChatHistoryProvider(
         IWorkspaceManager workspace,
-        int maxHistoryEntries = 100)
-    {
-        _workspace = workspace;
-        _maxHistoryEntries = maxHistoryEntries;
-    }
+        int maxHistoryEntries = 100);
 
     protected override async ValueTask<IEnumerable<ChatMessage>> ProvideChatHistoryAsync(
         InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        var historyPath = _workspace.GetFilePath("HISTORY.md");
-        if (!File.Exists(historyPath))
-            return [];
-
-        var lines = await File.ReadAllLinesAsync(historyPath, cancellationToken);
-        var recentLines = lines.TakeLast(_maxHistoryEntries).ToList();
-        
-        return ParseHistoryToMessages(recentLines);
-    }
+        CancellationToken cancellationToken);
 
     protected override async ValueTask StoreChatHistoryAsync(
         InvokedContext context,
-        CancellationToken cancellationToken)
-    {
-        var historyPath = _workspace.GetFilePath("HISTORY.md");
-        
-        var sb = new StringBuilder();
-        foreach (var message in context.RequestMessages)
-        {
-            sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {message.Text}");
-        }
-        foreach (var message in context.ResponseMessages)
-        {
-            sb.AppendLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] {message.Role}: {message.Text}");
-        }
-        sb.AppendLine();
-        
-        await File.AppendAllTextAsync(historyPath, sb.ToString(), cancellationToken);
-    }
+        CancellationToken cancellationToken);
 
-    private IEnumerable<ChatMessage> ParseHistoryToMessages(List<string> lines)
-    {
-        foreach (var line in lines)
-        {
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            
-            if (line.Contains("User:"))
-            {
-                yield return new ChatMessage(ChatRole.User, line.Split("User:")[1].Trim());
-            }
-            else if (line.Contains("Assistant:"))
-            {
-                yield return new ChatMessage(ChatRole.Assistant, line.Split("Assistant:")[1].Trim());
-            }
-        }
-    }
+    private IEnumerable<ChatMessage> ParseHistoryToMessages(List<string> lines);
 }
 ```
 
@@ -267,37 +172,11 @@ public class BootstrapContextProvider : AIContextProvider
 {
     private readonly IWorkspaceManager _workspace;
 
-    public BootstrapContextProvider(IWorkspaceManager workspace)
-    {
-        _workspace = workspace;
-    }
+    public BootstrapContextProvider(IWorkspaceManager workspace);
 
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        var instructions = new StringBuilder();
-
-        var agentsPath = _workspace.GetFilePath("AGENTS.md");
-        if (File.Exists(agentsPath))
-        {
-            instructions.AppendLine("## Agent Configuration");
-            instructions.AppendLine(await File.ReadAllTextAsync(agentsPath, cancellationToken));
-            instructions.AppendLine();
-        }
-
-        var soulPath = _workspace.GetFilePath("SOUL.md");
-        if (File.Exists(soulPath))
-        {
-            instructions.AppendLine("## Personality");
-            instructions.AppendLine(await File.ReadAllTextAsync(soulPath, cancellationToken));
-        }
-
-        return new AIContext
-        {
-            Instructions = instructions.Length > 0 ? instructions.ToString() : null
-        };
-    }
+        CancellationToken cancellationToken);
 }
 ```
 
@@ -313,36 +192,15 @@ public class MemoryContextProvider : AIContextProvider
 
     public MemoryContextProvider(
         IWorkspaceManager workspace,
-        IMemoryStore memoryStore)
-    {
-        _workspace = workspace;
-        _memoryStore = memoryStore;
-    }
+        IMemoryStore memoryStore);
 
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        var memory = await _memoryStore.LoadAsync(cancellationToken);
-        
-        if (string.IsNullOrEmpty(memory))
-            return new AIContext();
-
-        return new AIContext
-        {
-            Instructions = $"## Memory\n{memory}"
-        };
-    }
+        CancellationToken cancellationToken);
 
     protected override async ValueTask StoreAIContextAsync(
         InvokedContext context,
-        CancellationToken cancellationToken)
-    {
-        await _memoryStore.UpdateAsync(
-            context.RequestMessages,
-            context.ResponseMessages,
-            cancellationToken);
-    }
+        CancellationToken cancellationToken);
 }
 ```
 
@@ -355,42 +213,11 @@ public class SkillsContextProvider : AIContextProvider
 {
     private readonly ISkillsLoader _skillsLoader;
 
-    public SkillsContextProvider(ISkillsLoader skillsLoader)
-    {
-        _skillsLoader = skillsLoader;
-    }
+    public SkillsContextProvider(ISkillsLoader skillsLoader);
 
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        var skills = await _skillsLoader.LoadSkillsAsync(cancellationToken);
-        
-        if (!skills.Any())
-            return new AIContext();
-
-        var sb = new StringBuilder();
-        sb.AppendLine("## Available Skills");
-
-        foreach (var skill in skills)
-        {
-            sb.AppendLine($"### {skill.Name}");
-            if (skill.AlwaysLoad)
-            {
-                sb.AppendLine(skill.Content);
-            }
-            else
-            {
-                sb.AppendLine($"Description: {skill.Description}");
-            }
-            sb.AppendLine();
-        }
-
-        return new AIContext
-        {
-            Instructions = sb.ToString()
-        };
-    }
+        CancellationToken cancellationToken);
 }
 ```
 
@@ -426,25 +253,11 @@ public class MyContextProvider : AIContextProvider
 {
     protected override async ValueTask<AIContext> ProvideAIContextAsync(
         InvokingContext context,
-        CancellationToken cancellationToken)
-    {
-        // 从 StateBag 读取状态
-        if (context.Session?.StateBag.TryGetValue("custom_data", out string? data) == true)
-        {
-            // 使用存储的状态
-        }
-        
-        return new AIContext();
-    }
+        CancellationToken cancellationToken);
 
     protected override ValueTask StoreAIContextAsync(
         InvokedContext context,
-        CancellationToken cancellationToken)
-    {
-        // 存储状态到 StateBag
-        context.Session?.StateBag.SetValue("custom_data", "some value");
-        return default;
-    }
+        CancellationToken cancellationToken);
 }
 ```
 
@@ -495,35 +308,7 @@ var agent = new ChatClientAgent(chatClient, options, loggerFactory)
 public static AITool CreateSpawnTool(
     IChatClient chatClient,
     IWorkspaceManager workspace,
-    ILogger logger)
-{
-    [Description("Create a sub-agent to handle a specific task.")]
-    async Task<string> SpawnAsync(
-        [Description("The task for the sub-agent to handle")] string task,
-        [Description("Optional label for the sub-agent")] string? label = null)
-    {
-        var subAgentName = label ?? $"subagent_{Guid.NewGuid():N}";
-        
-        var subAgent = new ChatClientAgent(
-            chatClient,
-            instructions: $"You are a specialized agent. Task: {task}",
-            name: subAgentName);
-        
-        logger.LogInformation("Spawning sub-agent: {Name}", subAgentName);
-        
-        var response = await subAgent.RunAsync(task);
-        
-        return $"Sub-agent {subAgentName} completed:\n{response.Text}";
-    }
-
-    return AIFunctionFactory.Create(
-        SpawnAsync,
-        new AIFunctionFactoryOptions
-        {
-            Name = "spawn",
-            Description = "Create a sub-agent to handle a specific task."
-        });
-}
+    ILogger logger);
 
 // 将 Agent 转换为工具供其他 Agent 调用
 var childAgent = new ChatClientAgent(chatClient, instructions: "...", name: "ChildAgent");
@@ -553,33 +338,7 @@ var parentAgent = new ChatClientAgent(
 ```csharp
 public static class ServiceCollectionExtensions
 {
-    public static IServiceCollection AddNanoBotAgent(this IServiceCollection services)
-    {
-        // 注册 ChatHistoryProvider
-        services.AddSingleton<ChatHistoryProvider, FileBackedChatHistoryProvider>();
-
-        // 注册 AIContextProvider
-        services.AddSingleton<AIContextProvider, BootstrapContextProvider>();
-        services.AddSingleton<AIContextProvider, MemoryContextProvider>();
-        services.AddSingleton<AIContextProvider, SkillsContextProvider>();
-
-        // 注册 ChatClientAgent
-        services.AddSingleton<ChatClientAgent>(sp =>
-        {
-            var chatClient = sp.GetRequiredService<IChatClient>();
-            var workspace = sp.GetRequiredService<IWorkspaceManager>();
-            var skillsLoader = sp.GetRequiredService<ISkillsLoader>();
-            var tools = sp.GetServices<AITool>().ToList();
-            var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-            var contextProviders = sp.GetServices<AIContextProvider>().ToList();
-            var historyProvider = sp.GetRequiredService<ChatHistoryProvider>();
-
-            return NanoBotAgentFactory.Create(
-                chatClient, workspace, skillsLoader, tools, loggerFactory);
-        });
-
-        return services;
-    }
+    public static IServiceCollection AddNanoBotAgent(this IServiceCollection services);
 }
 ```
 

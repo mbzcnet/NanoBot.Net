@@ -52,8 +52,8 @@ public record InboundMessage
     public required string ChannelId { get; init; }
     public required string ChatId { get; init; }
     public string? UserId { get; init; }
-    public DateTimeOffset Timestamp { get; init; } = DateTimeOffset.UtcNow;
-    public Dictionary<string, object> Metadata { get; init; } = new();
+    public DateTimeOffset Timestamp { get; init; }
+    public Dictionary<string, object> Metadata { get; init; }
 }
 
 public record OutboundMessage
@@ -91,46 +91,6 @@ public interface IMessageBus
 ```csharp
 namespace NanoBot.Infrastructure.Messaging;
 
-public class ChannelMessageBus : IMessageBus, IDisposable
-{
-    private readonly Channel<InboundMessage> _inboundChannel;
-    private readonly Channel<OutboundMessage> _outboundChannel;
-    private readonly Channel<CronMessage> _cronChannel;
-    
-    public ChannelMessageBus()
-    {
-        _inboundChannel = Channel.CreateUnbounded<InboundMessage>();
-        _outboundChannel = Channel.CreateUnbounded<OutboundMessage>();
-        _cronChannel = Channel.CreateUnbounded<CronMessage>();
-    }
-    
-    public IAsyncEnumerable<InboundMessage> SubscribeInboundAsync(CancellationToken ct)
-        => _inboundChannel.Reader.ReadAllAsync(ct);
-    
-    public async Task PublishOutboundAsync(OutboundMessage message, CancellationToken ct = default)
-        => await _outboundChannel.Writer.WriteAsync(message, ct);
-    
-    public IAsyncEnumerable<OutboundMessage> SubscribeOutboundAsync(CancellationToken ct)
-        => _outboundChannel.Reader.ReadAllAsync(ct);
-    
-    public async Task PublishCronAsync(CronMessage message, CancellationToken ct = default)
-        => await _cronChannel.Writer.WriteAsync(message, ct);
-    
-    public IAsyncEnumerable<CronMessage> SubscribeCronAsync(CancellationToken ct)
-        => _cronChannel.Reader.ReadAllAsync(ct);
-    
-    public async Task PublishInboundAsync(InboundMessage message, CancellationToken ct = default)
-        => await _inboundChannel.Writer.WriteAsync(message, ct);
-    
-    public void Dispose()
-    {
-        _inboundChannel.Writer.Complete();
-        _outboundChannel.Writer.Complete();
-        _cronChannel.Writer.Complete();
-    }
-}
-```
-
 ---
 
 ## 通道适配器
@@ -162,56 +122,12 @@ namespace NanoBot.Channels.Console;
 
 public class ConsoleChannel : IChannel
 {
-    public string ChannelId => "console";
-    private readonly IMessageBus _bus;
-    private CancellationTokenSource? _cts;
+    public string ChannelId { get; }
     
-    public ConsoleChannel(IMessageBus bus)
-    {
-        _bus = bus;
-    }
+    public ConsoleChannel(IMessageBus bus);
     
-    public async Task StartAsync(IMessageBus bus, CancellationToken ct)
-    {
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        
-        _ = Task.Run(async () =>
-        {
-            System.Console.WriteLine("NanoBot ready. Type your message:");
-            
-            while (!_cts.Token.IsCancellationRequested)
-            {
-                var line = await System.Console.In.ReadLineAsync();
-                if (string.IsNullOrWhiteSpace(line)) continue;
-                
-                var message = new InboundMessage
-                {
-                    Content = line,
-                    ChannelId = ChannelId,
-                    ChatId = "default"
-                };
-                
-                await _bus.PublishInboundAsync(message, _cts.Token);
-            }
-        }, _cts.Token);
-        
-        _ = Task.Run(async () =>
-        {
-            await foreach (var outbound in _bus.SubscribeOutboundAsync(_cts.Token))
-            {
-                if (outbound.ChannelId == ChannelId || outbound.ChannelId == null)
-                {
-                    System.Console.WriteLine($"\n{outbound.Content}\n");
-                }
-            }
-        }, _cts.Token);
-    }
-    
-    public Task StopAsync(CancellationToken ct)
-    {
-        _cts?.Cancel();
-        return Task.CompletedTask;
-    }
+    public Task StartAsync(IMessageBus bus, CancellationToken ct);
+    public Task StopAsync(CancellationToken ct);
 }
 ```
 
@@ -222,63 +138,12 @@ namespace NanoBot.Channels.Slack;
 
 public class SlackChannel : IChannel
 {
-    public string ChannelId => "slack";
-    private readonly SlackOptions _options;
-    private readonly ILogger<SlackChannel> _logger;
-    private readonly ISlackClient _client;
-    private IMessageBus? _bus;
+    public string ChannelId { get; }
     
-    public SlackChannel(SlackOptions options, ILogger<SlackChannel> logger)
-    {
-        _options = options;
-        _logger = logger;
-        _client = new ISlackClient(options.BotToken);
-    }
+    public SlackChannel(SlackOptions options, ILogger<SlackChannel> logger);
     
-    public async Task StartAsync(IMessageBus bus, CancellationToken ct)
-    {
-        _bus = bus;
-        
-        _client.OnMessageReceived += async (sender, args) =>
-        {
-            var message = new InboundMessage
-            {
-                Content = args.Text,
-                ChannelId = ChannelId,
-                ChatId = args.Channel,
-                UserId = args.User,
-                Metadata = new Dictionary<string, object>
-                {
-                    ["ts"] = args.Ts,
-                    ["thread_ts"] = args.ThreadTs
-                }
-            };
-            
-            await _bus.PublishInboundAsync(message, ct);
-        };
-        
-        _ = Task.Run(async () =>
-        {
-            await foreach (var outbound in _bus.SubscribeOutboundAsync(ct))
-            {
-                if (outbound.ChannelId == ChannelId || outbound.ChannelId == null)
-                {
-                    await _client.PostMessageAsync(
-                        outbound.ChatId ?? _options.DefaultChannel,
-                        outbound.Content,
-                        outbound.ReplyToMessageId);
-                }
-            }
-        }, ct);
-        
-        await _client.ConnectAsync(ct);
-        _logger.LogInformation("Slack channel started");
-    }
-    
-    public async Task StopAsync(CancellationToken ct)
-    {
-        await _client.DisconnectAsync();
-    }
+    public Task StartAsync(IMessageBus bus, CancellationToken ct);
+    public Task StopAsync(CancellationToken ct);
 }
 ```
 
@@ -298,7 +163,7 @@ public record CronTask
     public required string Message { get; init; }
     public string? ChannelId { get; init; }
     public string? ChatId { get; init; }
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; init; }
 }
 
 public interface ICronService
@@ -306,8 +171,8 @@ public interface ICronService
     Task AddTaskAsync(CronTask task, CancellationToken ct = default);
     Task RemoveTaskAsync(string name, CancellationToken ct = default);
     Task<IReadOnlyList<CronTask>> GetTasksAsync(CancellationToken ct = default);
-    Task StartAsync(CancellationToken ct);
-    Task StopAsync(CancellationToken ct);
+    Task StartAsync(CancellationToken ct = default);
+    Task StopAsync(CancellationToken ct = default);
 }
 ```
 
@@ -321,91 +186,18 @@ public class CronService : ICronService, IDisposable
     private readonly IMessageBus _bus;
     private readonly IWorkspaceManager _workspace;
     private readonly ILogger<CronService> _logger;
-    private readonly Dictionary<string, CronTask> _tasks = new();
-    private readonly Dictionary<string, Timer> _timers = new();
+    private readonly Dictionary<string, Timer> _timers;
+    private readonly Dictionary<string, CronTask> _tasks;
     private CancellationTokenSource? _cts;
     
-    public CronService(IMessageBus bus, IWorkspaceManager workspace, ILogger<CronService> logger)
-    {
-        _bus = bus;
-        _workspace = workspace;
-        _logger = logger;
-    }
+    public CronService(IMessageBus bus, IWorkspaceManager workspace, ILogger<CronService> logger);
     
-    public async Task StartAsync(CancellationToken ct)
-    {
-        _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        
-        var tasks = await LoadTasksAsync(_cts.Token);
-        foreach (var task in tasks.Where(t => t.Enabled))
-        {
-            ScheduleTask(task);
-        }
-        
-        _logger.LogInformation("Cron service started with {Count} tasks", _tasks.Count);
-    }
-    
-    public Task StopAsync(CancellationToken ct)
-    {
-        foreach (var timer in _timers.Values)
-        {
-            timer.Dispose();
-        }
-        _timers.Clear();
-        _tasks.Clear();
-        _cts?.Cancel();
-        return Task.CompletedTask;
-    }
-    
-    public Task AddTaskAsync(CronTask task, CancellationToken ct = default)
-    {
-        _tasks[task.Name] = task;
-        ScheduleTask(task);
-        return SaveTasksAsync(ct);
-    }
-    
-    public Task RemoveTaskAsync(string name, CancellationToken ct = default)
-    {
-        if (_timers.TryGetValue(name, out var timer))
-        {
-            timer.Dispose();
-            _timers.Remove(name);
-        }
-        _tasks.Remove(name);
-        return SaveTasksAsync(ct);
-    }
-    
-    public Task<IReadOnlyList<CronTask>> GetTasksAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<CronTask>>(_tasks.Values.ToList());
-    
-    private void ScheduleTask(CronTask task)
-    {
-        if (_timers.TryGetValue(task.Name, out var existingTimer))
-        {
-            existingTimer.Dispose();
-        }
-        
-        var cron = CrontabSchedule.Parse(task.Schedule);
-        var now = DateTime.Now;
-        var next = cron.GetNextOccurrence(now);
-        var delay = next - now;
-        
-        var timer = new Timer(async _ => await ExecuteTaskAsync(task), null, delay, Timeout.InfiniteTimeSpan);
-        _timers[task.Name] = timer;
-    }
-    
-    private async Task ExecuteTaskAsync(CronTask task)
-    {
-        _logger.LogInformation("Executing cron task: {Name}", task.Name);
-        
-        var message = new CronMessage
-        {
-            Name = task.Name,
-            Message = task.Message,
-            ScheduledTime = DateTimeOffset.UtcNow
-        };
-        
-        await _bus.PublishCronAsync(message);
+    public Task StartAsync(CancellationToken ct);
+    public Task StopAsync(CancellationToken ct);
+    public Task AddTaskAsync(CronTask task, CancellationToken ct = default);
+    public Task RemoveTaskAsync(string name, CancellationToken ct = default);
+    public Task<IReadOnlyList<CronTask>> GetTasksAsync(CancellationToken ct = default);
+    public void Dispose();
         
         ScheduleTask(task);
     }

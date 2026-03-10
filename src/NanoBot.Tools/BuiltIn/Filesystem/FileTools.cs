@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using NanoBot.Core.Configuration;
 
 namespace NanoBot.Tools.BuiltIn;
 
@@ -52,6 +53,38 @@ public static class FileTools
                 Name = "list_dir",
                 Description = "List files and directories in the given path. Returns a formatted list of entries."
             });
+    }
+
+    /// <summary>
+    /// 创建增强的 read_file 工具 (暂时禁用)
+    /// </summary>
+    public static AITool CreateEnhancedReadFileTool(FileToolsConfig? config = null)
+    {
+        throw new NotImplementedException("Enhanced file reader is temporarily disabled");
+        // return Filesystem.Enhanced.EnhancedFileReader.CreateTool(config);
+    }
+
+    /// <summary>
+    /// 创建增强的 edit_file 工具 (暂时禁用)
+    /// </summary>
+    public static AITool CreateEnhancedEditFileTool(FileToolsConfig? config = null)
+    {
+        throw new NotImplementedException("Enhanced edit tool is temporarily disabled");
+        // return Filesystem.Enhanced.EnhancedEditTool.Create(config);
+    }
+
+    /// <summary>
+    /// Creates the default set of file tools.
+    /// </summary>
+    public static List<AITool> CreateFileTools(string? allowedDir = null)
+    {
+        return new List<AITool>
+        {
+            CreateReadFileTool(allowedDir),
+            CreateWriteFileTool(allowedDir),
+            CreateEditFileTool(allowedDir),
+            CreateListDirTool(allowedDir)
+        };
     }
 
     private static async Task<string> ReadFileAsync(

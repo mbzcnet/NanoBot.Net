@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
@@ -143,11 +144,13 @@ public class AgentService : IAgentService
                 if (functionCalls.Any())
                 {
                     var firstCall = functionCalls.First();
-                    var argsJson = firstCall.Arguments?.ToString() ?? "{}";
+                    var argsJson = firstCall.Arguments != null
+                        ? JsonSerializer.Serialize(firstCall.Arguments)
+                        : "{}";
                     toolCallDetails = new ToolCallInfo(
                         Name: firstCall.Name ?? "",
                         Arguments: argsJson,
-                        CallId: firstCall.Id
+                        CallId: firstCall.CallId
                     );
                 }
 

@@ -13,9 +13,11 @@ public class SubagentManager : ISubagentManager
     private readonly Func<string, string, Task<string>>? _executeSubagent;
 
     private readonly Dictionary<string, SubagentInfo> _subagents = new();
+    private readonly Dictionary<string, SubagentInfo> _completedSubagents = new();
     private readonly Dictionary<string, CancellationTokenSource> _cancellationTokens = new();
     private readonly Dictionary<string, HashSet<string>> _sessionToSubagentIds = new(); // sessionKey -> subagentIds
     private readonly object _lock = new();
+    private readonly TimeSpan _retentionTime = TimeSpan.FromMinutes(5);
 
     public event EventHandler<SubagentCompletedEventArgs>? SubagentCompleted;
 
@@ -157,7 +159,11 @@ public class SubagentManager : ISubagentManager
             lock (_lock)
             {
                 _cancellationTokens.Remove(id);
-                _subagents.Remove(id);
+                if (_subagents.TryGetValue(id, out var info))
+                {
+                    _subagents.Remove(id);
+                    _completedSubagents[id] = info; // Keep for retrieval
+                }
                 // Remove from session tracking
                 var keysToRemove = new List<string>();
                 foreach (var kvp in _sessionToSubagentIds)
@@ -193,7 +199,11 @@ public class SubagentManager : ISubagentManager
     {
         lock (_lock)
         {
-            return _subagents.GetValueOrDefault(id);
+            if (_subagents.TryGetValue(id, out var info))
+                return info;
+            if (_completedSubagents.TryGetValue(id, out var completedInfo))
+                return completedInfo;
+            return null;
         }
     }
 

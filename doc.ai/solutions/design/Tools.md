@@ -90,105 +90,12 @@ namespace NanoBot.Tools.FileSystem;
 
 public static class FileTools
 {
-    public static AITool CreateReadFileTool(string? workspacePath = null)
-    {
-        return AIFunctionFactory.Create(
-            (string path, int? startLine = null, int? endLine = null) =>
-            {
-                var fullPath = ResolvePath(path, workspacePath);
-                if (!File.Exists(fullPath))
-                    return $"Error: File not found: {path}";
-                
-                var lines = File.ReadAllLines(fullPath);
-                if (startLine.HasValue || endLine.HasValue)
-                {
-                    var start = startLine ?? 0;
-                    var end = endLine ?? lines.Length;
-                    lines = lines.Skip(start).Take(end - start).ToArray();
-                }
-                
-                return string.Join("\n", lines.Select((l, i) => $"{i + 1}→{l}"));
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "read_file",
-                Description = "Read the contents of a file. Returns the file content with line numbers."
-            });
-    }
+    public static AITool CreateReadFileTool(string? workspacePath = null);
+    public static AITool CreateWriteFileTool(string? workspacePath = null);
+    public static AITool CreateEditFileTool(string? workspacePath = null);
+    public static AITool CreateListDirTool(string? workspacePath = null);
     
-    public static AITool CreateWriteFileTool(string? workspacePath = null)
-    {
-        return AIFunctionFactory.Create(
-            (string path, string content) =>
-            {
-                var fullPath = ResolvePath(path, workspacePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-                File.WriteAllText(fullPath, content);
-                return $"Successfully wrote to {path}";
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "write_file",
-                Description = "Write content to a file. Creates parent directories if needed."
-            });
-    }
-    
-    public static AITool CreateEditFileTool(string? workspacePath = null)
-    {
-        return AIFunctionFactory.Create(
-            (string path, string oldText, string newText) =>
-            {
-                var fullPath = ResolvePath(path, workspacePath);
-                if (!File.Exists(fullPath))
-                    return $"Error: File not found: {path}";
-                
-                var content = File.ReadAllText(fullPath);
-                if (!content.Contains(oldText))
-                    return $"Error: Text not found in file: {oldText[..Math.Min(50, oldText.Length)]}...";
-                
-                content = content.Replace(oldText, newText);
-                File.WriteAllText(fullPath, content);
-                return $"Successfully edited {path}";
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "edit_file",
-                Description = "Edit a file by replacing specific text."
-            });
-    }
-    
-    public static AITool CreateListDirTool(string? workspacePath = null)
-    {
-        return AIFunctionFactory.Create(
-            (string path, bool recursive = false) =>
-            {
-                var fullPath = ResolvePath(path, workspacePath);
-                if (!Directory.Exists(fullPath))
-                    return $"Error: Directory not found: {path}";
-                
-                var entries = recursive
-                    ? Directory.GetFileSystemEntries(fullPath, "*", SearchOption.AllDirectories)
-                    : Directory.GetFileSystemEntries(fullPath);
-                
-                return string.Join("\n", entries.Select(e =>
-                {
-                    var isDir = Directory.Exists(e);
-                    return isDir ? $"[DIR] {Path.GetFileName(e)}/" : $"[FILE] {Path.GetFileName(e)}";
-                }));
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "list_dir",
-                Description = "List contents of a directory."
-            });
-    }
-    
-    private static string ResolvePath(string path, string? workspacePath)
-    {
-        if (Path.IsPathRooted(path))
-            return path;
-        return Path.Combine(workspacePath ?? Directory.GetCurrentDirectory(), path);
-    }
+    private static string ResolvePath(string path, string? workspacePath);
 }
 ```
 
@@ -207,50 +114,7 @@ public static class ShellTools
     public static AITool CreateExecTool(
         string? workspacePath = null,
         int defaultTimeout = 60,
-        IEnumerable<string>? additionalDeniedPatterns = null)
-    {
-        var denied = DeniedPatterns.Concat(additionalDeniedPatterns ?? []).ToHashSet();
-        
-        return AIFunctionFactory.Create(
-            async (string command, int timeout = 60, string? workingDir = null) =>
-            {
-                if (denied.Any(p => command.Contains(p, StringComparison.OrdinalIgnoreCase)))
-                    return $"Error: Command contains blocked pattern";
-                
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "/bin/bash",
-                    Arguments = $"-c \"{command.Replace("\"", "\\\"")}\"",
-                    WorkingDirectory = workingDir ?? workspacePath ?? Directory.GetCurrentDirectory(),
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false
-                };
-                
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
-                using var process = new Process { StartInfo = startInfo };
-                
-                process.Start();
-                
-                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
-                
-                await process.WaitForExitAsync(cts.Token);
-                
-                var output = await outputTask;
-                var error = await errorTask;
-                
-                if (!string.IsNullOrEmpty(error))
-                    return $"Error: {error}\nOutput: {output}";
-                
-                return output.Length > 10000 ? output[..10000] + "\n... (truncated)" : output;
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "exec",
-                Description = "Execute a shell command. Use with caution."
-            });
-    }
+        IEnumerable<string>? additionalDeniedPatterns = null);
 }
 ```
 
@@ -261,52 +125,8 @@ namespace NanoBot.Tools.Web;
 
 public static class WebTools
 {
-    public static AITool CreateWebSearchTool(string? apiKey = null)
-    {
-        return AIFunctionFactory.Create(
-            async (string query, int count = 5) =>
-            {
-                var key = apiKey ?? Environment.GetEnvironmentVariable("BRAVE_API_KEY");
-                if (string.IsNullOrEmpty(key))
-                    return "Error: BRAVE_API_KEY not configured";
-                
-                using var http = new HttpClient();
-                http.DefaultRequestHeaders.Add("X-Subscription-Token", key);
-                
-                var url = $"https://api.search.brave.com/res/v1/web/search?q={Uri.EscapeDataString(query)}&count={count}";
-                var response = await http.GetStringAsync(url);
-                
-                // Parse and format results...
-                return FormatSearchResults(response);
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "web_search",
-                Description = "Search the web using Brave Search API."
-            });
-    }
-    
-    public static AITool CreateWebFetchTool()
-    {
-        return AIFunctionFactory.Create(
-            async (string url, int maxChars = 50000) =>
-            {
-                using var http = new HttpClient();
-                var html = await http.GetStringAsync(url);
-                
-                // Extract readable content using readability...
-                var content = ExtractReadableContent(html);
-                
-                return content.Length > maxChars 
-                    ? content[..maxChars] + "\n... (truncated)" 
-                    : content;
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "web_fetch",
-                Description = "Fetch and extract main content from a URL."
-            });
-    }
+    public static AITool CreateWebSearchTool(string? apiKey = null);
+    public static AITool CreateWebFetchTool();
 }
 ```
 
@@ -317,27 +137,7 @@ namespace NanoBot.Tools.Messaging;
 
 public static class MessageTools
 {
-    public static AITool CreateMessageTool(IMessageBus messageBus)
-    {
-        return AIFunctionFactory.Create(
-            async (string content, string? channel = null, string? chatId = null) =>
-            {
-                var message = new OutboundMessage
-                {
-                    Content = content,
-                    ChannelId = channel,
-                    ChatId = chatId
-                };
-                
-                await messageBus.PublishOutboundAsync(message);
-                return "Message sent successfully";
-            },
-            new AIFunctionFactoryOptions
-            {
-                Name = "message",
-                Description = "Send a message to a specific channel and chat."
-            });
-    }
+    public static AITool CreateMessageTool(IMessageBus messageBus);
 }
 ```
 
@@ -426,35 +226,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddNanoBotTools(
         this IServiceCollection services,
-        string? workspacePath = null)
-    {
-        // 注册工具工厂
-        services.AddSingleton(sp =>
-        {
-            var workspace = workspacePath ?? sp.GetRequiredService<IWorkspaceManager>().GetWorkspacePath();
-            var messageBus = sp.GetService<IMessageBus>();
-            
-            var tools = new List<AITool>
-            {
-                FileTools.CreateReadFileTool(workspace),
-                FileTools.CreateWriteFileTool(workspace),
-                FileTools.CreateEditFileTool(workspace),
-                FileTools.CreateListDirTool(workspace),
-                ShellTools.CreateExecTool(workspace),
-                WebTools.CreateWebSearchTool(),
-                WebTools.CreateWebFetchTool()
-            };
-            
-            if (messageBus != null)
-            {
-                tools.Add(MessageTools.CreateMessageTool(messageBus));
-            }
-            
-            return tools.AsReadOnly();
-        });
-        
-        return services;
-    }
+        string? workspacePath = null);
 }
 ```
 
@@ -465,24 +237,7 @@ public static class ServiceCollectionExtensions
 ### 访问当前上下文
 
 ```csharp
-public static AITool CreateContextAwareTool()
-{
-    return AIFunctionFactory.Create(
-        (string path) =>
-        {
-            // 访问当前 Agent 运行上下文
-            var context = AIAgent.CurrentRunContext;
-            if (context != null)
-            {
-                var sessionId = context.Session?.Id;
-                var agentId = context.Agent?.Id;
-                // 使用上下文信息...
-            }
-            
-            return File.ReadAllText(path);
-        },
-        new AIFunctionFactoryOptions { Name = "read_file", Description = "..." });
-}
+public static AITool CreateContextAwareTool();
 ```
 
 ### 使用 FunctionInvocationContext
@@ -588,22 +343,7 @@ AITool tool = AIFunctionFactory.Create(
 ### 3. 安全控制
 
 ```csharp
-public static AITool CreateSafeExecTool(string workspacePath)
-{
-    return AIFunctionFactory.Create(
-        (string command) =>
-        {
-            // 检查危险命令
-            if (IsDangerousCommand(command))
-                return "Error: Command blocked for security reasons";
-            
-            // 限制在工作目录内
-            // ...
-            
-            return ExecuteCommand(command);
-        },
-        new() { Name = "exec" });
-}
+public static AITool CreateSafeExecTool(string workspacePath);
 ```
 
 ---

@@ -1,0 +1,216 @@
+@using NanoBot.Core.Messages
+
+<div class="tool-part @GetStatusCssClass() mb-2">
+    <div class="tool-header d-flex align-items-center p-2 rounded"
+         style="cursor: pointer; background-color: var(--bs-light);"
+         @onclick="ToggleOpen">
+
+        @* 工具图标 *@
+        <div class="tool-icon me-2">
+            <i class="bi @GetToolIcon()"></i>
+        </div>
+
+        @* 工具标题 *@
+        <div class="tool-title flex-grow-1">
+            <span class="fw-medium">@GetDisplayTitle()</span>
+            @if (!string.IsNullOrEmpty(GetSubtitle()))
+            {
+                <span class="text-muted ms-1">: @GetSubtitle()</span>
+            }
+        </div>
+
+        @* 状态指示器 *@
+        <div class="tool-status me-2">
+            @switch (Part.State)
+            {
+                case PendingToolState:
+                    <span class="badge bg-secondary">Pending</span>
+                    break;
+                case RunningToolState:
+                    <span class="badge bg-primary">
+                        <span class="spinner-border spinner-border-sm me-1" style="width: 0.8em; height: 0.8em;"></span>
+                        Running
+                    </span>
+                    break;
+                case CompletedToolState:
+                    <span class="badge bg-success">
+                        <i class="bi bi-check-circle me-1"></i>
+                        Done
+                    </span>
+                    break;
+                case ErrorToolState:
+                    <span class="badge bg-danger">
+                        <i class="bi bi-x-circle me-1"></i>
+                        Error
+                    </span>
+                    break;
+            }
+        </div>
+
+        @* 展开/折叠图标 *@
+        <div class="tool-toggle">
+            <i class="bi @(IsOpen ? "chevron-up" : "chevron-down")"></i>
+        </div>
+    </div>
+
+    @* 工具内容 *@
+    @if (IsOpen)
+    {
+        <div class="tool-content p-2 border rounded-bottom">
+            @switch (Part.State)
+            {
+                case PendingToolState:
+                    <div class="text-muted">
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                        Waiting to execute...
+                    </div>
+                    break;
+
+                case RunningToolState running:
+                    <div>
+                        <div class="d-flex align-items-center mb-2">
+                            <span class="spinner-border spinner-border-sm text-primary me-2"></span>
+                            <span>@running.Title</span>
+                        </div>
+                        @if (running.Metadata.Any())
+                        {
+                            <div class="tool-metadata">
+                                @foreach (var meta in running.Metadata)
+                                {
+                                    <span class="badge bg-info me-1">@meta.Key: @meta.Value</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                case CompletedToolState completed:
+                    <div>
+                        @if (!string.IsNullOrEmpty(completed.Output))
+                        {
+                            <div class="tool-output bg-light p-2 rounded">
+                                <pre class="mb-0" style="max-height: 300px; overflow: auto;"><code>@completed.Output</code></pre>
+                            </div>
+                        }
+                        @if (completed.Attachments.Any())
+                        {
+                            <div class="tool-attachments mt-2">
+                                <strong>Attachments:</strong>
+                                @foreach (var attachment in completed.Attachments)
+                                {
+                                    <div class="attachment-item">
+                                        <i class="bi bi-paperclip"></i>
+                                        <a href="@attachment.FilePath" target="_blank">@attachment.FileName</a>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    break;
+
+                case ErrorToolState error:
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <strong>Error:</strong> @error.ErrorMessage
+                    </div>
+                    break;
+            }
+
+            @* 详细信息（输入参数） *@
+            @if (!HideDetails && Part.Input.Any())
+            {
+                <details class="mt-2">
+                    <summary class="text-muted">Input Parameters</summary>
+                    <div class="bg-light p-2 rounded mt-1">
+                        <pre class="mb-0"><code>@FormatInputParameters()</code></pre>
+                    </div>
+                </details>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public ToolPart Part { get; set; } = null!;
+    [Parameter] public bool HideDetails { get; set; } = false;
+    [Parameter] public bool DefaultOpen { get; set; } = false;
+    [Parameter] public EventCallback<ToolPart> OnStateChanged { get; set; }
+
+    private bool IsOpen { get; set; }
+
+    protected override void OnInitialized()
+    {
+        IsOpen = DefaultOpen;
+    }
+
+    private void ToggleOpen()
+    {
+        IsOpen = !IsOpen;
+        if (OnStateChanged.HasDelegate)
+        {
+            _ = OnStateChanged.InvokeAsync(Part);
+        }
+    }
+
+    private string GetStatusCssClass() => Part.State.Status switch
+    {
+        "pending" => "tool-status-pending",
+        "running" => "tool-status-running",
+        "completed" => "tool-status-completed",
+        "error" => "tool-status-error",
+        _ => ""
+    };
+
+    private string GetToolIcon() => Part.ToolName.ToLowerInvariant() switch
+    {
+        var n when n.Contains("read") => "bi-eye",
+        var n when n.Contains("write") => "bi-pencil",
+        var n when n.Contains("edit") => "bi-pencil-square",
+        var n when n.Contains("list") => "bi-list-ul",
+        var n when n.Contains("bash") || n.Contains("shell") || n.Contains("exec") => "bi-terminal",
+        var n when n.Contains("search") => "bi-search",
+        var n when n.Contains("glob") => "bi-asterisk",
+        var n when n.Contains("grep") => "bi-text-left",
+        var n when n.Contains("web") => "bi-globe",
+        var n when n.Contains("fetch") => "bi-download",
+        var n when n.Contains("spawn") => "bi-robot",
+        var n when n.Contains("message") => "bi-chat",
+        var n when n.Contains("cron") => "bi-clock",
+        var n when n.Contains("browser") => "bi-window",
+        _ => "bi-gear"
+    };
+
+    private string GetDisplayTitle()
+    {
+        var title = Part.State switch
+        {
+            RunningToolState r => r.Title,
+            CompletedToolState c => c.Title,
+            _ => FormatToolName(Part.ToolName)
+        };
+        return title ?? FormatToolName(Part.ToolName);
+    }
+
+    private static string FormatToolName(string toolName)
+    {
+        // Simple humanize: replace underscores with spaces and capitalize first letter of each word
+        return string.Join(" ", toolName.Split('_', '-')
+            .Select(word => char.ToUpperInvariant(word[0]) + word[1..].ToLowerInvariant()));
+    }
+
+    private string? GetSubtitle() => Part.GetInputSummary();
+
+    private string FormatInputParameters()
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                Part.Input,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return "{ }";
+        }
+    }
+}

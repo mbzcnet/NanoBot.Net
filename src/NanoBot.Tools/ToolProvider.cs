@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Configuration;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
@@ -26,11 +27,23 @@ public static class ToolProvider
         var browserService = services.GetService<IBrowserService>();
         var httpClientFactory = services.GetService<IHttpClientFactory>();
         var mcpClient = services.GetService<IMcpClient>();
+        var config = services.GetService<AgentConfig>();
         var httpClient = httpClientFactory?.CreateClient("Tools");
 
-        tools.Add(BuiltIn.FileTools.CreateReadFileTool(allowedDir));
+        // Check if enhanced file tools should be used
+        var fileToolsConfig = config?.FileTools;
+        if (fileToolsConfig?.UseEnhanced == true)
+        {
+            tools.Add(BuiltIn.FileTools.CreateEnhancedReadFileTool(fileToolsConfig));
+            tools.Add(BuiltIn.FileTools.CreateEnhancedEditFileTool(fileToolsConfig));
+        }
+        else
+        {
+            tools.Add(BuiltIn.FileTools.CreateReadFileTool(allowedDir));
+            tools.Add(BuiltIn.FileTools.CreateEditFileTool(allowedDir));
+        }
+
         tools.Add(BuiltIn.FileTools.CreateWriteFileTool(allowedDir));
-        tools.Add(BuiltIn.FileTools.CreateEditFileTool(allowedDir));
         tools.Add(BuiltIn.FileTools.CreateListDirTool(allowedDir));
 
         tools.Add(BuiltIn.ShellTools.CreateExecTool(new ShellToolOptions()));

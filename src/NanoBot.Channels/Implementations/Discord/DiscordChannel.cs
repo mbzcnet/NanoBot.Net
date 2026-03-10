@@ -228,8 +228,8 @@ public class DiscordChannel : ChannelBase
             new Dictionary<string, object>
             {
                 ["message_id"] = payload.GetProperty("id").GetString() ?? "",
-                ["guild_id"] = payload.TryGetProperty("guild_id", out var guildId) ? guildId.GetString() : null,
-                ["reply_to"] = replyTo
+                ["guild_id"] = payload.TryGetProperty("guild_id", out var guildId) ? guildId.GetString() ?? "" : "",
+                ["reply_to"] = replyTo ?? ""
             }
         );
     }

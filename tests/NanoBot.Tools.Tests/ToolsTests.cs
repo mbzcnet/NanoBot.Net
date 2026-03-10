@@ -7,6 +7,7 @@ using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Browser;
 using NanoBot.Tools.BuiltIn;
+using NanoBot.Tools.Tests.Attributes;
 using Xunit;
 
 namespace NanoBot.Tools.Tests;
@@ -273,7 +274,7 @@ public class BrowserToolsTests
         Assert.Contains(tools, t => t.Name == "browser");
     }
 
-    [Fact]
+    [SkipIfPlaywrightNotInstalled]
     public async Task BrowserService_StartOpenContentStop_UsesRealPlaywright()
     {
         var workspaceMock = new Mock<IWorkspaceManager>();
@@ -332,7 +333,7 @@ public class BrowserToolsTests
         Assert.True(stopped.Ok);
     }
 
-    [Fact]
+    [SkipIfPlaywrightNotInstalled]
     public async Task BrowserService_BaiduSnapshot_CanSaveScreenshotToSessionFolder()
     {
         if (!EnsureBrowserIntegrationEnabled()) return;
@@ -394,7 +395,7 @@ public class BrowserToolsTests
         }
     }
 
-    [Fact]
+    [SkipIfPlaywrightNotInstalled]
     public async Task BrowserService_SnapshotWithoutSessionKey_UsesFallbackAndSavesScreenshot()
     {
         if (!EnsureBrowserIntegrationEnabled()) return;

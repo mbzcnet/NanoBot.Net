@@ -121,6 +121,13 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddBrowserServices(this IServiceCollection services)
+    {
+        services.AddSingleton<IPlaywrightInstaller, PlaywrightInstaller>();
+        services.AddSingleton<IBrowserService, BrowserService>();
+        return services;
+    }
+
     public static IServiceCollection AddInfrastructureServices(
         this IServiceCollection services,
         WorkspaceConfig? workspaceConfig = null,
@@ -132,7 +139,7 @@ public static class ServiceCollectionExtensions
         services.AddHeartbeatServices(heartbeatConfig);
         services.AddSkillsServices();
         services.AddSubagentServices();
-        services.AddSingleton<IBrowserService, BrowserService>();
+        services.AddBrowserServices();
         services.AddSingleton<IFileStorageService, FileStorageService>();
 
         return services;

@@ -9,7 +9,9 @@
 @inject NanoBot.Core.Storage.IFileStorageService FileStorageService
 @inject IConfiguration Configuration
 @using NanoBot.WebUI.Services
+@using NanoBot.WebUI.Components.Parts
 @using NanoBot.Core.Configuration
+@using NanoBot.Core.Messages
 @using NanoBot.Cli.Services
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
@@ -63,7 +65,20 @@
                                     </div>
                                 }
 
-                                <MarkdownRenderer Content="@message.Content" />
+                                @* 显示消息内容 *@
+                                @if (message.Parts?.Any() == true)
+                                {
+                                    @* 使用 Part 组件渲染 *@
+                                    @foreach (var part in message.Parts)
+                                    {
+                                        <MessagePartComponent Part="part" />
+                                    }
+                                }
+                                else if (!string.IsNullOrEmpty(message.Content))
+                                {
+                                    @* 回退到 Markdown 渲染 *@
+                                    <MarkdownRenderer Content="@message.Content" />
+                                }
                             </div>
                         </div>
                     }
@@ -647,6 +662,32 @@
         public string Content { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
         public ToolCallInfo? ToolCall { get; set; }
+        public List<MessagePart>? Parts { get; set; }
+
+        /// <summary>
+        /// 获取或创建 Part 列表（用于向后兼容）
+        /// </summary>
+        public List<MessagePart> GetOrCreateParts(string sessionId)
+        {
+            if (Parts != null && Parts.Any())
+                return Parts;
+
+            // 从 Content 创建 TextPart
+            var parts = new List<MessagePart>();
+            if (!string.IsNullOrEmpty(Content))
+            {
+                parts.Add(new TextPart
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    MessageId = Id ?? Guid.NewGuid().ToString(),
+                    SessionId = sessionId,
+                    Text = Content
+                });
+            }
+            return parts;
+        }
+
+        public string? Id { get; set; }
     }
 
     private sealed record ProfileOption(string ProfileId, string Display);

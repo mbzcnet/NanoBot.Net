@@ -6,7 +6,10 @@
       "Bash(git reset HEAD Temp/)",
       "Bash(git rm --cached Temp/agent-framework Temp/openclaw)",
       "Bash(git rm --cached -r --ignore-unmatch Temp/)",
-      "Bash(git reset HEAD)"
+      "Bash(git reset HEAD)",
+      "Bash(dotnet build src/NanoBot.Core/NanoBot.Core.csproj src/NanoBot.Tools/NanoBot.Tools.csproj src/NanoBot.Infrastructure/NanoBot.Infrastructure.csproj src/NanoBot.Channels/NanoBot.Channels.csproj src/NanoBot.Providers/NanoBot.Providers.csproj src/NanoBot.Agent/NanoBot.Agent.csproj src/NanoBot.Cli/NanoBot.Cli.csproj)",
+      "Bash(dotnet build src/NanoBot.WebUI/NanoBot.WebUI.csproj)",
+      "Bash(git -C /home/victor/Code/NanoBot.Net status --porcelain)"
     ]
   }
 }

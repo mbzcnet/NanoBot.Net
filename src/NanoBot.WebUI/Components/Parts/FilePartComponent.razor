@@ -1,0 +1,77 @@
+@using NanoBot.Core.Messages
+
+<div class="file-part d-flex align-items-center p-2 border rounded mb-2">
+    @* 文件图标 *@
+    <div class="file-icon me-3">
+        <i class="bi @GetFileIcon() fs-4"></i>
+    </div>
+
+    @* 文件信息 *@
+    <div class="file-info flex-grow-1">
+        <div class="file-name fw-medium">
+            @if (!string.IsNullOrEmpty(Part.FileName))
+            {
+                <span>@Part.FileName</span>
+            }
+            else
+            {
+                <span class="text-muted">Unknown file</span>
+            }
+        </div>
+        <div class="file-details text-muted small">
+            @if (Part.Size.HasValue)
+            {
+                <span>@FormatFileSize(Part.Size.Value)</span>
+            }
+            @if (!string.IsNullOrEmpty(Part.MimeType))
+            {
+                <span class="ms-2">@Part.MimeType</span>
+            }
+        </div>
+    </div>
+
+    @* 文件操作 *@
+    <div class="file-actions">
+        @if (!string.IsNullOrEmpty(Part.FilePath))
+        {
+            <a href="@Part.FilePath" target="_blank" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-box-arrow-up-right"></i>
+                Open
+            </a>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public FilePart Part { get; set; } = null!;
+
+    private string GetFileIcon() => Path.GetExtension(Part.FilePath).ToLowerInvariant() switch
+    {
+        ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp" or ".svg" => "bi-file-image",
+        ".pdf" => "bi-file-pdf",
+        ".doc" or ".docx" => "bi-file-word",
+        ".xls" or ".xlsx" => "bi-file-excel",
+        ".ppt" or ".pptx" => "bi-file-ppt",
+        ".zip" or ".rar" or ".7z" => "bi-file-zip",
+        ".mp3" or ".wav" or ".ogg" or ".flac" => "bi-file-music",
+        ".mp4" or ".avi" or ".mkv" or ".mov" => "bi-file-play",
+        ".cs" or ".js" or ".ts" or ".py" or ".java" or ".cpp" or ".c" or ".h" => "bi-file-code",
+        ".txt" or ".md" or ".json" or ".xml" or ".yaml" or ".yml" => "bi-file-text",
+        _ => "bi-file"
+    };
+
+    private static string FormatFileSize(long bytes)
+    {
+        const long KB = 1024;
+        const long MB = KB * 1024;
+        const long GB = MB * 1024;
+
+        return bytes switch
+        {
+            >= GB => $"{bytes / (double)GB:F2} GB",
+            >= MB => $"{bytes / (double)MB:F2} MB",
+            >= KB => $"{bytes / (double)KB:F2} KB",
+            _ => $"{bytes} B"
+        };
+    }
+}

@@ -37,25 +37,25 @@ namespace NanoBot.Core.Configuration;
 public class AgentConfig
 {
     /// <summary>Agent 名称</summary>
-    public string Name { get; set; } = "NanoBot";
+    public string Name { get; set; }
 
     /// <summary>Workspace 配置</summary>
-    public WorkspaceConfig Workspace { get; set; } = new();
+    public WorkspaceConfig Workspace { get; set; }
 
     /// <summary>LLM 模型配置</summary>
-    public LlmConfig Llm { get; set; } = new();
+    public LlmConfig Llm { get; set; }
 
     /// <summary>通道配置</summary>
-    public ChannelsConfig Channels { get; set; } = new();
+    public ChannelsConfig Channels { get; set; }
 
     /// <summary>MCP 配置</summary>
     public McpConfig? Mcp { get; set; }
 
     /// <summary>安全配置</summary>
-    public SecurityConfig Security { get; set; } = new();
+    public SecurityConfig Security { get; set; }
 
     /// <summary>记忆配置</summary>
-    public MemoryConfig Memory { get; set; } = new();
+    public MemoryConfig Memory { get; set; }
 
     /// <summary>心跳配置</summary>
     public HeartbeatConfig? Heartbeat { get; set; }
@@ -75,43 +75,31 @@ namespace NanoBot.Core.Configuration;
 public class WorkspaceConfig
 {
     /// <summary>Workspace 路径（支持 ~ 展开）</summary>
-    public string Path { get; set; } = "~/.nanobot/workspace";
+    public string Path { get; set; }
 
     /// <summary>获取展开后的绝对路径</summary>
-    public string GetResolvedPath()
-    {
-        string path = Path;
-        if (path.StartsWith("~/"))
-        {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            path = Path.Combine(home, path[2..]);
-        }
-        return Path.GetFullPath(path);
-    }
-
-    /// <summary>获取 Memory 目录路径</summary>
-    public string GetMemoryPath() => Path.Combine(GetResolvedPath(), "memory");
+    public string GetResolvedPath();
 
     /// <summary>获取 Skills 目录路径</summary>
-    public string GetSkillsPath() => Path.Combine(GetResolvedPath(), "skills");
+    public string GetSkillsPath();
 
     /// <summary>获取 Sessions 目录路径</summary>
-    public string GetSessionsPath() => Path.Combine(GetResolvedPath(), "sessions");
+    public string GetSessionsPath();
 
     /// <summary>获取 AGENTS.md 文件路径</summary>
-    public string GetAgentsFile() => Path.Combine(GetResolvedPath(), "AGENTS.md");
+    public string GetAgentsFile();
 
     /// <summary>获取 SOUL.md 文件路径</summary>
-    public string GetSoulFile() => Path.Combine(GetResolvedPath(), "SOUL.md");
+    public string GetSoulFile();
 
-    /// <summary>获取 TOOLS.md 文件路径</summary>
-    public string GetToolsFile() => Path.Combine(GetResolvedPath(), "TOOLS.md");
+    /// <summary>获取 MEMORY.md 文件路径</summary>
+    public string GetMemoryFile();
 
-    /// <summary>获取 USER.md 文件路径</summary>
-    public string GetUserFile() => Path.Combine(GetResolvedPath(), "USER.md");
+    /// <summary>获取 HISTORY.md 文件路径</summary>
+    public string GetHistoryFile();
 
-    /// <summary>获取 HEARTBEAT.md 文件路径</summary>
-    public string GetHeartbeatFile() => Path.Combine(GetResolvedPath(), "HEARTBEAT.md");
+    /// <summary>获取 config.json 文件路径</summary>
+    public string GetConfigFile();
 }
 ```
 
@@ -128,7 +116,7 @@ namespace NanoBot.Core.Configuration;
 public class LlmConfig
 {
     /// <summary>模型名称</summary>
-    public string Model { get; set; } = "";
+    public string Model { get; set; }
 
     /// <summary>API 密钥</summary>
     public string? ApiKey { get; set; }
@@ -140,10 +128,10 @@ public class LlmConfig
     public string? Provider { get; set; }
 
     /// <summary>温度参数（默认 0.1，更确定的输出）</summary>
-    public double Temperature { get; set; } = 0.1;
+    public double Temperature { get; set; }
 
     /// <summary>最大 Token 数</summary>
-    public int MaxTokens { get; set; } = 4096;
+    public int MaxTokens { get; set; }
 
     /// <summary>系统提示词</summary>
     public string? SystemPrompt { get; set; }
@@ -187,16 +175,16 @@ namespace NanoBot.Core.Configuration;
 public class SecurityConfig
 {
     /// <summary>允许访问的目录列表</summary>
-    public IReadOnlyList<string> AllowedDirs { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> AllowedDirs { get; set; }
 
     /// <summary>禁止执行的命令模式</summary>
-    public IReadOnlyList<string> DenyCommandPatterns { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> DenyCommandPatterns { get; set; }
 
     /// <summary>是否限制在工作目录</summary>
-    public bool RestrictToWorkspace { get; set; } = true;
+    public bool RestrictToWorkspace { get; set; }
 
     /// <summary>Shell 命令超时（秒）</summary>
-    public int ShellTimeout { get; set; } = 60;
+    public int ShellTimeout { get; set; }
 }
 ```
 
@@ -213,16 +201,16 @@ namespace NanoBot.Core.Configuration;
 public class MemoryConfig
 {
     /// <summary>记忆文件路径</summary>
-    public string MemoryFile { get; set; } = "MEMORY.md";
+    public string MemoryFile { get; set; }
 
     /// <summary>历史文件路径</summary>
-    public string HistoryFile { get; set; } = "HISTORY.md";
+    public string HistoryFile { get; set; }
 
     /// <summary>最大历史条数</summary>
-    public int MaxHistoryEntries { get; set; } = 500;
+    public int MaxHistoryEntries { get; set; }
 
     /// <summary>是否启用记忆</summary>
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; }
 }
 ```
 
@@ -242,7 +230,7 @@ public class HeartbeatConfig
     public bool Enabled { get; set; }
 
     /// <summary>间隔秒数</summary>
-    public int IntervalSeconds { get; set; } = 300;
+    public int IntervalSeconds { get; set; }
 
     /// <summary>心跳消息</summary>
     public string? Message { get; set; }
@@ -262,7 +250,7 @@ namespace NanoBot.Core.Configuration;
 public class McpConfig
 {
     /// <summary>MCP 服务器配置字典</summary>
-    public Dictionary<string, McpServerConfig> Servers { get; set; } = new();
+    public Dictionary<string, McpServerConfig> Servers { get; set; }
 }
 
 /// <summary>
@@ -271,19 +259,19 @@ public class McpConfig
 public class McpServerConfig
 {
     /// <summary>启动命令</summary>
-    public string Command { get; set; } = string.Empty;
+    public string Command { get; set; }
     
     /// <summary>命令参数</summary>
-    public IReadOnlyList<string> Args { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> Args { get; set; }
     
     /// <summary>环境变量</summary>
-    public Dictionary<string, string> Env { get; set; } = new();
+    public Dictionary<string, string> Env { get; set; }
     
     /// <summary>工作目录</summary>
     public string? Cwd { get; set; }
     
     /// <summary>工具调用超时（秒，默认 30）</summary>
-    public int ToolTimeout { get; set; } = 30;
+    public int ToolTimeout { get; set; }
     
     /// <summary>HTTP 自定义 Headers（用于 HTTP 传输）</summary>
     public Dictionary<string, string>? Headers { get; set; }
@@ -303,9 +291,9 @@ namespace NanoBot.Core.Configuration;
 public class TelegramConfig
 {
     public bool Enabled { get; set; }
-    public string Token { get; set; } = "";  // Bot Token from @BotFather
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
-    public string? Proxy { get; set; }  // HTTP/SOCKS5 proxy URL
+    public string Token { get; set; }
+    public IReadOnlyList<string> AllowFrom { get; set; }
+    public string? Proxy { get; set; }
 }
 ```
 
@@ -316,10 +304,10 @@ public class TelegramConfig
 public class DiscordConfig
 {
     public bool Enabled { get; set; }
-    public string Token { get; set; } = "";  // Bot token
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
-    public string GatewayUrl { get; set; } = "wss://gateway.discord.gg/?v=10&encoding=json";
-    public int Intents { get; set; } = 37377;
+    public string Token { get; set; }
+    public IReadOnlyList<string> AllowFrom { get; set; }
+    public string GatewayUrl { get; set; }
+    public int Intents { get; set; }
 }
 ```
 
@@ -330,11 +318,11 @@ public class DiscordConfig
 public class FeishuConfig
 {
     public bool Enabled { get; set; }
-    public string AppId { get; set; } = "";
-    public string AppSecret { get; set; } = "";
-    public string EncryptKey { get; set; } = "";
-    public string VerificationToken { get; set; } = "";
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
+    public string AppId { get; set; }
+    public string AppSecret { get; set; }
+    public string EncryptKey { get; set; }
+    public string VerificationToken { get; set; }
+    public IReadOnlyList<string> AllowFrom { get; set; }
 }
 ```
 
@@ -345,9 +333,9 @@ public class FeishuConfig
 public class WhatsAppConfig
 {
     public bool Enabled { get; set; }
-    public string BridgeUrl { get; set; } = "ws://localhost:3001";
-    public string BridgeToken { get; set; } = "";
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
+    public string BridgeUrl { get; set; }
+    public string BridgeToken { get; set; }
+    public IReadOnlyList<string> AllowFrom { get; set; }
 }
 ```
 
@@ -358,9 +346,9 @@ public class WhatsAppConfig
 public class DingTalkConfig
 {
     public bool Enabled { get; set; }
-    public string ClientId { get; set; } = "";  // AppKey
-    public string ClientSecret { get; set; } = "";  // AppSecret
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
+    public string ClientId { get; set; }
+    public string ClientSecret { get; set; }
+    public IReadOnlyList<string> AllowFrom { get; set; }
 }
 ```
 
@@ -371,30 +359,25 @@ public class DingTalkConfig
 public class EmailConfig
 {
     public bool Enabled { get; set; }
-    public bool ConsentGranted { get; set; }  // 邮箱访问授权
+    public bool ConsentGranted { get; set; }
 
     // IMAP（接收）
-    public string ImapHost { get; set; } = "";
-    public int ImapPort { get; set; } = 993;
-    public string ImapUsername { get; set; } = "";
-    public string ImapPassword { get; set; } = "";
-    public string ImapMailbox { get; set; } = "INBOX";
-    public bool ImapUseSsl { get; set; } = true;
+    public string ImapHost { get; set; }
+    public int ImapPort { get; set; }
+    public string ImapUsername { get; set; }
+    public string ImapPassword { get; set; }
+    public bool ImapUseSsl { get; set; }
 
     // SMTP（发送）
-    public string SmtpHost { get; set; } = "";
-    public int SmtpPort { get; set; } = 587;
-    public string SmtpUsername { get; set; } = "";
-    public string SmtpPassword { get; set; } = "";
-    public bool SmtpUseTls { get; set; } = true;
-    public string FromAddress { get; set; } = "";
+    public string SmtpHost { get; set; }
+    public int SmtpPort { get; set; }
+    public string SmtpUsername { get; set; }
+    public string SmtpPassword { get; set; }
+    public bool SmtpUseSsl { get; set; }
 
-    // 行为配置
-    public bool AutoReplyEnabled { get; set; } = true;
-    public int PollIntervalSeconds { get; set; } = 30;
-    public bool MarkSeen { get; set; } = true;
-    public int MaxBodyChars { get; set; } = 12000;
-    public IReadOnlyList<string> AllowFrom { get; set; } = Array.Empty<string>();
+    // 过滤配置
+    public IReadOnlyList<string> AllowFrom { get; set; }
+    public string SubjectPrefix { get; set; }
 }
 ```
 

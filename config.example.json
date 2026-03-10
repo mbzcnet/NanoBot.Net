@@ -95,5 +95,20 @@
       "DefaultLanguage": "auto",
       "SupportedLanguages": ["zh-CN", "en-US"]
     }
+  },
+  "FileTools": {
+    "UseEnhanced": false,
+    "Read": {
+      "MaxChars": 128000,
+      "MaxBytes": 51200,
+      "MaxLineLength": 2000,
+      "DefaultLineLimit": 2000,
+      "EnableBinaryDetection": true
+    },
+    "Edit": {
+      "SingleCandidateThreshold": 0.0,
+      "MultipleCandidatesThreshold": 0.3,
+      "EnableFuzzySuggestions": true
+    }
   }
 }

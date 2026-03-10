@@ -276,10 +276,10 @@ public partial class TelegramChannel : ChannelBase
                 {
                     ["message_id"] = message.MessageId,
                     ["user_id"] = user.Id,
-                    ["username"] = user.Username,
+                    ["username"] = user.Username ?? "",
                     ["first_name"] = user.FirstName,
                     ["is_group"] = message.Chat.Type != ChatType.Private,
-                    ["media_group_id"] = message.MediaGroupId
+                    ["media_group_id"] = message.MediaGroupId ?? ""
                 }
             });
 
@@ -315,7 +315,7 @@ public partial class TelegramChannel : ChannelBase
             {
                 ["message_id"] = message.MessageId,
                 ["user_id"] = user.Id,
-                ["username"] = user.Username,
+                ["username"] = user.Username ?? "",
                 ["first_name"] = user.FirstName,
                 ["is_group"] = message.Chat.Type != ChatType.Private
             }

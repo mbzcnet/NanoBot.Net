@@ -21,6 +21,8 @@ public class AgentConfig
     public WebUIConfig WebUI { get; set; } = new();
 
     public WebToolsConfig? WebTools { get; set; }
+
+    public FileToolsConfig? FileTools { get; set; }
 }
 
 public class WebToolsConfig

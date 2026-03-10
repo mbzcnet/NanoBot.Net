@@ -1,6 +1,7 @@
 using System.CommandLine;
 using NanoBot.Core.Configuration;
 using NanoBot.Cli.Services;
+using NanoBot.Infrastructure.Browser;
 
 namespace NanoBot.Cli.Commands;
 
@@ -56,6 +57,11 @@ public class OnboardCommand : ICliCommand
             description: "Run without prompts; use defaults or provided options"
         );
 
+        var skipBrowserInstallOption = new Option<bool>(
+            name: "--skip-browser-install",
+            description: "Skip Playwright browser installation"
+        );
+
         var command = new Command(Name, Description)
         {
             dirOption,
@@ -65,7 +71,8 @@ public class OnboardCommand : ICliCommand
             apiKeyOption,
             apiBaseOption,
             workspaceOption,
-            nonInteractiveOption
+            nonInteractiveOption,
+            skipBrowserInstallOption
         };
 
         command.SetHandler(async (context) =>
@@ -78,8 +85,9 @@ public class OnboardCommand : ICliCommand
             var apiBase = context.ParseResult.GetValueForOption(apiBaseOption);
             var workspace = context.ParseResult.GetValueForOption(workspaceOption);
             var nonInteractive = context.ParseResult.GetValueForOption(nonInteractiveOption);
+            var skipBrowserInstall = context.ParseResult.GetValueForOption(skipBrowserInstallOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteOnboardAsync(dir, name, provider, model, apiKey, apiBase, workspace, nonInteractive, cancellationToken);
+            await ExecuteOnboardAsync(dir, name ?? "NanoBot", provider, model, apiKey, apiBase, workspace, nonInteractive, skipBrowserInstall, cancellationToken);
         });
 
         return command;
@@ -94,6 +102,7 @@ public class OnboardCommand : ICliCommand
         string? apiBase,
         string? workspace,
         bool nonInteractive,
+        bool skipBrowserInstall,
         CancellationToken cancellationToken)
     {
         var configPath = GetConfigPath();
@@ -147,6 +156,12 @@ public class OnboardCommand : ICliCommand
         }
 
         await CreateWorkspaceTemplatesAsync(resolvedWorkspacePath, cancellationToken);
+
+        // Install Playwright browsers
+        if (!skipBrowserInstall)
+        {
+            await InstallPlaywrightBrowsersAsync(nonInteractive, cancellationToken);
+        }
 
         if (nonInteractive)
         {
@@ -391,6 +406,9 @@ public class OnboardCommand : ICliCommand
 
         await CreateWorkspaceTemplatesAsync(workspacePath, cancellationToken);
 
+        // Install Playwright browsers (if not already installed)
+        await InstallPlaywrightBrowsersAsync(nonInteractive: true, cancellationToken);
+
         Console.WriteLine("\n🐈 nbot is ready!");
         PrintNextSteps(config, configPath);
     }
@@ -437,6 +455,78 @@ public class OnboardCommand : ICliCommand
             return Path.Combine(homeDir, path[2..]);
         }
         return Path.GetFullPath(path);
+    }
+
+    private static async Task InstallPlaywrightBrowsersAsync(bool nonInteractive, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Browser Tools Setup ===\n");
+
+        var installer = new PlaywrightInstaller();
+
+        // Check if already installed
+        Console.WriteLine("Checking Playwright browser installation...");
+        if (await installer.IsInstalledAsync(cancellationToken))
+        {
+            Console.WriteLine("✓ Playwright browsers already installed");
+            return;
+        }
+
+        // Ask user if they want to install (unless non-interactive)
+        if (!nonInteractive)
+        {
+            Console.WriteLine("Browser automation tools require Playwright browsers to be installed.");
+            Console.Write("Install Playwright browsers now? [Y/n]: ");
+            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+            if (response == "n" || response == "no")
+            {
+                Console.WriteLine("⚠ Skipped Playwright browser installation.");
+                Console.WriteLine("  You can install manually later by running:");
+                Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
+                Console.WriteLine("    playwright install chromium");
+                return;
+            }
+        }
+
+        // Install browsers
+        Console.WriteLine("Installing Playwright browsers (this may take a few minutes)...");
+        Console.WriteLine("  Installing Chromium...");
+
+        try
+        {
+            var success = await installer.InstallAsync(new[] { "chromium" }, cancellationToken);
+            if (success)
+            {
+                Console.WriteLine("✓ Playwright browsers installed successfully");
+            }
+            else
+            {
+                var errorMessage = installer.GetStatusMessage();
+                Console.WriteLine("✗ Failed to install Playwright browsers automatically.");
+
+                // Check for platform not supported errors
+                if (errorMessage.Contains("does not support") || errorMessage.Contains("unsupported") || errorMessage.Contains("operating system may not be supported"))
+                {
+                    Console.WriteLine("\n  Note: Your operating system may not be officially supported by Playwright.");
+                    Console.WriteLine("  You can try one of the following:");
+                    Console.WriteLine("    1. Use Docker with a supported Linux distribution (Ubuntu 20.04/22.04/24.04)");
+                    Console.WriteLine("    2. Use WSL2 if on Windows");
+                    Console.WriteLine("    3. Skip browser installation with --skip-browser-install flag");
+                }
+                else
+                {
+                    Console.WriteLine("  Please install manually:");
+                    Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
+                    Console.WriteLine("    playwright install chromium");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"✗ Error during Playwright browser installation: {ex.Message}");
+            Console.WriteLine("  Please install manually:");
+            Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
+            Console.WriteLine("    playwright install chromium");
+        }
     }
 
     private static async Task CreateWorkspaceTemplatesAsync(string workspacePath, CancellationToken cancellationToken)

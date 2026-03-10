@@ -27,6 +27,32 @@
 - 收紧 tool 结果回放策略：重载时仅保留 snapshot/capture 对应图片，其他 tool 纯文本与错误内容不再回放到对话气泡，提升与实时视图一致性。
 - 修复重载图片丢失：会话回放解析 tool 结果时新增双层 JSON 与 `\u0022` 转义修复，兼容 `"{\"action\":\"snapshot\"...}"` 与 `{\\u0022action\\u0022...}` 格式并正确提取 `imagePath`。
 
+# 2026-03-10
+
+- 实现增强版文件编辑工具（FileTools Enhancement）：
+  - 新增 8 种文本匹配策略：精确匹配、行修剪匹配、块锚点匹配、空白规范化、缩进灵活匹配、转义规范化、边界修剪匹配、上下文感知匹配
+  - 新增行尾规范化处理（CRLF/LF 自动转换）
+  - 新增模糊匹配建议功能，匹配失败时提供最佳匹配位置提示
+  - 新增文件大小限制保护（默认 128KB 字符限制）
+  - 新增二进制文件检测（扩展名 + 内容采样）
+  - 新增差异生成和 diff 预览功能
+  - 配置支持通过 `FileToolsConfig.UseEnhanced` 开关切换新旧实现
+  - 所有更改向后兼容，现有 FileTools API 保持不变
+- 创建 FileTools 增强设计文档：doc.ai/solutions/design/FileTools-Enhancement.md
+- 新增配置类：FileToolsConfig、FileReadConfig、FileEditConfig
+- 所有 25 个现有 FileTools 测试通过
+
+# 2026-03-10
+
+- 创建 WebUI 增强实现方案：基于 OpenCode 对比分析报告，制定 6 项核心功能增强方案
+  - 实时同步 (Real-time Sync)：基于 SignalR 的多客户端同步机制
+  - 密码保护 (Password Protection)：BCrypt 会话级密码保护
+  - 过期时间 (Expiration Time)：会话过期自动清理机制
+  - 快捷键 (Keyboard Shortcuts)：全局快捷键支持
+  - 拖拽上传 (Drag & Drop Upload)：文件拖拽上传功能
+  - 消息样式优化 (Message Style Enhancement)：增强 Markdown 渲染和交互
+- 更新功能清单 (Feature-List.md)：添加 8 个新功能项，状态为计划中
+
 # 2026-03-07
 
 - 修复多模态图片注入：AgentRuntime 解析用户消息中的 Markdown 图片 URL，并将会话本地图片作为二进制内容附加到用户消息，确保模型可真实接收图片输入。

@@ -5,7 +5,7 @@ public class LlmProfile
     /// <summary>
     /// 显示名称，用于UI展示。为空时默认使用 "{Provider}-{Model}"
     /// </summary>
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; set; } = "default";
 
     public string Model { get; set; } = string.Empty;
 
@@ -32,5 +32,5 @@ public class LlmConfig
 {
     public Dictionary<string, LlmProfile> Profiles { get; set; } = new();
 
-    public string? DefaultProfile { get; set; }
+    public string? DefaultProfile { get; set; } = "default";
 }

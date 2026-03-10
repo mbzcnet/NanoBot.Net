@@ -61,6 +61,7 @@ NanoBot.Cli → NanoBot.Agent → NanoBot.Core (abstractions/interfaces)
 - When executing plans, must read the design documents in `doc.ai/solutions`.
 - When executing plans, must read the original project's source code related to the plan.
 - When writing solution design documents in `doc.ai/solutions`, do not write implementation code; only allow interface classes, properties, method signatures, etc.
+- For all documents created in the `doc.ai` directory, no implementation code is allowed; only signatures (class names, method names, property names, parameter names, parameter types, etc.) related to code design may be provided.
 - When adding new designs (new classes), browse `doc.ai/solutions/Feature-List.md` to ensure alignment with existing design, no architecture breaking, and no redundant design.
 - When committing code, do not include the `Temp` directory.
 - For all new features, refactoring, or optimizations, record changes in `doc.ai/update/update_logs.md`.

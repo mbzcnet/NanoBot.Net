@@ -1,0 +1,18 @@
+@using NanoBot.Core.Messages
+@using NanoBot.WebUI.Components.Shared
+
+<div class="text-part">
+    @if (Part.Synthetic)
+    {
+        <div class="text-synthetic-indicator">
+            <span class="badge bg-secondary">System</span>
+        </div>
+    }
+    <div class="text-content">
+        <MarkdownRenderer Content="@Part.Text" />
+    </div>
+</div>
+
+@code {
+    [Parameter] public TextPart Part { get; set; } = null!;
+}

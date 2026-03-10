@@ -1,0 +1,56 @@
+@using NanoBot.Core.Messages
+
+<div class="reasoning-part mb-2">
+    <div class="reasoning-header d-flex align-items-center p-2 rounded"
+         style="cursor: pointer; background-color: rgba(108, 117, 125, 0.1);"
+         @onclick="ToggleOpen">
+
+        @* 推理图标 *@
+        <div class="reasoning-icon me-2">
+            <i class="bi @GetReasoningIcon()"></i>
+        </div>
+
+        @* 推理标题 *@
+        <div class="reasoning-title flex-grow-1">
+            <span class="fw-medium">@GetReasoningTitle()</span>
+        </div>
+
+        @* 展开/折叠图标 *@
+        <div class="reasoning-toggle">
+            <i class="bi @(IsOpen ? "chevron-up" : "chevron-down")"></i>
+        </div>
+    </div>
+
+    @if (IsOpen)
+    {
+        <div class="reasoning-content p-2 border rounded-bottom">
+            <div class="text-muted" style="white-space: pre-wrap;">@Part.Content</div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public ReasoningPart Part { get; set; } = null!;
+
+    private bool IsOpen { get; set; } = false;
+
+    private void ToggleOpen() => IsOpen = !IsOpen;
+
+    private string GetReasoningIcon() => Part.ReasoningType switch
+    {
+        ReasoningType.Planning => "bi-calendar-check",
+        ReasoningType.Analysis => "bi-graph-up",
+        ReasoningType.Verification => "bi-check2-circle",
+        ReasoningType.Reflection => "bi-mirror",
+        _ => "bi-lightbulb"
+    };
+
+    private string GetReasoningTitle() => Part.ReasoningType switch
+    {
+        ReasoningType.Planning => "Planning",
+        ReasoningType.Analysis => "Analysis",
+        ReasoningType.Verification => "Verification",
+        ReasoningType.Reflection => "Reflection",
+        _ => Part.Summary ? "Summary" : "Reasoning"
+    };
+}

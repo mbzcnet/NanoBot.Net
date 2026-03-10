@@ -99,7 +99,7 @@ public static class MessageSanitizer
     public static IList<ChatMessage> SanitizeMessages(IList<ChatMessage> messages)
     {
         if (messages == null || messages.Count == 0)
-            return messages;
+            return new List<ChatMessage>();
 
         var sanitized = new List<ChatMessage>(messages.Count);
 

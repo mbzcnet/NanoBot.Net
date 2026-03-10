@@ -8,11 +8,11 @@ namespace NanoBot.Providers.Tests;
 public class MessageSanitizerTests
 {
     [Fact]
-    public void SanitizeMessages_Null_ReturnsNull()
+    public void SanitizeMessages_Null_ReturnsEmptyList()
     {
         var result = MessageSanitizer.SanitizeMessages(null!);
 
-        Assert.Null(result);
+        Assert.Empty(result);
     }
 
     [Fact]

@@ -419,6 +419,7 @@ public static class ServiceCollectionExtensions
         AgentOptions? agentOptions = null)
     {
         var configuration = BuildConfiguration(configPath);
+        services.AddSingleton(configuration); // Register configuration
         return services.AddNanoBot(configuration, agentOptions);
     }
 

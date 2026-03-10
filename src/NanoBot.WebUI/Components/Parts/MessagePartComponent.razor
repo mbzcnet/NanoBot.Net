@@ -1,0 +1,36 @@
+@using NanoBot.Core.Messages
+
+@* Part 组件分发器 - 根据 Part 类型渲染对应组件 *@
+@switch (Part)
+{
+    case TextPart textPart:
+        <TextPartComponent Part="textPart" />
+        break;
+
+    case ToolPart toolPart:
+        <ToolPartComponent Part="toolPart"
+                          HideDetails="HideDetails"
+                          DefaultOpen="DefaultOpen" />
+        break;
+
+    case FilePart filePart:
+        <FilePartComponent Part="filePart" />
+        break;
+
+    case ReasoningPart reasoningPart:
+        <ReasoningPartComponent Part="reasoningPart" />
+        break;
+
+    default:
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i>
+            Unknown part type: @Part?.GetType().Name
+        </div>
+        break;
+}
+
+@code {
+    [Parameter] public MessagePart? Part { get; set; }
+    [Parameter] public bool HideDetails { get; set; } = false;
+    [Parameter] public bool DefaultOpen { get; set; } = false;
+}

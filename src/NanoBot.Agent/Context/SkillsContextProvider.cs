@@ -34,14 +34,14 @@ public class SkillsContextProvider : AIContextProvider
         {
             await EnsureCacheAsync(cancellationToken);
 
-            if (_cachedAlwaysSkills.Count == 0 && string.IsNullOrEmpty(_cachedSkillsSummary))
+            if (_cachedAlwaysSkills?.Count == 0 && string.IsNullOrEmpty(_cachedSkillsSummary))
             {
                 return new AIContext();
             }
 
             var instructions = new StringBuilder();
 
-            if (_cachedAlwaysSkills.Count > 0 && !string.IsNullOrEmpty(_cachedAlwaysSkillsContent))
+            if (_cachedAlwaysSkills?.Count > 0 && !string.IsNullOrEmpty(_cachedAlwaysSkillsContent))
             {
                 instructions.AppendLine("# Active Skills");
                 instructions.AppendLine();

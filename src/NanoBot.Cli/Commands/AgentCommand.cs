@@ -88,7 +88,7 @@ public class AgentCommand : ICliCommand
             var skipCheck = context.ParseResult.GetValueForOption(skipCheckOption);
             var streaming = context.ParseResult.GetValueForOption(streamingOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, streaming, cancellationToken);
+            await ExecuteAgentAsync(message, session ?? "cli:direct", configPath, markdown, logs, skipCheck, streaming, cancellationToken);
         });
 
         return command;
