@@ -76,11 +76,11 @@ public class ConfigurationCheckerTests : IDisposable
 }
 
     [Fact]
-    public void WorkspaceConfig_DefaultPath_ShouldBeDotNbot()
+    public void WorkspaceConfig_DefaultPath_ShouldBeInHomeDirectory()
     {
         var workspace = new WorkspaceConfig();
 
-        workspace.Path.Should().Be(".nbot");
+        workspace.Path.Should().Be("~/.nbot/workspace");
     }
 
     [Fact]

@@ -14,7 +14,7 @@ public class OnboardCommand : ICliCommand
     {
         var dirOption = new Option<string?>(
             name: "--dir",
-            description: "Workspace directory path (default: .nbot in current directory)"
+            description: "Workspace directory path (default: ~/.nbot/workspace)"
         );
 
         var nameOption = new Option<string>(
@@ -445,7 +445,7 @@ public class OnboardCommand : ICliCommand
         return Path.Combine(homeDir, ".nbot", "config.json");
     }
 
-    private static string GetDefaultWorkspacePath() => ".nbot";
+    private static string GetDefaultWorkspacePath() => "~/.nbot/workspace";
 
     private static string ResolvePath(string path)
     {

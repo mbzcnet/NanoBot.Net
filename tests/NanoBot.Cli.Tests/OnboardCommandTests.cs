@@ -39,9 +39,9 @@ public class OnboardCommandTests
             var doc = JsonDocument.Parse(configJson);
             doc.RootElement.TryGetProperty("workspace", out var workspaceEl).Should().BeTrue();
             workspaceEl.TryGetProperty("path", out var pathEl).Should().BeTrue();
-            pathEl.GetString().Should().Be(".nbot");
+            pathEl.GetString().Should().Be("~/.nbot/workspace");
 
-            var workspaceDir = Path.Combine(tempDir, ".nbot");
+            var workspaceDir = Path.Combine(tempDir, ".nbot", "workspace");
             Directory.Exists(workspaceDir).Should().BeTrue();
             File.Exists(Path.Combine(workspaceDir, "AGENTS.md")).Should().BeTrue();
             File.Exists(Path.Combine(workspaceDir, "SOUL.md")).Should().BeTrue();
