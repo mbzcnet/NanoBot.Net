@@ -276,9 +276,10 @@ public class CronServiceTests : IDisposable
         var job = service.AddJob(definition);
         await service.RunJobAsync(job.Id);
 
-        var eventArgs = await Task.WhenAny(tcs.Task, Task.Delay(5000)) as Task<CronJobEventArgs>;
-        Assert.NotNull(eventArgs);
-        Assert.True(eventArgs.Result.Success);
+        var completedTask = await Task.WhenAny(tcs.Task, Task.Delay(5000));
+        Assert.True(tcs.Task.IsCompleted, "Expected event to be raised within timeout");
+        var eventArgs = tcs.Task.Result;
+        Assert.True(eventArgs.Success);
 
         await service.StopAsync();
     }

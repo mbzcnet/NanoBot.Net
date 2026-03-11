@@ -25,25 +25,29 @@ public class FileToolsExecutionTests : IDisposable
     private static async Task<string> CallReadFileAsync(string path, int? startLine = null, int? endLine = null, string? allowedDir = null)
     {
         var method = typeof(FileTools).GetMethod("ReadFileAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<string>)method.Invoke(null, new object[] { path, startLine, endLine, allowedDir, CancellationToken.None })!;
+        var result = method.Invoke(null, new object[] { path, startLine, endLine, allowedDir, CancellationToken.None });
+        return await (Task<string>)result!;
     }
 
     private static async Task<string> CallWriteFileAsync(string path, string content, string? allowedDir = null)
     {
         var method = typeof(FileTools).GetMethod("WriteFileAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<string>)method.Invoke(null, new object[] { path, content, allowedDir, CancellationToken.None })!;
+        var result = method.Invoke(null, new object[] { path, content, allowedDir, CancellationToken.None });
+        return await (Task<string>)result!;
     }
 
     private static async Task<string> CallEditFileAsync(string path, string oldStr, string newStr, string? allowedDir = null)
     {
         var method = typeof(FileTools).GetMethod("EditFileAsync", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return await (Task<string>)method.Invoke(null, new object[] { path, oldStr, newStr, allowedDir, CancellationToken.None })!;
+        var result = method.Invoke(null, new object[] { path, oldStr, newStr, allowedDir, CancellationToken.None });
+        return await (Task<string>)result!;
     }
 
     private static string CallListDir(string path, bool recursive = false, string? allowedDir = null)
     {
         var method = typeof(FileTools).GetMethod("ListDir", BindingFlags.NonPublic | BindingFlags.Static)!;
-        return (string)method.Invoke(null, new object[] { path, recursive, allowedDir })!;
+        var result = method.Invoke(null, new object[] { path, recursive, allowedDir });
+        return (string)result!;
     }
 
     #region ReadFile Tests

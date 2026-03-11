@@ -35,7 +35,7 @@ public class TokenCountingChatClient : IChatClient
             var usage = response.Usage;
             var tokenUsage = new TokenUsage
             {
-                Input = (int)usage.InputTokenCount,
+                Input = (int)(usage.InputTokenCount ?? 0),
                 Output = (int)(usage.OutputTokenCount ?? 0),
                 Reasoning = GetAdditionalCount(usage, "reasoning"),
                 Cache = GetCacheUsage(usage)

@@ -207,7 +207,7 @@
             {
                 _config = await Task.Run(async () => 
                     await ConfigurationLoader.LoadAsync(_configPath, CancellationToken.None));
-                _selectedDefaultProfile = _config.Llm.DefaultProfile;
+                _selectedDefaultProfile = _config?.Llm?.DefaultProfile ?? string.Empty;
             }
             else
             {
@@ -241,7 +241,7 @@
             }
 
             await ConfigurationLoader.SaveAsync(_configPath, _config, CancellationToken.None);
-            _selectedDefaultProfile = _config.Llm.DefaultProfile;
+            _selectedDefaultProfile = _config?.Llm?.DefaultProfile ?? string.Empty;
 
             // 清除 agent 缓存，使配置修改立即生效
             AgentRuntime.ClearAgentCache();

@@ -64,9 +64,10 @@ public class JsonSerializationTests
 
         // 3. Simulate SessionService reading this line
         var loadedMsg = JsonSerializer.Deserialize<JsonElement>(jsonlLine);
-        string loadedContent = loadedMsg.GetProperty("content").GetString();
+        string? loadedContent = loadedMsg.GetProperty("content").GetString();
 
         // loadedContent should match toolResultString exactly
+        Assert.NotNull(loadedContent);
         Assert.Equal(toolResultString, loadedContent);
         Assert.Contains("网易", loadedContent);
         Assert.DoesNotContain("\\u", loadedContent);

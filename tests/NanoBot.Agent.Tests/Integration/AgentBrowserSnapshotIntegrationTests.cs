@@ -95,7 +95,6 @@ public class AgentBrowserSnapshotIntegrationTests : IDisposable
         // Setup ChatClient mock to simulate LLM calling the tool
         // First call: returns FunctionCall
         // Second call: returns text response
-        var toolCallId = "call_123";
         var arguments = new Dictionary<string, object?>
         {
             ["action"] = "snapshot",
@@ -182,8 +181,8 @@ public class AgentBrowserSnapshotIntegrationTests : IDisposable
             LogLevel.Warning,
             It.IsAny<EventId>(),
             It.Is<It.IsAnyType>((v, t) => v.ToString().Contains("BuildSnapshotImageMarkdown")),
-            It.IsAny<Exception>(),
-            It.IsAny<Func<It.IsAnyType, Exception, string>>()), Times.Never);
+            It.IsAny<Exception?>(),
+            It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Never);
 
         // Assert
         // Check if we received the snapshot injection

@@ -32,7 +32,7 @@
                               RequiredError="请输入 Profile 标识"
                               Variant="Variant.Outlined"
                               HelperText="配置的唯一标识符，仅限字母、数字、小数点、横线、下划线（如：default, openai-gpt4）"
-                              Validation="ValidateProfileName"
+                              Validation="@(ValidateProfileName)"
                               Class="mb-4" />
 
                 <MudTextField @bind-Value="_profile.Name"
