@@ -2,9 +2,12 @@ using System.Reflection;
 using System.CommandLine;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NanoBot.Cli.Commands;
 using NanoBot.Cli.Extensions;
+using NanoBot.Core.Benchmark;
 using NanoBot.Core.Configuration;
+using NanoBot.Providers.Benchmark;
 
 namespace NanoBot.Cli;
 
@@ -29,6 +32,9 @@ public static class Program
 
         var services = new ServiceCollection();
         services.AddNanoBot(config);
+
+        // Register benchmark services
+        services.AddSingleton<IBenchmarkEngine, BenchmarkEngine>();
 
         var provider = services.BuildServiceProvider();
         NanoBotCommandBase.Initialize(provider, config, configPath);
@@ -89,7 +95,8 @@ public static class Program
             new CronCommand(),
             new McpCommand(),
             new ChannelsCommand(),
-            new ProviderCommand()
+            new ProviderCommand(),
+            new BenchmarkCommand()
         };
     }
 }

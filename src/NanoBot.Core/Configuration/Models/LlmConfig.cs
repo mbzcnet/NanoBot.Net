@@ -1,3 +1,5 @@
+using NanoBot.Core.Benchmark;
+
 namespace NanoBot.Core.Configuration;
 
 public class LlmProfile
@@ -20,6 +22,11 @@ public class LlmProfile
     public int MaxTokens { get; set; } = 4096;
 
     public string? SystemPrompt { get; set; }
+
+    /// <summary>
+    /// 模型能力属性（JSON序列化）
+    /// </summary>
+    public ModelCapabilities? Capabilities { get; set; }
 
     /// <summary>
     /// 获取显示名称，优先使用 Name 属性，为空则返回 "{Provider}-{Model}"
