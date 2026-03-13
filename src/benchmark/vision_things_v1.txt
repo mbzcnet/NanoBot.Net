@@ -1,0 +1,15 @@
+A collection of everyday objects and geometric shapes arranged on a light gray background:
+
+Top row:
+- A solid blue circle with black border
+- A solid red square with black border
+
+Middle row:
+- A white ceramic coffee mug with handle
+- A solid green 3D cube
+
+Bottom row:
+- A black smartphone (iPhone-style) lying flat
+- A green apple with stem
+
+The image tests object recognition capabilities including shapes (circle, square, cube), colors (blue, red, green, white, black), and real-world items (mug, phone, fruit).

@@ -9,7 +9,27 @@
       "Bash(git reset HEAD)",
       "Bash(dotnet build src/NanoBot.Core/NanoBot.Core.csproj src/NanoBot.Tools/NanoBot.Tools.csproj src/NanoBot.Infrastructure/NanoBot.Infrastructure.csproj src/NanoBot.Channels/NanoBot.Channels.csproj src/NanoBot.Providers/NanoBot.Providers.csproj src/NanoBot.Agent/NanoBot.Agent.csproj src/NanoBot.Cli/NanoBot.Cli.csproj)",
       "Bash(dotnet build src/NanoBot.WebUI/NanoBot.WebUI.csproj)",
-      "Bash(git -C /home/victor/Code/NanoBot.Net status --porcelain)"
+      "Bash(git -C /home/victor/Code/NanoBot.Net status --porcelain)",
+      "Bash(chmod +x \"/Users/victor/Code/NanoBot.Net/Temp/git-pull-all.sh\")",
+      "Bash(./git-pull-all.sh)",
+      "Bash(dotnet run --project src/NanoBot.Cli/NanoBot.Cli.csproj -- benchmark --profile default)",
+      "Read(//Users/victor/.nbot/**)",
+      "Bash(git add src/NanoBot.Core/Benchmark/ src/NanoBot.Providers/Benchmark/ src/NanoBot.Cli/Commands/BenchmarkCommand.cs src/NanoBot.Cli/Program.cs src/NanoBot.Core/Configuration/Models/LlmConfig.cs doc.ai/solutions/design/Model-Benchmark.md)",
+      "Bash(git commit:*)",
+      "Bash(dotnet run --project src/NanoBot.Cli -- benchmark --config config.json)",
+      "Bash(dotnet run --project src/NanoBot.Cli -- --config config.json benchmark)",
+      "Bash(export OPENAI_API_KEY=\"test-key\")",
+      "Bash(dotnet run --project src/NanoBot.Cli -- benchmark --profile default)",
+      "Bash(export OPENAI_API_KEY=\"sk-test\")",
+      "Bash(dotnet run --project src/NanoBot.Cli -- benchmark)",
+      "Bash(dotnet package search Microsoft.Agents.AI --source nuget.org --prerelease)",
+      "Bash(dotnet run --project src/NanoBot.Cli -- agent -m \"pwd\")",
+      "Bash(dotnet run --project src/NanoBot.Cli -- benchmark 2)",
+      "Bash(1)",
+      "Bash(xargs -I {} cat ~/.nbot/workspace/.benchmark/{}/tool_shell/output.json)"
+    ],
+    "additionalDirectories": [
+      "/Users/victor/Code/NanoBot.Net"
     ]
   }
 }

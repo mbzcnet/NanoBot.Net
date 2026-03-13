@@ -181,8 +181,6 @@ nbot config --list
 
 Configuration is loaded from (in order):
 1. `--config` command line option
-2. `config.json` in current directory
-3. `agent.json` in current directory
 4. `~/.nbot/config.json`
 
 Environment variables are supported with `NBOT_` prefix:

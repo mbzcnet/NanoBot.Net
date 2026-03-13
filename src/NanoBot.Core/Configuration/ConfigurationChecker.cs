@@ -113,19 +113,9 @@ public static class ConfigurationChecker
 
     private static IEnumerable<string> EnumerateDefaultConfigPaths()
     {
-        var cwd = Directory.GetCurrentDirectory();
-        var dir = new DirectoryInfo(cwd);
-        var maxHops = 12;
-
-        for (var i = 0; i < maxHops && dir != null; i++)
-        {
-            yield return Path.Combine(dir.FullName, ".nbot", "config.json");
-            yield return Path.Combine(dir.FullName, "config.json");
-            yield return Path.Combine(dir.FullName, "agent.json");
-            dir = dir.Parent;
-        }
-
         var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        // Only use ~/.nbot/config.json (and legacy ~/.nanobot/config.json)
         yield return Path.Combine(homeDir, ".nbot", "config.json");
         yield return Path.Combine(homeDir, ".nanobot", "config.json");
     }

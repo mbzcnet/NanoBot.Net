@@ -1,0 +1,15 @@
+AI Image Recognition Test
+
+This is a test to evaluate the ability of an AI system to recognize and interpret visual data. The system should identify key elements such as text, formatting, and simple charts.
+
+The image contains:
+- Title: "AI Image Recognition Test" in bold
+- A paragraph explaining the test purpose
+- A bar chart with three categories (A, B, C) showing values approximately:
+  - A: ~18
+  - B: ~22 (highest)
+  - C: ~20
+- A line graph showing an upward trend across three points (X, Y, Z) with values approximately:
+  - X: 8
+  - Y: 10
+  - Z: ~12
