@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Benchmark;
 
@@ -28,8 +29,8 @@ public class BenchmarkEngine : IBenchmarkEngine
     }
 
     public async Task<BenchmarkResult> RunBenchmarkAsync(
-        object chatClient,
-        IReadOnlyList<object> tools,
+        IChatClient chatClient,
+        IReadOnlyList<AITool> tools,
         CancellationToken cancellationToken = default)
     {
         var result = new BenchmarkResult
@@ -66,9 +67,11 @@ public class BenchmarkEngine : IBenchmarkEngine
         }
 
         // Run vision tests
+        _logger.LogInformation("Starting {Count} vision test cases...", visionCases.Count);
         foreach (var testCase in visionCases)
         {
-            var caseResult = await EvaluateVisionCaseAsync(testCase, cancellationToken);
+            _logger.LogInformation("Running vision case: {CaseId} - {CaseName}", testCase.Id, testCase.Name);
+            var caseResult = await EvaluateVisionCaseAsync(testCase, chatClient, cancellationToken);
             caseResult.Category = "vision";
             result.CaseResults.Add(caseResult);
 
@@ -79,7 +82,7 @@ public class BenchmarkEngine : IBenchmarkEngine
             }
             result.VisionTotalCount++;
 
-            _logger.LogInformation("Vision case {CaseId}: {Passed}", caseResult.CaseId, caseResult.Passed);
+            _logger.LogInformation("Vision case {CaseId}: {Passed} (Score: {Score})", caseResult.CaseId, caseResult.Passed, caseResult.Score);
         }
 
         // Calculate 100-point scores
@@ -209,8 +212,8 @@ public class BenchmarkEngine : IBenchmarkEngine
             result.ResponseContent = output;
             result.RequestMessages = testCase.Input;
 
-            // Validate tool call by checking keywords in output
-            result.Passed = ValidateToolOutput(output, testCase.Keywords);
+            // Validate tool call by checking tool calls and keywords
+            result.Passed = ValidateToolOutput(output, testCase.Keywords, testCase.RequiredTools);
             result.Score = result.Passed ? testCase.Score : 0;
 
             _logger.LogInformation("Tool case {CaseId} validation: {Passed}", testCase.Id, result.Passed);
@@ -232,34 +235,97 @@ public class BenchmarkEngine : IBenchmarkEngine
         return result;
     }
 
-    private bool ValidateToolOutput(string output, List<string> keywords)
+    private bool ValidateToolOutput(string output, List<string> keywords, List<string> requiredTools)
     {
         if (string.IsNullOrWhiteSpace(output))
-            return false;
-
-        // If no keywords defined, just check if there's a meaningful response
-        if (keywords.Count == 0)
-            return output.Length > 10;
-
-        // Check if any keyword appears in the output (case insensitive)
-        var outputLower = output.ToLowerInvariant();
-        var matchedCount = 0;
-
-        foreach (var keyword in keywords)
         {
-            if (outputLower.Contains(keyword.ToLowerInvariant()))
+            _logger.LogWarning("Output is empty");
+            return false;
+        }
+
+        // Check for tool call markers [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
+        var toolCallPattern = @"\[TABLET_TOOL_CALL\](.*?)\[/TABLET_TOOL_CALL\]";
+        var matches = System.Text.RegularExpressions.Regex.Matches(output, toolCallPattern);
+        
+        if (matches.Count == 0)
+        {
+            _logger.LogWarning("No tool calls found in output");
+            return false;
+        }
+
+        _logger.LogInformation("Found {Count} tool calls in output", matches.Count);
+
+        // Extract tool names from tool calls
+        var calledTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            var toolCall = match.Groups[1].Value;
+            // Extract tool name (everything before the first '(')
+            var toolName = toolCall.Split('(')[0].Trim();
+            if (!string.IsNullOrWhiteSpace(toolName))
             {
-                matchedCount++;
+                calledTools.Add(toolName);
+                _logger.LogDebug("Detected tool call: {ToolName}", toolName);
             }
         }
 
-        // Require at least 50% of keywords to match, or at least 1 if there are many keywords
-        var requiredMatchCount = Math.Max(1, keywords.Count / 2);
-        return matchedCount >= requiredMatchCount;
+        // Check if required tools are called
+        if (requiredTools.Count > 0)
+        {
+            var requiredMatchCount = 0;
+            foreach (var requiredTool in requiredTools)
+            {
+                // Check for exact match or partial match (e.g., "browser" matches "browser_navigate")
+                if (calledTools.Any(t => t.Equals(requiredTool, StringComparison.OrdinalIgnoreCase) ||
+                                         t.Contains(requiredTool, StringComparison.OrdinalIgnoreCase) ||
+                                         requiredTool.Contains(t, StringComparison.OrdinalIgnoreCase)))
+                {
+                    requiredMatchCount++;
+                    _logger.LogDebug("Required tool matched: {RequiredTool}", requiredTool);
+                }
+            }
+
+            // For multi-tool tests, require at least 1 tool to match
+            // For single-tool tests, require the specific tool
+            var requiredThreshold = requiredTools.Count > 1 ? 1 : 1;
+            if (requiredMatchCount >= requiredThreshold)
+            {
+                _logger.LogInformation("Required tools matched: {Matched}/{Total} (threshold: {Threshold})", 
+                    requiredMatchCount, requiredTools.Count, requiredThreshold);
+                return true;
+            }
+            
+            _logger.LogWarning("Required tools not matched: {Matched}/{Total}", requiredMatchCount, requiredTools.Count);
+        }
+
+        // Fallback to keyword matching if no required tools specified or not matched
+        if (keywords.Count > 0)
+        {
+            var outputLower = output.ToLowerInvariant();
+            var matchedCount = 0;
+
+            foreach (var keyword in keywords)
+            {
+                if (outputLower.Contains(keyword.ToLowerInvariant()))
+                {
+                    matchedCount++;
+                }
+            }
+
+            var requiredMatchCount = Math.Max(1, keywords.Count / 2);
+            var keywordMatched = matchedCount >= requiredMatchCount;
+            _logger.LogInformation("Keyword matching: {Matched}/{Required} - {Result}", 
+                matchedCount, requiredMatchCount, keywordMatched ? "PASSED" : "FAILED");
+            return keywordMatched;
+        }
+
+        // If we have tool calls but no specific requirements, consider it a pass
+        return matches.Count > 0;
     }
 
     private async Task<CaseResult> EvaluateVisionCaseAsync(
         BenchmarkCase testCase,
+        IChatClient chatClient,
         CancellationToken cancellationToken)
     {
         var result = new CaseResult
@@ -284,24 +350,42 @@ public class BenchmarkEngine : IBenchmarkEngine
                 return result;
             }
 
-            // Build vision prompt with image (English)
-            var messages = new List<Microsoft.Extensions.AI.ChatMessage>
+            // Load image data
+            var imageBytes = await File.ReadAllBytesAsync(imagePath, cancellationToken);
+            var mediaType = GetImageMediaType(imagePath);
+
+            // Build vision prompt with image
+            var contents = new List<AIContent>
             {
-                new(Microsoft.Extensions.AI.ChatRole.System, "You are an AI assistant. Please answer questions about images truthfully."),
-                new(Microsoft.Extensions.AI.ChatRole.User, $"[Image: {imagePath}]\n{testCase.Input}")
+                new DataContent(imageBytes, mediaType),
+                new TextContent(testCase.Input)
+            };
+
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, "You are an AI assistant. Please answer questions about images truthfully."),
+                new(ChatRole.User, contents)
             };
 
             result.RequestMessages = $"Image: {imagePath}\nQuestion: {testCase.Input}";
 
-            // For now, we'll use direct chat client call - but vision requires proper implementation
-            // This is a placeholder - actual vision testing would need the ChatClient to support image input
-            // TODO: Implement proper vision testing with IChatClient that supports images
+            _logger.LogInformation("Sending vision request for case {CaseId} with image {ImagePath}", testCase.Id, imagePath);
 
-            result.Passed = false; // Not implemented yet - need proper vision support
-            result.Score = 0;
-            result.ErrorMessage = "Vision test requires IChatClient with vision support - not yet implemented";
+            // Send request to chat client
+            var response = await chatClient.GetResponseAsync(
+                messages,
+                cancellationToken: cancellationToken);
 
-            _logger.LogWarning("Vision test not fully implemented for case {CaseId}", testCase.Id);
+            var responseText = response.Text ?? "";
+            result.ResponseContent = responseText;
+
+            _logger.LogInformation("Vision case {CaseId} response: {Response}", testCase.Id, responseText[..Math.Min(200, responseText.Length)]);
+
+            // Validate response by checking expected content
+            result.Passed = ValidateVisionOutput(responseText, testCase.ExpectedContent);
+            result.Score = result.Passed ? testCase.Score : 0;
+
+            _logger.LogInformation("Vision case {CaseId} validation: {Passed}", testCase.Id, result.Passed);
         }
         catch (Exception ex)
         {
@@ -314,23 +398,52 @@ public class BenchmarkEngine : IBenchmarkEngine
         return result;
     }
 
-    private async Task<string> RunAgentCommandAsync(string input, CancellationToken cancellationToken)
+    private string GetImageMediaType(string path)
     {
-        var nbotExe = GetNbotExecutable();
-        var args = $"agent -m \"{input}\"";
-
-        // If using dotnet, need to specify project path
-        if (nbotExe == "dotnet")
+        return Path.GetExtension(path).ToLowerInvariant() switch
         {
-            var projectPath = GetProjectPath();
-            if (!string.IsNullOrEmpty(projectPath))
+            ".png" => "image/png",
+            ".jpg" => "image/jpeg",
+            ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "image/png"
+        };
+    }
+
+    private bool ValidateVisionOutput(string output, List<string> expectedContent)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return false;
+
+        // If no expected content defined, just check if there's a meaningful response
+        if (expectedContent.Count == 0)
+            return output.Length > 10;
+
+        // Check if any expected content appears in the output (case insensitive)
+        var outputLower = output.ToLowerInvariant();
+        var matchedCount = 0;
+
+        foreach (var content in expectedContent)
+        {
+            if (outputLower.Contains(content.ToLowerInvariant()))
             {
-                args = $"run --project \"{projectPath}\" -- {args}";
+                matchedCount++;
             }
         }
 
+        // Require at least 50% of expected content to match, or at least 1 if there are many items
+        var requiredMatchCount = Math.Max(1, expectedContent.Count / 2);
+        return matchedCount >= requiredMatchCount;
+    }
+
+    private async Task<string> RunAgentCommandAsync(string input, CancellationToken cancellationToken)
+    {
+        var (nbotExe, args) = GetNbotCommand(input);
+
         _logger.LogInformation("Running: {Exe} {Args}", nbotExe, args);
-        _logger.LogInformation("Working directory: {Dir}", GetProjectPath());
 
         var startInfo = new ProcessStartInfo
         {
@@ -340,14 +453,13 @@ public class BenchmarkEngine : IBenchmarkEngine
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            WorkingDirectory = GetProjectPath()
+            WorkingDirectory = GetProjectPath() ?? Directory.GetCurrentDirectory()
         };
 
         // Add environment variables - need HOME for config lookup
         startInfo.Environment["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1";
         startInfo.Environment["HOME"] = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        // Set PATH to ensure dotnet can be found
-        startInfo.Environment["PATH"] = Environment.GetEnvironmentVariable("PATH");
+        startInfo.Environment["PATH"] = Environment.GetEnvironmentVariable("PATH") ?? "";
 
         using var process = new Process { StartInfo = startInfo };
         var output = new List<string>();
@@ -366,7 +478,7 @@ public class BenchmarkEngine : IBenchmarkEngine
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        // Wait for completion with timeout
+        // Wait for completion with timeout (60 seconds per test case)
         var completed = await Task.Run(() => process.WaitForExit(60000), cancellationToken);
 
         if (!completed)
@@ -375,15 +487,31 @@ public class BenchmarkEngine : IBenchmarkEngine
             throw new TimeoutException("Agent command timed out after 60 seconds");
         }
 
+        // Wait a bit for remaining output to be processed
+        await Task.Delay(500, cancellationToken);
+
         if (error.Count > 0 && !string.IsNullOrWhiteSpace(string.Join("\n", error)))
         {
             _logger.LogWarning("Agent stderr: {Error}", string.Join("\n", error));
         }
 
-        return string.Join("\n", output);
+        // Combine stdout and stderr
+        var stdout = string.Join("\n", output);
+        var stderr = string.Join("\n", error);
+        
+        var result = stdout;
+        if (!string.IsNullOrWhiteSpace(stderr))
+        {
+            result += "\n\n[STDERR]\n" + stderr;
+        }
+        
+        _logger.LogInformation("Command output length: {Length} chars (stdout: {Stdout}, stderr: {Stderr})", 
+            result.Length, stdout.Length, stderr.Length);
+        
+        return result;
     }
 
-    private string GetNbotExecutable()
+    private (string exe, string args) GetNbotCommand(string input)
     {
         // Try to find nbot in PATH first
         var pathEnv = Environment.GetEnvironmentVariable("PATH");
@@ -393,15 +521,57 @@ public class BenchmarkEngine : IBenchmarkEngine
             {
                 var nbotPath = Path.Combine(path, "nbot");
                 if (File.Exists(nbotPath))
-                    return nbotPath;
+                    return (nbotPath, $"agent -m \"{input}\"");
             }
         }
 
-        // Return dotnet - we'll specify project path in RunAgentCommandAsync
-        return "dotnet";
+        // Try to find compiled DLL
+        var dllPath = FindCompiledDll();
+        if (!string.IsNullOrEmpty(dllPath))
+        {
+            return ("dotnet", $"\"{dllPath}\" agent -m \"{input}\"");
+        }
+
+        // Fallback to dotnet run (slow, for development only)
+        var projectPath = GetProjectPath();
+        if (!string.IsNullOrEmpty(projectPath))
+        {
+            _logger.LogWarning("Using 'dotnet run' for benchmark - this is slow. Consider building the project first.");
+            return ("dotnet", $"run --project \"{projectPath}\" -- agent -m \"{input}\"");
+        }
+
+        throw new InvalidOperationException("Could not find nbot executable or project");
     }
 
-    private string GetProjectPath()
+    private string? FindCompiledDll()
+    {
+        // Navigate from benchmark directory to find compiled DLL
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var possiblePaths = new[]
+        {
+            // Try net10.0 first (current target framework)
+            Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "NanoBot.Cli", "bin", "Debug", "net10.0", "NanoBot.Cli.dll"),
+            Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "NanoBot.Cli", "bin", "Release", "net10.0", "NanoBot.Cli.dll"),
+            // Fallback to net9.0
+            Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "NanoBot.Cli", "bin", "Debug", "net9.0", "NanoBot.Cli.dll"),
+            Path.Combine(baseDir, "..", "..", "..", "..", "..", "src", "NanoBot.Cli", "bin", "Release", "net9.0", "NanoBot.Cli.dll"),
+            Path.Combine(baseDir, "NanoBot.Cli.dll"),
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (File.Exists(fullPath))
+            {
+                _logger.LogInformation("Found compiled DLL: {Path}", fullPath);
+                return fullPath;
+            }
+        }
+
+        return null;
+    }
+
+    private string? GetProjectPath()
     {
         // Navigate from benchmark directory to project root
         var baseDir = AppDomain.CurrentDomain.BaseDirectory;

@@ -12,7 +12,7 @@ namespace NanoBot.Cli.Commands;
 
 public class WebUICommand : ICliCommand
 {
-    public string Name => "webui";
+    public string Name => "web";
     public string Description => "Start WebUI server";
 
     public Command CreateCommand()

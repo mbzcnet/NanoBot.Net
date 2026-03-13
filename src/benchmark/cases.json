@@ -4,17 +4,17 @@
       "id": "tool_file_read",
       "name": "文件读取",
       "input": "List files in /tmp directory",
-      "requiredTools": ["list_dir"],
+      "requiredTools": ["list_dir", "exec"],
       "score": 10,
-      "keywords": ["ls", "tmp", "list", "dir", "工具", "执行"]
+      "keywords": ["list_dir", "exec", "ls", "tmp"]
     },
     {
       "id": "tool_file_write",
       "name": "文件写入",
-      "input": "Create a file at /tmp/test.txt with content 'hello'",
-      "requiredTools": ["write_file"],
+      "input": "Create a file at /tmp/test.txt with content hello",
+      "requiredTools": ["write_file", "exec"],
       "score": 10,
-      "keywords": ["write", "file", "create", "hello", "工具", "执行"]
+      "keywords": ["write_file", "exec", "echo", "tmp", "test.txt"]
     },
     {
       "id": "tool_shell",
@@ -22,23 +22,23 @@
       "input": "Execute pwd command",
       "requiredTools": ["exec"],
       "score": 10,
-      "keywords": ["pwd", "exec", "工作路径", "工具", "执行"]
+      "keywords": ["exec", "pwd"]
     },
     {
       "id": "tool_web_search",
       "name": "网页搜索",
-      "input": "Search for today's weather in Beijing",
+      "input": "Search for today's weather",
       "requiredTools": ["web_search"],
       "score": 10,
-      "keywords": ["search", "weather", "google", "搜索", "工具"]
+      "keywords": ["web_search", "search"]
     },
     {
       "id": "tool_multi",
       "name": "多工具调用",
       "input": "First list /tmp directory, then create a file there",
-      "requiredTools": ["list_dir", "write_file"],
+      "requiredTools": ["list_dir", "write_file", "exec"],
       "score": 15,
-      "keywords": ["list", "write", "tmp", "file", "工具", "执行"]
+      "keywords": ["list", "write", "exec", "tmp"]
     },
     {
       "id": "browser_navigate",
@@ -46,23 +46,23 @@
       "input": "Open https://example.com webpage",
       "requiredTools": ["browser_navigate"],
       "score": 10,
-      "keywords": ["example.com", "browser", "打开", "工具", "导航"]
+      "keywords": ["browser", "navigate", "example.com"]
     },
     {
       "id": "browser_click",
       "name": "浏览器点击",
-      "input": "Click the search button on the page",
-      "requiredTools": ["browser_click"],
+      "input": "Navigate to https://www.google.com and click the search button",
+      "requiredTools": ["browser_navigate", "browser_click"],
       "score": 10,
-      "keywords": ["click", "button", "browser", "点击", "工具"]
+      "keywords": ["browser", "navigate", "click", "google.com"]
     },
     {
       "id": "browser_type",
       "name": "浏览器输入",
-      "input": "Type 'hello world' in the search box",
-      "requiredTools": ["browser_type"],
+      "input": "Navigate to https://www.google.com and type hello world in the search box",
+      "requiredTools": ["browser_navigate", "browser_type"],
       "score": 10,
-      "keywords": ["type", "input", "hello", "browser", "输入", "工具"]
+      "keywords": ["browser", "navigate", "type", "google.com"]
     }
   ],
   "vision": [

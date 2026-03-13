@@ -15,7 +15,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 web_search(\"test query\")\n", result);
+        Assert.Equal("\n[TOOL_CALL]web_search(\"test query\")[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n🔧 web_search(\"{longQuery[..40]}…\")\n", result);
+        Assert.Equal($"\n[TOOL_CALL]web_search(\"{longQuery[..40]}…\")[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 web_search(\"test\"), read_file(\"/path/to/file\")\n", result);
+        Assert.Equal("\n[TOOL_CALL]web_search(\"test\")|||read_file(\"/path/to/file\")[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 get_time\n", result);
+        Assert.Equal("\n[TOOL_CALL]get_time()[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 calculate\n", result);
+        Assert.Equal("\n[TOOL_CALL]calculate()[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -82,7 +82,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 search\n", result);
+        Assert.Equal("\n[TOOL_CALL]search()[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -92,7 +92,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n🔧 \n", result);
+        Assert.Equal("\n[TOOL_CALL][/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -106,7 +106,7 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n🔧 search(\"{query}\")\n", result);
+        Assert.Equal($"\n[TOOL_CALL]search(\"{query}\")[/TOOL_CALL]\n", result);
     }
 
     [Fact]
@@ -120,6 +120,6 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n🔧 search(\"{query[..40]}…\")\n", result);
+        Assert.Equal($"\n[TOOL_CALL]search(\"{query[..40]}…\")[/TOOL_CALL]\n", result);
     }
 }

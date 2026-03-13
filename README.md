@@ -38,6 +38,7 @@
 - **Scheduled Tasks**: Cron-based job scheduling
 - **Heartbeat Service**: Periodic autonomous actions
 - **Skills System**: Loadable skill modules for extended capabilities
+- **Vision / Multi-modal**: Image input support in CLI and WebUI
 - **Feishu File Download**: Automatic download of images, audio, files, and media from Feishu messages
 - **Tool Hints**: Real-time display of tool call progress during agent execution
 
@@ -115,7 +116,7 @@ nbot agent -m "Hello, what can you do?"
 ### 3. Launch the WebUI
 
 ```bash
-nbot webui
+nbot web
 ```
 
 This command boots the Blazor-based WebUI. Useful options:
@@ -127,7 +128,7 @@ This command boots the Blazor-based WebUI. Useful options:
 If you prefer running directly from source without installing the global tool:
 
 ```bash
-dotnet run --project src/NanoBot.Cli -- webui --port 18888
+dotnet run --project src/NanoBot.Cli -- web --port 18888
 ```
 
 ## Commands
@@ -137,7 +138,7 @@ dotnet run --project src/NanoBot.Cli -- webui --port 18888
 | `nbot onboard` | Initialize workspace |
 | `nbot agent` | Start interactive chat |
 | `nbot agent -m "..."` | Send a single message |
-| `nbot webui` | Start the WebUI server |
+| `nbot web` | Start the WebUI server |
 | `nbot gateway` | Start gateway service mode |
 | `nbot status` | Show agent status |
 | `nbot config` | Manage configuration |
@@ -146,6 +147,30 @@ dotnet run --project src/NanoBot.Cli -- webui --port 18888
 | `nbot mcp` | Manage MCP servers |
 | `nbot channels` | Manage channels |
 | `nbot provider` | Manage OAuth providers |
+
+### Image / Vision Support
+
+NanoBot.Net supports multi-modal image input in CLI. Use Markdown image syntax to reference images:
+
+```bash
+# Using relative path (workspace root or sessions directory)
+nbot agent -m "Describe this image: ![alt](image.jpg)"
+
+# Using relative path to sessions folder
+nbot agent -m "What is in this image? ![photo](sessions/myimage.png)"
+
+# Using absolute path
+nbot agent -m "Analyze this: ![screenshot](/path/to/image.jpg)"
+```
+
+**Supported formats**: PNG, JPEG, GIF, WebP, BMP, SVG
+
+**Path resolution order**:
+1. Absolute paths (if file exists)
+2. Sessions directory (`~/.bot/workspace/sessions/`)
+3. Workspace root (`~/.bot/workspace/`)
+
+For interactive mode, simply paste the image reference in your message.
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 

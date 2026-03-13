@@ -646,7 +646,7 @@
 
     /// <summary>
     /// 从内容中提取工具调用信息
-    /// 格式: [TABLET_TOOL_CALL]tool_name("args")|||tool_name2("args")[/TABLET_TOOL_CALL]
+    /// 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
     /// </summary>
     private List<ToolCallInfo> ExtractToolCallsFromContent(string content)
     {
@@ -655,8 +655,8 @@
         if (string.IsNullOrEmpty(content))
             return toolCalls;
 
-        // 匹配 [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
-        var pattern = @"\[TABLET_TOOL_CALL\](.*?)\[/TABLET_TOOL_CALL\]";
+        // 匹配 [TOOL_CALL]...[/TOOL_CALL]
+        var pattern = @"\[TOOL_CALL\](.*?)\[/TOOL_CALL\]";
         var match = System.Text.RegularExpressions.Regex.Match(content, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
 
         if (match.Success && match.Groups.Count > 1)
@@ -724,8 +724,8 @@
         if (string.IsNullOrEmpty(content))
             return content;
 
-        // 移除 [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
-        var pattern = @"\[TABLET_TOOL_CALL\].*?\[/TABLET_TOOL_CALL\]";
+        // 移除 [TOOL_CALL]...[/TOOL_CALL]
+        var pattern = @"\[TOOL_CALL\].*?\[/TOOL_CALL\]";
         return System.Text.RegularExpressions.Regex.Replace(content, pattern, "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
     }
 

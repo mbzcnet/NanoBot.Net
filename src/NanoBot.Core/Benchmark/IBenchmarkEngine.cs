@@ -1,3 +1,5 @@
+using Microsoft.Extensions.AI;
+
 namespace NanoBot.Core.Benchmark;
 
 /// <summary>
@@ -9,7 +11,7 @@ public interface IBenchmarkEngine
     /// 运行评测
     /// </summary>
     Task<BenchmarkResult> RunBenchmarkAsync(
-        object chatClient,
-        IReadOnlyList<object> tools,
+        IChatClient chatClient,
+        IReadOnlyList<AITool> tools,
         CancellationToken cancellationToken = default);
 }

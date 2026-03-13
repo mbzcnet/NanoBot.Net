@@ -537,7 +537,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private static string WrapToolHintAsMarkdown(string toolHint)
     {
         // 直接返回 Markdown 格式
-        // 格式: [TABLET_TOOL_CALL]tool_name("args")|||tool_name2("args")[/TABLET_TOOL_CALL]
+        // 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
         return $"\n{toolHint}\n";
     }
 
@@ -676,13 +676,18 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         if (Path.IsPathRooted(imagePath))
         {
-            var rootPath = _workspace.GetSessionsPath();
-            if (!imagePath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
+            if (File.Exists(imagePath))
             {
-                return null;
+                return imagePath;
             }
 
-            return imagePath;
+            var sessionsRoot = _workspace.GetSessionsPath();
+            if (imagePath.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return imagePath;
+            }
+
+            return null;
         }
 
         var normalized = imagePath.Replace('\\', '/').TrimStart('/');
@@ -691,8 +696,21 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             normalized = normalized["sessions/".Length..];
         }
 
-        var sessionsRoot = _workspace.GetSessionsPath();
-        return Path.Combine(sessionsRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
+        var sessionsRoot2 = _workspace.GetSessionsPath();
+        var sessionPath = Path.Combine(sessionsRoot2, normalized.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(sessionPath))
+        {
+            return sessionPath;
+        }
+
+        var workspaceRoot = _workspace.GetWorkspacePath();
+        var workspacePath = Path.Combine(workspaceRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
+        if (File.Exists(workspacePath))
+        {
+            return workspacePath;
+        }
+
+        return null;
     }
 
     private ChatMessage BuildUserMessage(string content, IEnumerable<string>? extraImageUrls = null)

@@ -16,21 +16,34 @@ public class BenchmarkCommand : NanoBotCommandBase
 
     public override Command CreateCommand()
     {
-        var profileOption = new Option<string>(
+        var profileOption = new Option<string?>(
             name: "--profile",
-            description: "LLM 配置 profile 名称",
-            getDefaultValue: () => "default");
+            description: "LLM 配置 profile 名称（默认测试 default，使用 --all 测试所有）");
+
+        var allOption = new Option<bool>(
+            name: "--all",
+            description: "测试所有 LLM 配置",
+            getDefaultValue: () => false);
+
+        var forceOption = new Option<bool>(
+            name: "--force",
+            description: "强制覆盖已有测试结果，不询问",
+            getDefaultValue: () => false);
 
         var command = new Command(Name, Description)
         {
-            profileOption
+            profileOption,
+            allOption,
+            forceOption
         };
 
         command.SetHandler(async (context) =>
         {
             var profile = context.ParseResult.GetValueForOption(profileOption);
+            var all = context.ParseResult.GetValueForOption(allOption);
+            var force = context.ParseResult.GetValueForOption(forceOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteBenchmarkAsync(profile, cancellationToken);
+            await ExecuteBenchmarkAsync(profile, all, force, cancellationToken);
         });
 
         return command;
@@ -38,64 +51,156 @@ public class BenchmarkCommand : NanoBotCommandBase
 
     private async Task ExecuteBenchmarkAsync(
         string? profileName,
+        bool testAll,
+        bool force,
         CancellationToken cancellationToken)
     {
         var config = GetConfig();
         var configPath = GetConfigPath();
 
-        profileName ??= config.Llm.DefaultProfile ?? "default";
-
-        Console.WriteLine("🔧 模型可用性评测工具\n");
-
-        if (!config.Llm.Profiles.TryGetValue(profileName, out var profile))
+        // 确定要测试的 profiles
+        List<string> profilesToTest;
+        if (testAll)
         {
-            Console.WriteLine($"❌ 错误: Profile '{profileName}' 不存在");
-            Console.WriteLine($"可用的 profiles: {string.Join(", ", config.Llm.Profiles.Keys)}");
-            return;
+            profilesToTest = config.Llm.Profiles.Keys.ToList();
+            Console.WriteLine($"🔧 模型可用性评测工具 - 测试所有配置 ({profilesToTest.Count} 个)\n");
+        }
+        else
+        {
+            profileName ??= config.Llm.DefaultProfile ?? "default";
+            if (!config.Llm.Profiles.ContainsKey(profileName))
+            {
+                Console.WriteLine($"❌ 错误: Profile '{profileName}' 不存在");
+                Console.WriteLine($"可用的 profiles: {string.Join(", ", config.Llm.Profiles.Keys)}");
+                return;
+            }
+            profilesToTest = [profileName];
+            Console.WriteLine($"🔧 模型可用性评测工具\n");
         }
 
-        Console.WriteLine($"评测 profile: {profileName}");
-        Console.WriteLine($"模型: {profile.Provider}/{profile.Model}\n");
-
-        try
+        // 检查是否已有测试结果
+        if (!force && !testAll)
         {
-            // Create ChatClient
-            var chatClientFactory = GetService<IChatClientFactory>();
-            var chatClient = chatClientFactory.CreateChatClient(
-                profile.Provider ?? "openai",
-                profile.Model,
-                profile.ApiKey,
-                profile.ApiBase);
-
-            // Run benchmark
-            var benchmarkEngine = GetService<IBenchmarkEngine>();
-            var emptyTools = new List<object>();
-            var result = await benchmarkEngine.RunBenchmarkAsync(
-                chatClient,
-                emptyTools,
-                cancellationToken);
-
-            // Update result with actual model info
-            result.Model = profile.Model;
-            result.Provider = profile.Provider ?? "unknown";
-
-            // Output results
-            OutputResults(result);
-
-            // Save to config
-            await SaveCapabilitiesAsync(configPath, profileName, result, cancellationToken);
-
-            // Save detailed results to workspace/.benchmark
-            var workspacePath = config.Workspace?.Path?.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
-                ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nbot", "workspace");
-            await SaveDetailedResultsAsync(result, workspacePath, cancellationToken);
-
-            Console.WriteLine($"\n✅ 评测完成");
+            var targetProfile = profilesToTest[0];
+            if (config.Llm.Profiles.TryGetValue(targetProfile, out var profile) && 
+                profile.Capabilities?.LastBenchmarkTime != null)
+            {
+                Console.WriteLine($"⚠️ Profile '{targetProfile}' 已有测试结果:");
+                Console.WriteLine($"   评分: {profile.Capabilities.Score}/100");
+                Console.WriteLine($"   测试时间: {profile.Capabilities.LastBenchmarkTime:yyyy-MM-dd HH:mm:ss}");
+                Console.Write($"\n是否重新测试并覆盖? [y/N]: ");
+                
+                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (response != "y" && response != "yes")
+                {
+                    Console.WriteLine("已取消测试。");
+                    return;
+                }
+                Console.WriteLine();
+            }
         }
-        catch (Exception ex)
+
+        var results = new List<(string ProfileName, BenchmarkResult Result)>();
+        var failedProfiles = new List<string>();
+
+        // 测试每个 profile
+        foreach (var profileToTest in profilesToTest)
         {
-            Console.WriteLine($"\n❌ 评测失败: {ex.Message}");
+            if (!config.Llm.Profiles.TryGetValue(profileToTest, out var profile))
+            {
+                Console.WriteLine($"❌ Profile '{profileToTest}' 不存在，跳过");
+                failedProfiles.Add(profileToTest);
+                continue;
+            }
+
+            Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            Console.WriteLine($"测试 Profile: {profileToTest}");
+            Console.WriteLine($"模型: {profile.Provider}/{profile.Model}");
+            
+            // 检查是否已有测试结果（批量测试时）
+            if (!force && testAll && profile.Capabilities?.LastBenchmarkTime != null)
+            {
+                Console.WriteLine($"   已有测试结果: {profile.Capabilities.Score}/100");
+                Console.Write($"   是否重新测试? [y/N]: ");
+                
+                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (response != "y" && response != "yes")
+                {
+                    Console.WriteLine($"   跳过 '{profileToTest}'\n");
+                    continue;
+                }
+            }
+            Console.WriteLine();
+
+            try
+            {
+                // Create ChatClient
+                var chatClientFactory = GetService<IChatClientFactory>();
+                var chatClient = chatClientFactory.CreateChatClient(
+                    profile.Provider ?? "openai",
+                    profile.Model,
+                    profile.ApiKey,
+                    profile.ApiBase);
+
+                // Run benchmark
+                var benchmarkEngine = GetService<IBenchmarkEngine>();
+                var emptyTools = new List<AITool>();
+                var result = await benchmarkEngine.RunBenchmarkAsync(
+                    chatClient,
+                    emptyTools,
+                    cancellationToken);
+
+                // Update result with actual model info
+                result.Model = profile.Model;
+                result.Provider = profile.Provider ?? "unknown";
+
+                // Output results
+                OutputResults(result);
+
+                results.Add((profileToTest, result));
+
+                // Save detailed results immediately for each profile
+                var workspacePath = config.Workspace?.Path?.Replace("~", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+                    ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nbot", "workspace");
+                await SaveDetailedResultsAsync(result, workspacePath, configPath, profileToTest, cancellationToken);
+
+                Console.WriteLine($"✅ Profile '{profileToTest}' 测试完成\n");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"\n❌ Profile '{profileToTest}' 测试失败: {ex.Message}");
+                failedProfiles.Add(profileToTest);
+            }
         }
+
+        // 保存所有结果到配置文件（一次性保存，避免多次读写）
+        if (results.Count > 0)
+        {
+            await SaveAllCapabilitiesAsync(configPath, results, cancellationToken);
+        }
+
+        // 输出总结
+        Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        Console.WriteLine($"评测总结");
+        Console.WriteLine($"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        Console.WriteLine($"测试完成: {results.Count}/{profilesToTest.Count}");
+        
+        if (results.Count > 0)
+        {
+            Console.WriteLine($"\n详细结果:");
+            foreach (var (name, result) in results)
+            {
+                var status = result.Passed ? "✅" : "❌";
+                Console.WriteLine($"  {status} {name,-15} {result.FinalScore}/100");
+            }
+        }
+
+        if (failedProfiles.Count > 0)
+        {
+            Console.WriteLine($"\n测试失败: {string.Join(", ", failedProfiles)}");
+        }
+
+        Console.WriteLine($"\n✅ 评测完成");
     }
 
     private static void OutputResults(BenchmarkResult result)
@@ -129,15 +234,14 @@ public class BenchmarkCommand : NanoBotCommandBase
         Console.WriteLine($"  评分: {result.FinalScore}/100");
     }
 
-    private static async Task SaveCapabilitiesAsync(
+    private static async Task SaveAllCapabilitiesAsync(
         string configPath,
-        string profileName,
-        BenchmarkResult result,
+        List<(string ProfileName, BenchmarkResult Result)> results,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Read and parse the original JSON using JsonNode (mutable)
+            // 读取原始文件内容
             var json = await File.ReadAllTextAsync(configPath, cancellationToken);
             var node = JsonNode.Parse(json);
             if (node == null)
@@ -146,31 +250,39 @@ public class BenchmarkCommand : NanoBotCommandBase
                 return;
             }
 
-            // Navigate to llm.profiles.{profileName}
-            var llm = node?["llm"];
-            var profiles = llm?["profiles"];
-            var profile = profiles?[profileName];
+            // 确保 llm.profiles 存在
+            var llm = node["llm"] ??= new JsonObject();
+            var profiles = llm["profiles"] ??= new JsonObject();
 
-            if (profile == null)
+            // 更新每个 profile 的 capabilities
+            foreach (var (profileName, result) in results)
             {
-                Console.WriteLine($"\n⚠️ 未找到 profile '{profileName}'");
-                return;
+                var profile = profiles[profileName];
+                if (profile == null)
+                {
+                    Console.WriteLine($"\n⚠️ 未找到 profile '{profileName}'");
+                    continue;
+                }
+
+                // 更新或添加 capabilities
+                var capabilities = new JsonObject
+                {
+                    ["supportsVision"] = result.Capabilities.SupportsVision,
+                    ["supportsToolCalling"] = result.Capabilities.SupportsToolCalling,
+                    ["lastBenchmarkTime"] = result.Timestamp.ToString("o"),
+                    ["score"] = result.FinalScore,
+                    ["toolScore"] = result.ToolScore,
+                    ["visionScore"] = result.VisionScore
+                };
+                profile["capabilities"] = capabilities;
             }
 
-            // Update or add capabilities
-            var capabilities = new JsonObject
-            {
-                ["supportsVision"] = result.Capabilities.SupportsVision,
-                ["supportsToolCalling"] = result.Capabilities.SupportsToolCalling,
-                ["lastBenchmarkTime"] = result.Timestamp.ToString("o"),
-                ["score"] = result.FinalScore,
-                ["toolScore"] = result.ToolScore,
-                ["visionScore"] = result.VisionScore
+            // 序列化并保存（保持原有格式）
+            var options = new JsonSerializerOptions 
+            { 
+                WriteIndented = true,
+                PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
             };
-            profile["capabilities"] = capabilities;
-
-            // Serialize and save
-            var options = new JsonSerializerOptions { WriteIndented = true };
             var resultJson = JsonSerializer.Serialize(node, options);
             await File.WriteAllTextAsync(configPath, resultJson, cancellationToken);
 
@@ -185,13 +297,15 @@ public class BenchmarkCommand : NanoBotCommandBase
     private static async Task SaveDetailedResultsAsync(
         BenchmarkResult result,
         string workspacePath,
+        string configPath,
+        string profileName,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Create benchmark directory with timestamp
+            // 创建目录结构: .benchmark/{profileName}/{timestamp}/
             var timestamp = result.Timestamp.ToString("yyyy-MM-dd_HH-mm-ss");
-            var benchmarkDir = Path.Combine(workspacePath, ".benchmark", timestamp);
+            var benchmarkDir = Path.Combine(workspacePath, ".benchmark", profileName, timestamp);
             Directory.CreateDirectory(benchmarkDir);
 
             // Save summary.json
@@ -208,7 +322,9 @@ public class BenchmarkCommand : NanoBotCommandBase
                 result.VisionPassCount,
                 result.VisionTotalCount,
                 result.Passed,
-                result.Capabilities
+                result.Capabilities,
+                ConfigPath = configPath,
+                ProfileName = profileName
             };
             var summaryJson = JsonSerializer.Serialize(summary, new JsonSerializerOptions { WriteIndented = true });
             await File.WriteAllTextAsync(Path.Combine(benchmarkDir, "summary.json"), summaryJson, cancellationToken);
@@ -225,7 +341,8 @@ public class BenchmarkCommand : NanoBotCommandBase
                     caseResult.CaseId,
                     caseResult.CaseName,
                     caseResult.Category,
-                    caseResult.Score
+                    caseResult.Score,
+                    caseResult.RequestMessages
                 };
                 await File.WriteAllTextAsync(
                     Path.Combine(caseDir, "input.json"),
@@ -245,11 +362,11 @@ public class BenchmarkCommand : NanoBotCommandBase
                     cancellationToken);
             }
 
-            Console.WriteLine($"\n📁 详细结果已保存到: {benchmarkDir}");
+            Console.WriteLine($"📁 详细结果已保存到: {benchmarkDir}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"\n⚠️ 保存详细结果失败: {ex.Message}");
+            Console.WriteLine($"⚠️ 保存详细结果失败: {ex.Message}");
         }
     }
 }

@@ -5,7 +5,7 @@ namespace NanoBot.Agent;
 
 public static class ToolHintFormatter
 {
-    private const int MaxArgumentLength = 100;
+    private const int MaxArgumentLength = 40;
 
     /// <summary>
     /// Format tool calls as a parseable marker with icon and details
@@ -16,7 +16,7 @@ public static class ToolHintFormatter
     public static string FormatToolHint(IEnumerable<FunctionCallContent> toolCalls)
     {
         var hints = toolCalls.Select(FormatSingleToolCall);
-        return $"\n[TABLET_TOOL_CALL]{string.Join("|||", hints)}[/TABLET_TOOL_CALL]\n";
+        return $"\n[TOOL_CALL]{string.Join("|||", hints)}[/TOOL_CALL]\n";
     }
 
     private static string FormatSingleToolCall(FunctionCallContent toolCall)
@@ -33,36 +33,15 @@ public static class ToolHintFormatter
         var argName = firstArg.Key;
         var argValue = firstArg.Value;
 
-        // 将参数值转换为字符串
-        string argString;
+        // 将参数值转换为字符串（仅处理字符串类型）
+        string? argString = null;
         if (argValue is string strValue)
         {
             argString = strValue;
         }
-        else if (argValue is JsonElement jsonElement)
+        else if (argValue is JsonElement jsonElement && jsonElement.ValueKind == JsonValueKind.String)
         {
-            // 处理 JsonElement
-            argString = jsonElement.ValueKind switch
-            {
-                JsonValueKind.String => jsonElement.GetString() ?? "",
-                JsonValueKind.Number => jsonElement.ToString(),
-                JsonValueKind.True => "true",
-                JsonValueKind.False => "false",
-                JsonValueKind.Null => "null",
-                _ => jsonElement.ToString()
-            };
-        }
-        else
-        {
-            // 其他类型，使用 JsonSerializer 序列化
-            try
-            {
-                argString = JsonSerializer.Serialize(argValue);
-            }
-            catch
-            {
-                argString = argValue?.ToString() ?? "";
-            }
+            argString = jsonElement.GetString();
         }
 
         if (string.IsNullOrEmpty(argString))
@@ -72,7 +51,7 @@ public static class ToolHintFormatter
 
         // 返回带参数的工具调用（显示参数名和值）
         var displayArg = argString.Length > MaxArgumentLength
-            ? argString[..MaxArgumentLength] + "..."
+            ? argString[..MaxArgumentLength] + "…"
             : argString;
 
         return $"{toolName}(\"{displayArg}\")";
