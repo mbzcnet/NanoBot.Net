@@ -12,11 +12,13 @@ namespace NanoBot.Infrastructure.Browser;
 public class PlaywrightInstaller : IPlaywrightInstaller
 {
     private readonly ILogger<PlaywrightInstaller>? _logger;
+    private readonly IPowerShellInstaller? _powerShellInstaller;
     private string? _lastError;
 
-    public PlaywrightInstaller(ILogger<PlaywrightInstaller>? logger = null)
+    public PlaywrightInstaller(ILogger<PlaywrightInstaller>? logger = null, IPowerShellInstaller? powerShellInstaller = null)
     {
         _logger = logger;
+        _powerShellInstaller = powerShellInstaller;
     }
 
     /// <inheritdoc />
@@ -275,6 +277,34 @@ public class PlaywrightInstaller : IPlaywrightInstaller
     /// </summary>
     private async Task<(int ExitCode, string Error)> RunViaPowerShellAsync(string[] browsers, CancellationToken cancellationToken)
     {
+        // Check if PowerShell is installed, and try to install it if not
+        string? pwshPath = null;
+        if (_powerShellInstaller != null)
+        {
+            pwshPath = await _powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
+            if (string.IsNullOrEmpty(pwshPath))
+            {
+                _logger?.LogInformation("PowerShell not found, attempting to install...");
+                var installed = await _powerShellInstaller.InstallAsync(cancellationToken);
+                if (installed)
+                {
+                    pwshPath = await _powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
+                    _logger?.LogInformation("PowerShell installed successfully at {Path}", pwshPath);
+                }
+                else
+                {
+                    var errorMsg = _powerShellInstaller.GetStatusMessage();
+                    _logger?.LogWarning("Failed to install PowerShell: {Error}", errorMsg);
+                    return (-1, $"PowerShell is not installed and could not be installed automatically. {errorMsg}");
+                }
+            }
+        }
+        else
+        {
+            // Fallback: just try "pwsh" command
+            pwshPath = "pwsh";
+        }
+
         // Find the playwright.ps1 script location
         var playbookwrightDir = typeof(Playwright).Assembly.Location;
         var playbookwrightRoot = Path.GetDirectoryName(playbookwrightDir);
@@ -288,7 +318,7 @@ public class PlaywrightInstaller : IPlaywrightInstaller
 
         var args = new List<string> { "-ExecutionPolicy", "Bypass", "-File", psScriptPath, "install" };
         args.AddRange(browsers);
-        return await RunProcessAsync("pwsh", args, cancellationToken);
+        return await RunProcessAsync(pwshPath ?? "pwsh", args, cancellationToken);
     }
 
     /// <summary>

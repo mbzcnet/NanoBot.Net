@@ -257,26 +257,55 @@ public class AgentCommand : ICliCommand
 
         var fullResponse = new StringBuilder();
         var isFirstChunk = true;
+        var hasOutputContent = false;
 
         await foreach (var update in runtime.ProcessDirectStreamingAsync(message, sessionId, cancellationToken: cancellationToken))
         {
             var text = update.Text;
-            if (string.IsNullOrEmpty(text))
-                continue;
 
             // Check if this is a tool hint
             var isToolHint = update.AdditionalProperties?.ContainsKey("_tool_hint") == true;
-            
+            var isToolResult = update.AdditionalProperties?.ContainsKey("_tool_result") == true;
+
             if (isToolHint)
             {
                 // Tool hint: output on its own line with color/formatting
+                if (hasOutputContent)
+                {
+                    Console.WriteLine();
+                    hasOutputContent = false;
+                }
                 Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.Write("⚡ ");
                 Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.Write(text);
+                Console.Write(text.Trim());
                 Console.ResetColor();
                 Console.WriteLine();
+                isFirstChunk = true; // Reset for next content
                 continue;
             }
+
+            if (isToolResult)
+            {
+                // Tool result: show in a distinct format
+                if (hasOutputContent)
+                {
+                    Console.WriteLine();
+                    hasOutputContent = false;
+                }
+                Console.WriteLine();
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.Write("✓ ");
+                Console.ResetColor();
+                Console.Write(text?.Trim());
+                Console.WriteLine();
+                isFirstChunk = true; // Reset for next content
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(text))
+                continue;
 
             if (isFirstChunk)
             {
@@ -287,6 +316,7 @@ public class AgentCommand : ICliCommand
             Console.Write(text);
             Console.Out.Flush();
             fullResponse.Append(text);
+            hasOutputContent = true;
         }
 
         Console.WriteLine();

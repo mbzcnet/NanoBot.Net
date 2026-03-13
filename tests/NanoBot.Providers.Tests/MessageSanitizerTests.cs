@@ -79,16 +79,41 @@ public class MessageSanitizerTests
     {
         var messages = new List<ChatMessage>
         {
+            // Assistant message with tool_calls must come first
+            new ChatMessage(ChatRole.Assistant, "")
+            {
+                Contents = { new FunctionCallContent("call123", "search", new Dictionary<string, object?> { { "query", "test" } }) }
+            },
+            // Tool message with function result
             new ChatMessage(ChatRole.Tool, "result content")
             {
-                Contents = { new FunctionResultContent("search", "call123") }
+                Contents = { new FunctionResultContent("call123", "search result") }
             }
         };
 
         var result = MessageSanitizer.SanitizeMessages(messages);
 
-        var hasFunctionResult = result[0].Contents.Any(c => c is FunctionResultContent);
+        Assert.Equal(2, result.Count);
+        var hasFunctionResult = result[1].Contents.Any(c => c is FunctionResultContent);
         Assert.True(hasFunctionResult);
+    }
+
+    [Fact]
+    public void SanitizeMessages_FiltersOrphanedToolMessages()
+    {
+        // This test verifies that tool messages without corresponding tool_calls are filtered out
+        var messages = new List<ChatMessage>
+        {
+            new ChatMessage(ChatRole.Tool, "orphaned result")
+            {
+                Contents = { new FunctionResultContent("orphan_call", "result") }
+            }
+        };
+
+        var result = MessageSanitizer.SanitizeMessages(messages);
+
+        // The orphaned tool message should be filtered out
+        Assert.Empty(result);
     }
 
     [Fact]

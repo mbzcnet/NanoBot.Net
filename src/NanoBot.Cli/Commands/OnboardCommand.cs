@@ -461,10 +461,49 @@ public class OnboardCommand : ICliCommand
     {
         Console.WriteLine("\n=== Browser Tools Setup ===\n");
 
-        var installer = new PlaywrightInstaller();
+        // First ensure PowerShell is available (needed for Playwright installation)
+        var powerShellInstaller = new PowerShellInstaller();
+        var pwshPath = await powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
+
+        if (string.IsNullOrEmpty(pwshPath))
+        {
+            Console.WriteLine("PowerShell Core (pwsh) is required for browser automation tools.");
+
+            if (!nonInteractive)
+            {
+                Console.Write("Install PowerShell Core now? [Y/n]: ");
+                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (response == "n" || response == "no")
+                {
+                    Console.WriteLine("⚠ Skipped PowerShell installation. Browser tools will not be available.");
+                    Console.WriteLine("  You can install manually later from: https://aka.ms/powershell");
+                    return;
+                }
+            }
+
+            Console.WriteLine("Installing PowerShell Core (this may take a few minutes)...");
+            var psInstalled = await powerShellInstaller.InstallAsync(cancellationToken);
+
+            if (!psInstalled)
+            {
+                Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
+                Console.WriteLine("  Browser tools require PowerShell. Please install manually from:");
+                Console.WriteLine("  https://aka.ms/powershell");
+                return;
+            }
+
+            Console.WriteLine("✓ PowerShell Core installed successfully");
+        }
+        else
+        {
+            Console.WriteLine($"✓ PowerShell Core found at: {pwshPath}");
+        }
+
+        // Now install Playwright browsers
+        var installer = new PlaywrightInstaller(powerShellInstaller: powerShellInstaller);
 
         // Check if already installed
-        Console.WriteLine("Checking Playwright browser installation...");
+        Console.WriteLine("\nChecking Playwright browser installation...");
         if (await installer.IsInstalledAsync(cancellationToken))
         {
             Console.WriteLine("✓ Playwright browsers already installed");

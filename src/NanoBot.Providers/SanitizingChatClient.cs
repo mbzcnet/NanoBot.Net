@@ -101,10 +101,37 @@ public static class MessageSanitizer
         if (messages == null || messages.Count == 0)
             return new List<ChatMessage>();
 
+        // Collect all tool call IDs from assistant messages
+        var toolCallIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var msg in messages)
+        {
+            if (msg.Role == ChatRole.Assistant)
+            {
+                foreach (var content in msg.Contents)
+                {
+                    if (content is FunctionCallContent fcc)
+                    {
+                        toolCallIds.Add(fcc.CallId);
+                    }
+                }
+            }
+        }
+
         var sanitized = new List<ChatMessage>(messages.Count);
 
         foreach (var msg in messages)
         {
+            // Skip orphaned tool messages (tool messages without corresponding tool_calls)
+            if (msg.Role == ChatRole.Tool)
+            {
+                var toolResult = msg.Contents.OfType<FunctionResultContent>().FirstOrDefault();
+                if (toolResult != null && !toolCallIds.Contains(toolResult.CallId))
+                {
+                    // This is an orphaned tool message, skip it
+                    continue;
+                }
+            }
+
             var cleanMessage = SanitizeMessage(msg);
             sanitized.Add(cleanMessage);
         }

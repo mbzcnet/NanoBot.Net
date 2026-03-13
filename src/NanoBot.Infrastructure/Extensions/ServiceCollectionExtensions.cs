@@ -123,6 +123,7 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddBrowserServices(this IServiceCollection services)
     {
+        services.AddSingleton<IPowerShellInstaller, PowerShellInstaller>();
         services.AddSingleton<IPlaywrightInstaller, PlaywrightInstaller>();
         services.AddSingleton<IBrowserService, BrowserService>();
         return services;

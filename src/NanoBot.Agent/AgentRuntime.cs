@@ -349,6 +349,28 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     }
                 }
 
+                // Handle tool results (FunctionResultContent) - emit them for CLI display
+                var functionResults = update.Contents.OfType<FunctionResultContent>().ToList();
+                if (functionResults.Any())
+                {
+                    foreach (var result in functionResults)
+                    {
+                        var toolResultText = FormatToolResult(result);
+                        if (!string.IsNullOrEmpty(toolResultText))
+                        {
+                            var toolResultUpdate = new AgentResponseUpdate
+                            {
+                                Role = ChatRole.Tool,
+                                Contents = { new TextContent(toolResultText) },
+                                AdditionalProperties = new()
+                            };
+                            toolResultUpdate.AdditionalProperties["_tool_result"] = true;
+                            toolResultUpdate.AdditionalProperties["tool_call_id"] = result.CallId ?? "unknown";
+                            yield return toolResultUpdate;
+                        }
+                    }
+                }
+
                 var imageMarkdown = BuildSnapshotImageMarkdown(update.Contents);
                 if (!string.IsNullOrWhiteSpace(imageMarkdown))
                 {
@@ -626,6 +648,100 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         {
             return functionResult.Result.ToString();
         }
+    }
+
+    /// <summary>
+    /// Formats a tool result for display in CLI
+    /// </summary>
+    private static string? FormatToolResult(FunctionResultContent functionResult)
+    {
+        var payload = GetFunctionResultPayload(functionResult);
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        // Try to parse as JSON to extract meaningful information
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+
+            // Handle different result formats
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                // Check for error
+                if (root.TryGetProperty("error", out var errorElement))
+                {
+                    var errorMsg = errorElement.GetString() ?? errorElement.GetRawText();
+                    return $"[ERROR] {errorMsg}";
+                }
+
+                // Check for content/output
+                if (root.TryGetProperty("content", out var contentElement))
+                {
+                    var content = contentElement.GetString() ?? contentElement.GetRawText();
+                    return Truncate(content, 200);
+                }
+
+                if (root.TryGetProperty("output", out var outputElement))
+                {
+                    var output = outputElement.GetString() ?? outputElement.GetRawText();
+                    return Truncate(output, 200);
+                }
+
+                // Check for action-based results (browser, etc.)
+                if (root.TryGetProperty("action", out var actionElement))
+                {
+                    var action = actionElement.GetString();
+                    if (root.TryGetProperty("url", out var urlElement))
+                    {
+                        var url = urlElement.GetString();
+                        return $"{action}: {url}";
+                    }
+                    if (root.TryGetProperty("imagePath", out var imagePathElement))
+                    {
+                        var imagePath = imagePathElement.GetString();
+                        return $"{action}: snapshot captured";
+                    }
+                    return action;
+                }
+
+                // For search results, show summary
+                if (root.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array)
+                {
+                    var count = resultsElement.GetArrayLength();
+                    return $"Found {count} results";
+                }
+
+                // Default: show truncated JSON
+                var json = root.GetRawText();
+                return Truncate(json, 150);
+            }
+
+            // For string results
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                var str = root.GetString() ?? payload;
+                return Truncate(str, 200);
+            }
+        }
+        catch (JsonException)
+        {
+            // Not valid JSON, return as-is
+        }
+
+        // Fallback: return truncated payload
+        return Truncate(payload, 200);
+    }
+
+    private static string Truncate(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value ?? "";
+        }
+        return value[..maxLength] + "…";
     }
 
     private string? ToSessionFileUrl(string? imagePath)
