@@ -85,4 +85,10 @@
   <data name="ConfigDescription" xml:space="preserve">
     <value>Configure Agent and LLM providers</value>
   </data>
+  <data name="InputPlaceholder" xml:space="preserve">
+    <value>Type a message to start a new session... (Shift+Enter for new line)</value>
+  </data>
+  <data name="Send" xml:space="preserve">
+    <value>Send</value>
+  </data>
 </root>

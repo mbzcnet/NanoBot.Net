@@ -33,11 +33,14 @@ public static class WebTools
     {
         try
         {
-            using var client = httpClient ?? new HttpClient();
+            var ownClient = httpClient is null;
+            var client = httpClient ?? new HttpClient();
 
-            // Use DuckDGo API (no API key required for basic usage)
-            var searchUrl = $"https://api.duckduckgo.com/?q={Uri.EscapeDataString(query)}&format=json&no_html=1";
-            var response = await client.GetStringAsync(searchUrl);
+            try
+            {
+                // Use DuckDGo API (no API key required for basic usage)
+                var searchUrl = $"https://api.duckduckgo.com/?q={Uri.EscapeDataString(query)}&format=json&no_html=1";
+                var response = await client.GetStringAsync(searchUrl);
 
             using var doc = JsonDocument.Parse(response);
             var root = doc.RootElement;
@@ -57,11 +60,19 @@ public static class WebTools
             }
 
             if (results.Count == 0)
-            {
-                return "No search results found.";
-            }
+                {
+                    return "No search results found.";
+                }
 
-            return string.Join("\n\n", results);
+                return string.Join("\n\n", results);
+            }
+            finally
+            {
+                if (ownClient)
+                {
+                    client.Dispose();
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -73,21 +84,32 @@ public static class WebTools
     {
         try
         {
-            using var client = httpClient ?? new HttpClient();
+            var ownClient = httpClient is null;
+            var client = httpClient ?? new HttpClient();
 
-            var userAgent = config?.FetchUserAgent ?? "Mozilla/5.0 (compatible; NanoBot/1.0)";
-            client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
-
-            var html = await client.GetStringAsync(url);
-
-            var text = ExtractTextFromHtml(html);
-
-            if (text.Length > 10000)
+            try
             {
-                text = text[..10000] + "\n... (truncated)";
-            }
+                var userAgent = config?.FetchUserAgent ?? "Mozilla/5.0 (compatible; NanoBot/1.0)";
+                client.DefaultRequestHeaders.UserAgent.ParseAdd(userAgent);
 
-            return text;
+                var html = await client.GetStringAsync(url);
+
+                var text = ExtractTextFromHtml(html);
+
+                if (text.Length > 10000)
+                {
+                    text = text[..10000] + "\n... (truncated)";
+                }
+
+                return text;
+            }
+            finally
+            {
+                if (ownClient)
+                {
+                    client.Dispose();
+                }
+            }
         }
         catch (Exception ex)
         {

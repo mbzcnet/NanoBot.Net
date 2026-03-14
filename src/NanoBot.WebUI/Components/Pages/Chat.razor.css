@@ -196,37 +196,133 @@
     background: transparent;
 }
 
-/* Tool call display */
-.nb-tool-call-display {
-    margin: 8px 0;
-    padding: 12px;
-    border-radius: 8px;
-    background: rgba(15, 23, 42, 0.8);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+.nb-tool-execution-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 10px 0 14px;
 }
 
-.nb-tool-call-header {
+.nb-tool-execution-card {
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(15, 23, 42, 0.7);
+}
+
+.nb-tool-io-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: #f59e0b;
-    font-family: 'Fira Code', 'Consolas', monospace;
-    font-size: 0.85em;
-    font-weight: 500;
-    margin-bottom: 8px;
-}
-
-.nb-tool-call-args {
     padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 4px;
-    overflow-x: auto;
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.83rem;
+    font-weight: 600;
 }
 
-.nb-tool-call-args code {
-    font-family: 'Fira Code', 'Consolas', monospace;
-    font-size: 0.8em;
-    color: #e2e8f0;
+.nb-tool-io-header-in {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nb-tool-io-header-out {
+    color: #34d399;
+    background: rgba(16, 185, 129, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nb-tool-io-header-error {
+    color: #f87171;
+    background: rgba(239, 68, 68, 0.08);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.nb-tool-io-name {
+    margin-left: 4px;
+    color: rgba(255, 255, 255, 0.92);
+    font-weight: 500;
+}
+
+.nb-tool-io-body {
+    padding: 10px 12px;
+}
+
+.nb-tool-io-body pre {
+    margin: 0;
     white-space: pre-wrap;
-    word-break: break-all;
+    word-break: break-word;
+    overflow-x: auto;
+    background: rgba(2, 6, 23, 0.45);
+    border-radius: 8px;
+    padding: 10px 12px;
+}
+
+.nb-tool-io-body code {
+    font-family: 'Fira Code', 'Consolas', monospace;
+    font-size: 0.82rem;
+    color: #e2e8f0;
+}
+
+.nb-message-bubble {
+    position: relative;
+}
+
+::deep .nb-message-bubble .markdown-content img,
+::deep .nb-message-bubble img {
+    display: block;
+    max-width: min(100%, 480px);
+    max-height: 360px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 10px;
+}
+
+.nb-message-actions-wrapper {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    visibility: hidden;
+    transition: max-height 0.2s ease, opacity 0.2s ease, visibility 0.2s ease;
+}
+
+.nb-message-actions-container {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+::deep .message-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+::deep .message-action-btn {
+    width: 28px;
+    height: 28px;
+    padding: 4px;
+}
+
+::deep .message-action-btn .mud-icon-root {
+    font-size: 16px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .nb-message-bubble:hover .nb-message-actions-wrapper {
+        max-height: 50px;
+        opacity: 1;
+        visibility: visible;
+    }
+}
+
+@media (hover: none) or (pointer: coarse) {
+    .nb-message-actions-wrapper {
+        max-height: 50px;
+        opacity: 1;
+        visibility: visible;
+    }
 }

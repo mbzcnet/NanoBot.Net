@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Diagnostics;
+using System.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -222,6 +223,13 @@ public class WebUICommand : ICliCommand
             }
         }
 
+        // 等待服务器实际可访问后再打开浏览器
+        if (!noBrowser && serverStarted)
+        {
+            var url = finalUrls.Split(';', StringSplitOptions.RemoveEmptyEntries).First();
+            await WaitForServerReadyAsync(url, cancellationToken);
+        }
+
         // 打开浏览器
         if (!noBrowser)
         {
@@ -346,6 +354,43 @@ public class WebUICommand : ICliCommand
         None,
         Packaged,
         SourceProject
+    }
+
+    private static async Task WaitForServerReadyAsync(string url, CancellationToken cancellationToken)
+    {
+        using var client = new HttpClient();
+        client.Timeout = TimeSpan.FromSeconds(2);
+
+        var maxRetries = 20;
+        var delay = TimeSpan.FromMilliseconds(500);
+
+        for (int i = 0; i < maxRetries; i++)
+        {
+            if (cancellationToken.IsCancellationRequested)
+                break;
+
+            try
+            {
+                var response = await client.GetAsync(url, cancellationToken);
+                if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.Redirect)
+                {
+                    // 服务器已准备好
+                    return;
+                }
+            }
+            catch
+            {
+                // 忽略连接错误，继续重试
+            }
+
+            if (i < maxRetries - 1)
+            {
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        // 如果超时，记录警告但继续执行（浏览器可能仍能打开）
+        Console.WriteLine("⚠️  等待服务器就绪超时，继续打开浏览器...");
     }
 
     private static void OpenBrowser(string url)

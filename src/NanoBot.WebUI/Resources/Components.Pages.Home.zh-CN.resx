@@ -85,4 +85,10 @@
   <data name="ConfigDescription" xml:space="preserve">
     <value>配置 Agent 和 LLM 提供商</value>
   </data>
+  <data name="InputPlaceholder" xml:space="preserve">
+    <value>输入消息开始新会话... (Shift+Enter 换行)</value>
+  </data>
+  <data name="Send" xml:space="preserve">
+    <value>发送</value>
+  </data>
 </root>

@@ -72,5 +72,19 @@ window.nanoBotChatImage = {
     }
 
     containerElement.scrollTop = containerElement.scrollHeight;
+  },
+
+  focusInput: function (containerElement) {
+    if (!containerElement) {
+      return;
+    }
+
+    const textarea = containerElement.querySelector('textarea');
+    if (textarea) {
+      textarea.focus();
+      // 将光标移到文本末尾
+      const length = textarea.value.length;
+      textarea.setSelectionRange(length, length);
+    }
   }
 };

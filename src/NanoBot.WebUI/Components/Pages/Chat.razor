@@ -48,49 +48,35 @@
                                     </div>
                                 }
 
-                                @* 显示工具调用信息 (从 AgentService 获取) *@
-                                @if (message.ToolCall != null)
+                                @if (message.ToolExecutions.Any())
                                 {
-                                    <div class="nb-tool-call-display">
-                                        <div class="nb-tool-call-header">
-                                            <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Class="mr-1" />
-                                            <span>@message.ToolCall.Name</span>
-                                        </div>
-                                        @if (!string.IsNullOrEmpty(message.ToolCall.Arguments) && message.ToolCall.Arguments != "{}")
+                                    <div class="nb-tool-execution-list">
+                                        @foreach (var toolExecution in message.ToolExecutions)
                                         {
-                                            <div class="nb-tool-call-args">
-                                                <code>@message.ToolCall.Arguments</code>
-                                            </div>
-                                        }
-                                    </div>
-                                }
-
-                                @* 显示消息内容 - 先从内容中提取工具调用 *@
-                                @{
-                                    var toolCallsFromContent = ExtractToolCallsFromContent(message.Content);
-                                    var cleanedContent = CleanContent(message.Content);
-                                }
-
-                                @* 显示从内容中提取的工具调用 *@
-                                @if (toolCallsFromContent.Any())
-                                {
-                                    <div class="nb-tool-calls-container">
-                                        @foreach (var toolCall in toolCallsFromContent)
-                                        {
-                                            <div class="nb-tool-call-display">
-                                                <div class="nb-tool-call-header">
-                                                    <MudIcon Icon="@Icons.Material.Filled.Terminal" Size="Size.Small" Class="mr-1" />
-                                                    <span>@toolCall.Name</span>
+                                            <div class="nb-tool-execution-card">
+                                                <div class="nb-tool-io-header nb-tool-io-header-in">
+                                                    <MudIcon Icon="@Icons.Material.Filled.Input" Size="Size.Small" Class="mr-1" />
+                                                    <span>IN</span>
+                                                    <span class="nb-tool-io-name">@toolExecution.Name</span>
                                                 </div>
-                                                @if (!string.IsNullOrEmpty(toolCall.Arguments) && toolCall.Arguments != "{}")
-                                                {
-                                                    <div class="nb-tool-call-args">
-                                                        <code>@toolCall.Arguments</code>
-                                                    </div>
-                                                }
+                                                <div class="nb-tool-io-body">
+                                                    <pre><code>@FormatToolPayload(toolExecution.Arguments)</code></pre>
+                                                </div>
+
+                                                <div class="@($"nb-tool-io-header {(toolExecution.IsError ? "nb-tool-io-header-error" : "nb-tool-io-header-out")}")">
+                                                    <MudIcon Icon="@(toolExecution.IsError ? Icons.Material.Filled.ErrorOutline : Icons.Material.Filled.Output)" Size="Size.Small" Class="mr-1" />
+                                                    <span>OUT</span>
+                                                </div>
+                                                <div class="nb-tool-io-body">
+                                                    <pre><code>@FormatToolOutput(toolExecution.Output)</code></pre>
+                                                </div>
                                             </div>
                                         }
                                     </div>
+                                }
+
+                                @{
+                                    var cleanedContent = message.Content;
                                 }
 
                                 @* 显示消息内容 *@
@@ -106,6 +92,20 @@
                                 {
                                     @* 回退到 Markdown 渲染 *@
                                     <MarkdownRenderer Content="@cleanedContent" />
+                                }
+
+                                @if (message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ||
+                                     message.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    <div class="nb-message-actions-wrapper">
+                                        <div class="nb-message-actions-container">
+                                            <MessageActions IsUserMessage="@message.Role.Equals("user", StringComparison.OrdinalIgnoreCase)"
+                                                            OnCopy="@(() => CopyMessage(message))"
+                                                            OnEdit="@(() => EditMessage(message))"
+                                                            OnRetry="@(() => RetryMessage(message))"
+                                                            OnDelete="@(() => DeleteMessage(message))" />
+                                        </div>
+                                    </div>
                                 }
                             </div>
                         </div>
@@ -283,9 +283,22 @@
         var messages = await SessionService.GetMessagesAsync(SessionId);
         _messages = messages.Select(m => new ChatMessage
         {
+            Id = m.Id,
             Role = m.Role,
             Content = m.Content,
-            Timestamp = m.Timestamp
+            Timestamp = m.Timestamp,
+            ToolCall = m.ToolCall,
+            ToolExecutions = m.ToolExecutions.Select(t => new ChatToolExecution
+            {
+                CallId = t.CallId,
+                Name = t.Name,
+                Arguments = t.Arguments,
+                Output = t.Output,
+                IsError = t.IsError
+            }).ToList(),
+            SourceIndex = m.SourceIndex,
+            RetryFromIndex = m.RetryFromIndex,
+            RetryPrompt = m.RetryPrompt
         }).ToList();
 
         // 自动滚动到底部
@@ -389,22 +402,65 @@
             {
                 Role = "assistant",
                 Content = string.Empty,
-                Timestamp = DateTime.Now
+                Timestamp = DateTime.Now,
+                ToolExecutions = new List<ChatToolExecution>()
             };
             _messages.Add(assistantMessage);
 
             await foreach (var chunk in AgentService.SendMessageStreamingAsync(SessionId, userContent, _cancellationTokenSource.Token))
             {
-                // 记录工具调用信息（如果有）
                 if (chunk.ToolCallDetails != null)
                 {
                     Logger.LogInformation("Tool call detected: {ToolName} with args: {Args}",
                         chunk.ToolCallDetails.Name, chunk.ToolCallDetails.Arguments);
-                    // 保存工具调用信息到消息中
+
                     assistantMessage.ToolCall = chunk.ToolCallDetails;
+                    var existingExecution = assistantMessage.ToolExecutions.LastOrDefault(t =>
+                        !string.IsNullOrWhiteSpace(chunk.ToolCallDetails.CallId) &&
+                        string.Equals(t.CallId, chunk.ToolCallDetails.CallId, StringComparison.Ordinal));
+
+                    if (existingExecution == null)
+                    {
+                        existingExecution = new ChatToolExecution
+                        {
+                            CallId = chunk.ToolCallDetails.CallId ?? string.Empty,
+                            Name = chunk.ToolCallDetails.Name,
+                            Arguments = chunk.ToolCallDetails.Arguments ?? "{}"
+                        };
+                        assistantMessage.ToolExecutions.Add(existingExecution);
+                    }
+                    else
+                    {
+                        existingExecution.Name = chunk.ToolCallDetails.Name;
+                        existingExecution.Arguments = chunk.ToolCallDetails.Arguments ?? "{}";
+                    }
                 }
 
-                assistantMessage.Content += chunk.Content;
+                if (chunk.IsToolResult)
+                {
+                    var targetExecution = assistantMessage.ToolExecutions.LastOrDefault(t =>
+                        !string.IsNullOrWhiteSpace(chunk.ToolResultCallId) &&
+                        string.Equals(t.CallId, chunk.ToolResultCallId, StringComparison.Ordinal))
+                        ?? assistantMessage.ToolExecutions.LastOrDefault();
+
+                    if (targetExecution == null)
+                    {
+                        targetExecution = new ChatToolExecution
+                        {
+                            CallId = chunk.ToolResultCallId ?? string.Empty,
+                            Name = chunk.ToolCallDetails?.Name ?? "tool"
+                        };
+                        assistantMessage.ToolExecutions.Add(targetExecution);
+                    }
+
+                    targetExecution.Output += chunk.Content;
+                    targetExecution.IsError = LooksLikeErrorOutput(targetExecution.Output);
+                }
+                else
+                {
+                    assistantMessage.Content += chunk.Content;
+                }
+
                 StateHasChanged();
                 await Task.Yield();
                 await ScrollToBottom();
@@ -497,6 +553,62 @@
             Logger.LogError(ex, "Failed to handle image upload for session {SessionId}", SessionId);
             Snackbar.Add($"图片上传失败: {ex.Message}", Severity.Error);
         }
+    }
+
+    private async Task CopyMessage(ChatMessage message)
+    {
+        var content = BuildCopyContent(message);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            Snackbar.Add("没有可复制的内容", Severity.Info);
+            return;
+        }
+
+        await JSRuntime.InvokeVoidAsync("navigator.clipboard.writeText", content);
+        Snackbar.Add("已复制", Severity.Success);
+    }
+
+    private async Task EditMessage(ChatMessage message)
+    {
+        if (!message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) || message.SourceIndex < 0)
+        {
+            return;
+        }
+
+        _inputMessage = message.Content;
+        await SessionService.DeleteMessagesFromAsync(SessionId, message.SourceIndex);
+        await LoadMessages();
+        await InvokeAsync(StateHasChanged);
+        Snackbar.Add("消息已加载到输入框，编辑后发送", Severity.Info);
+    }
+
+    private async Task RetryMessage(ChatMessage message)
+    {
+        if (!message.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase) ||
+            message.RetryFromIndex is null ||
+            string.IsNullOrWhiteSpace(message.RetryPrompt))
+        {
+            Snackbar.Add("无法重试该消息", Severity.Warning);
+            return;
+        }
+
+        await SessionService.DeleteMessagesFromAsync(SessionId, message.RetryFromIndex.Value);
+        await LoadMessages();
+        _inputMessage = message.RetryPrompt;
+        await SendMessage();
+    }
+
+    private async Task DeleteMessage(ChatMessage message)
+    {
+        if (message.SourceIndex < 0)
+        {
+            Snackbar.Add("无法删除该消息", Severity.Warning);
+            return;
+        }
+
+        await SessionService.DeleteMessagesFromAsync(SessionId, message.SourceIndex);
+        await LoadMessages();
+        Snackbar.Add("已删除该消息及其后续内容", Severity.Success);
     }
 
     private Task RemoveAttachedImage()
@@ -644,109 +756,41 @@
         }
     }
 
-    /// <summary>
-    /// 从内容中提取工具调用信息
-    /// 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
-    /// </summary>
-    private List<ToolCallInfo> ExtractToolCallsFromContent(string content)
+    private static string FormatToolPayload(string? payload)
+        => string.IsNullOrWhiteSpace(payload) ? "{}" : payload;
+
+    private static string FormatToolOutput(string? output)
+        => string.IsNullOrWhiteSpace(output) ? "(no output)" : output;
+
+    private static bool LooksLikeErrorOutput(string? value)
     {
-        var toolCalls = new List<ToolCallInfo>();
-
-        if (string.IsNullOrEmpty(content))
-            return toolCalls;
-
-        // 匹配 [TOOL_CALL]...[/TOOL_CALL]
-        var pattern = @"\[TOOL_CALL\](.*?)\[/TOOL_CALL\]";
-        var match = System.Text.RegularExpressions.Regex.Match(content, pattern, System.Text.RegularExpressions.RegexOptions.Singleline);
-
-        if (match.Success && match.Groups.Count > 1)
+        if (string.IsNullOrWhiteSpace(value))
         {
-            var toolCallText = match.Groups[1].Value;
-            var toolParts = toolCallText.Split("|||", StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var part in toolParts)
-            {
-                var trimmed = part.Trim();
-                if (string.IsNullOrEmpty(trimmed))
-                    continue;
-
-                // 解析 tool_name("args") 格式
-                var parseResult = ParseToolCallString(trimmed);
-                if (parseResult != null)
-                {
-                    toolCalls.Add(parseResult);
-                }
-            }
+            return false;
         }
 
-        return toolCalls;
+        return value.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("ERR_", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("SSL", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// 解析工具调用字符串 "tool_name(\"args\")" 或 "tool_name()"
-    /// </summary>
-    private ToolCallInfo? ParseToolCallString(string toolCallStr)
+    private static string BuildCopyContent(ChatMessage message)
     {
-        if (string.IsNullOrEmpty(toolCallStr))
-            return null;
-
-        try
+        var segments = new List<string>();
+        if (!string.IsNullOrWhiteSpace(message.Content))
         {
-            // 匹配 tool_name("args") 格式
-            var match = System.Text.RegularExpressions.Regex.Match(
-                toolCallStr,
-                @"^(\w+)\(""([^""]*)""\)$|^(\w+)\(\)$|^(\w+)\(\.\.\.\)$");
-
-            if (match.Success)
-            {
-                string? name = match.Groups[1].Value ?? match.Groups[3].Value ?? match.Groups[4].Value;
-                string? args = match.Groups[2].Success ? match.Groups[2].Value : null;
-
-                if (!string.IsNullOrEmpty(name))
-                {
-                    return new ToolCallInfo(name, args ?? "{}", null);
-                }
-            }
-        }
-        catch
-        {
-            // 解析失败
+            segments.Add(message.Content);
         }
 
-        return null;
-    }
-
-    /// <summary>
-    /// 清理内容，移除工具调用标记
-    /// </summary>
-    private string CleanContent(string content)
-    {
-        if (string.IsNullOrEmpty(content))
-            return content;
-
-        // 移除 [TOOL_CALL]...[/TOOL_CALL]
-        var pattern = @"\[TOOL_CALL\].*?\[/TOOL_CALL\]";
-        return System.Text.RegularExpressions.Regex.Replace(content, pattern, "", System.Text.RegularExpressions.RegexOptions.Singleline).Trim();
-    }
-
-    private string GetMessageRowStyle(string role)
-    {
-        return role?.ToLowerInvariant() switch
+        foreach (var toolExecution in message.ToolExecutions)
         {
-            "user" => "display:flex;justify-content:flex-end;",
-            "system" => "display:flex;justify-content:center;",
-            _ => "display:flex;justify-content:flex-start;"
-        };
-    }
+            segments.Add($"IN {toolExecution.Name}\n{FormatToolPayload(toolExecution.Arguments)}");
+            segments.Add($"OUT\n{FormatToolOutput(toolExecution.Output)}");
+        }
 
-    private string GetMessageBubbleStyle(string role)
-    {
-        return role?.ToLowerInvariant() switch
-        {
-            "user" => "max-width: min(76%, 860px); background: var(--mud-palette-primary-darken);",
-            "system" => "max-width: min(88%, 980px);",
-            _ => "max-width: min(82%, 930px);"
-        };
+        return string.Join("\n\n", segments.Where(s => !string.IsNullOrWhiteSpace(s)));
     }
 
     private string GetMessageIcon(string role)
@@ -771,10 +815,15 @@
 
     private class ChatMessage
     {
+        public string? Id { get; set; }
+        public int SourceIndex { get; set; } = -1;
+        public int? RetryFromIndex { get; set; }
+        public string? RetryPrompt { get; set; }
         public string Role { get; set; } = string.Empty;
         public string Content { get; set; } = string.Empty;
         public DateTime Timestamp { get; set; }
         public ToolCallInfo? ToolCall { get; set; }
+        public List<ChatToolExecution> ToolExecutions { get; set; } = new();
         public List<MessagePart>? Parts { get; set; }
 
         /// <summary>
@@ -800,7 +849,15 @@
             return parts;
         }
 
-        public string? Id { get; set; }
+    }
+
+    private class ChatToolExecution
+    {
+        public string CallId { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Arguments { get; set; } = "{}";
+        public string Output { get; set; } = string.Empty;
+        public bool IsError { get; set; }
     }
 
     private sealed record ProfileOption(string ProfileId, string Display);

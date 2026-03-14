@@ -138,6 +138,11 @@ public class AgentService : IAgentService
                 var text = GetUpdateText(update);
                 var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
                 var toolCall = functionCalls.FirstOrDefault()?.Name;
+                var isToolResult = update.AdditionalProperties?.ContainsKey("_tool_result") == true;
+                var toolResultCallId = isToolResult && update.AdditionalProperties != null &&
+                                       update.AdditionalProperties.TryGetValue("tool_call_id", out var toolCallIdValue)
+                    ? toolCallIdValue?.ToString()
+                    : null;
 
                 // 构建详细的工具调用信息
                 ToolCallInfo? toolCallDetails = null;
@@ -158,7 +163,9 @@ public class AgentService : IAgentService
                     Content: text,
                     IsComplete: false,
                     ToolCall: toolCall,
-                    ToolCallDetails: toolCallDetails
+                    ToolCallDetails: toolCallDetails,
+                    IsToolResult: isToolResult,
+                    ToolResultCallId: toolResultCallId
                 );
             }
 

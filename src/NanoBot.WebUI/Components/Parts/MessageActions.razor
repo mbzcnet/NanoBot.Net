@@ -1,0 +1,48 @@
+@namespace NanoBot.WebUI.Components.Parts
+
+<div class="message-actions">
+    <MudTooltip Text="复制" Placement="Placement.Top">
+        <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                       Size="Size.Small"
+                       Color="Color.Default"
+                       OnClick="OnCopy"
+                       Class="message-action-btn" />
+    </MudTooltip>
+
+    @if (IsUserMessage)
+    {
+        <MudTooltip Text="编辑" Placement="Placement.Top">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit"
+                           Size="Size.Small"
+                           Color="Color.Default"
+                           OnClick="OnEdit"
+                           Class="message-action-btn" />
+        </MudTooltip>
+    }
+    else
+    {
+        <MudTooltip Text="重新生成" Placement="Placement.Top">
+            <MudIconButton Icon="@Icons.Material.Filled.Refresh"
+                           Size="Size.Small"
+                           Color="Color.Default"
+                           OnClick="OnRetry"
+                           Class="message-action-btn" />
+        </MudTooltip>
+    }
+
+    <MudTooltip Text="删除" Placement="Placement.Top">
+        <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                       Size="Size.Small"
+                       Color="Color.Error"
+                       OnClick="OnDelete"
+                       Class="message-action-btn" />
+    </MudTooltip>
+</div>
+
+@code {
+    [Parameter] public bool IsUserMessage { get; set; }
+    [Parameter] public EventCallback OnCopy { get; set; }
+    [Parameter] public EventCallback OnEdit { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+    [Parameter] public EventCallback OnRetry { get; set; }
+}
