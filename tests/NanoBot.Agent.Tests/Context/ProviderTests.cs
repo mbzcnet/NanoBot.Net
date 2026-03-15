@@ -28,7 +28,7 @@ public class ProviderTests
         {
             var historyPath = Path.Combine(tempDir, "HISTORY.md");
             var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetHistoryFile()).Returns(historyPath);
+            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
 
             var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
 
@@ -64,7 +64,7 @@ public class ProviderTests
         {
             var historyPath = Path.Combine(tempDir, "HISTORY.md");
             var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetHistoryFile()).Returns(historyPath);
+            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
 
             var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
 
@@ -108,7 +108,7 @@ public class ProviderTests
             await File.WriteAllTextAsync(historyPath, historyContent.ToString());
 
             var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetHistoryFile()).Returns(historyPath);
+            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
 
             var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
 

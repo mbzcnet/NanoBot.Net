@@ -9,6 +9,7 @@ using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Cron;
+using NanoBot.Core.Debug;
 using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
@@ -120,6 +121,13 @@ public static class ServiceCollectionExtensions
         {
             var workspace = sp.GetRequiredService<IWorkspaceManager>();
             return new BootstrapLoader(workspace);
+        });
+
+        // Register DebugState for debugging LLM requests/responses
+        services.AddSingleton<IDebugState>(sp =>
+        {
+            var workspace = sp.GetRequiredService<IWorkspaceManager>();
+            return new DebugState(workspace);
         });
 
         services.AddSingleton<IMessageBus, MessageBus>();
@@ -237,6 +245,7 @@ public static class ServiceCollectionExtensions
             var agentConfig = sp.GetService<AgentConfig>();
             var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var logger = sp.GetService<ILogger<AgentRuntime>>();
+            var debugState = sp.GetService<IDebugState>();
 
             // Get profile-aware dependencies for WebUI support
             var chatClientFactory = sp.GetService<IChatClientFactory>();
@@ -253,7 +262,8 @@ public static class ServiceCollectionExtensions
                 chatClientFactory,
                 llmConfig,
                 sp,
-                logger);
+                logger,
+                debugState);
         });
 
         return services;

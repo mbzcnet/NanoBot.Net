@@ -109,13 +109,7 @@ public class MemoryConsolidator
                 return null;
             }
 
-            var historyEntry = args.TryGetValue("history_entry", out var he) ? he?.ToString() : null;
             var memoryUpdate = args.TryGetValue("memory_update", out var mu) ? mu?.ToString() : null;
-
-            if (!string.IsNullOrWhiteSpace(historyEntry))
-            {
-                await _memoryStore.AppendHistoryAsync(historyEntry!, cancellationToken);
-            }
 
             if (!string.IsNullOrWhiteSpace(memoryUpdate) && memoryUpdate != currentMemory)
             {

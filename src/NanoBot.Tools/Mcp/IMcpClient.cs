@@ -11,12 +11,12 @@ public interface IMcpClient : IAsyncDisposable
 
     Task<IReadOnlyList<AITool>> GetAllAIToolsAsync(CancellationToken cancellationToken = default);
 
-    Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken cancellationToken = default);
+    Task ConnectAsync(string serverName, McpConnectionConfig config, CancellationToken cancellationToken = default);
 
     Task DisconnectAsync(string serverName, CancellationToken cancellationToken = default);
 }
 
-public record McpServerConfig
+public record McpConnectionConfig
 {
     public required string Command { get; init; }
     public IReadOnlyList<string> Args { get; init; } = Array.Empty<string>();

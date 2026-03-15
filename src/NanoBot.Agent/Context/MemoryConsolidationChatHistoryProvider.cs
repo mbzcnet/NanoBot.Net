@@ -146,15 +146,6 @@ public class MemoryConsolidationChatHistoryProvider : ChatHistoryProvider
                 return;
             }
 
-            if (result.TryGetPropertyValue("history_entry", out var historyEntry) && historyEntry != null)
-            {
-                var entryText = historyEntry.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(entryText))
-                {
-                    await _memoryStore.AppendHistoryAsync(entryText, cancellationToken);
-                }
-            }
-
             if (result.TryGetPropertyValue("memory_update", out var memoryUpdate) && memoryUpdate != null)
             {
                 var updateText = memoryUpdate.GetValue<string>();

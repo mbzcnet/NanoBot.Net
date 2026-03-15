@@ -1,5 +1,14 @@
 # 2026-03-15
 
+- 统一 ValidationResult 类型：
+  - 将 `GetSummary()` 方法从 WebUI 版本的 `ValidationResult` 迁移到 Core 版本
+  - 删除 `WebUIConfigValidator.cs` 中的 `class ValidationResult` 定义
+  - 更新 `WebUIConfigValidator.Validate()` 使用 Core 版本的 `record ValidationResult`
+  - Core 版本的 `ValidationResult` 现在包含：`IsValid`, `HasWarnings`, `GetErrorMessage()`, `GetWarningMessage()`, `GetSummary()`
+  - 消除了 `ValidationResult` 类型的重复定义，统一使用 `NanoBot.Core.Configuration.ValidationResult`
+
+# 2026-03-15
+
 - 实现 OpenCrawl 对齐计划 - Channel 插件架构：
   - 新增 `IChannelPlugin<TAccount>` 泛型接口，支持插件化架构
   - 新增适配器接口：`IChannelConfigAdapter`、`IChannelSecurityAdapter`、`IChannelOutboundAdapter`、`IChannelGroupAdapter`、`IChannelMentionAdapter`、`IChannelThreadingAdapter`、`IChannelStreamingAdapter`、`IChannelHeartbeatAdapter`

@@ -20,7 +20,7 @@ public class NanoBotMcpClient : IMcpClient
 
     public IReadOnlyList<string> ConnectedServers => _clients.Keys.ToList();
 
-    public async Task ConnectAsync(string serverName, McpServerConfig config, CancellationToken cancellationToken = default)
+    public async Task ConnectAsync(string serverName, McpConnectionConfig config, CancellationToken cancellationToken = default)
     {
         if (_clients.ContainsKey(serverName))
         {

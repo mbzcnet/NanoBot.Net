@@ -22,8 +22,6 @@ public interface IWorkspaceManager
 
     string GetMemoryFile();
 
-    string GetHistoryFile();
-
     string GetCachePath();
 
     string GetUploadsPath();

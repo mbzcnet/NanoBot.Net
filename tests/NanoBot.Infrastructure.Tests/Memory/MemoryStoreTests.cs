@@ -24,8 +24,6 @@ public class MemoryStoreTests : IDisposable
         _mockWorkspace = new Mock<IWorkspaceManager>();
         _mockWorkspace.Setup(w => w.GetMemoryFile())
             .Returns(Path.Combine(_testDirectory, "memory", "MEMORY.md"));
-        _mockWorkspace.Setup(w => w.GetHistoryFile())
-            .Returns(Path.Combine(_testDirectory, "memory", "HISTORY.md"));
 
         _config = new MemoryConfig
         {
@@ -130,48 +128,6 @@ public class MemoryStoreTests : IDisposable
     }
 
     [Fact]
-    public async Task AppendHistoryAsync_CreatesHistoryFile_WhenNotExists()
-    {
-        var store = new MemoryStore(_mockWorkspace.Object, _config, _mockLogger.Object);
-
-        await store.AppendHistoryAsync("Test history entry");
-
-        var historyPath = Path.Combine(_testDirectory, "memory", "HISTORY.md");
-        Assert.True(File.Exists(historyPath));
-
-        var content = await File.ReadAllTextAsync(historyPath);
-        Assert.Contains("Test history entry", content);
-    }
-
-    [Fact]
-    public async Task AppendHistoryAsync_AppendsToExistingFile()
-    {
-        var historyPath = Path.Combine(_testDirectory, "memory", "HISTORY.md");
-        await File.WriteAllTextAsync(historyPath, "Existing content\n");
-
-        var store = new MemoryStore(_mockWorkspace.Object, _config, _mockLogger.Object);
-
-        await store.AppendHistoryAsync("New entry");
-
-        var content = await File.ReadAllTextAsync(historyPath);
-        Assert.Contains("Existing content", content);
-        Assert.Contains("New entry", content);
-    }
-
-    [Fact]
-    public async Task AppendHistoryAsync_DoesNothing_WhenEntryIsEmpty()
-    {
-        var store = new MemoryStore(_mockWorkspace.Object, _config, _mockLogger.Object);
-
-        await store.AppendHistoryAsync("");
-        await store.AppendHistoryAsync("   ");
-        await store.AppendHistoryAsync(null!);
-
-        var historyPath = Path.Combine(_testDirectory, "memory", "HISTORY.md");
-        Assert.False(File.Exists(historyPath));
-    }
-
-    [Fact]
     public async Task GetMemoryContext_ReturnsEmpty_WhenNoMemory()
     {
         var store = new MemoryStore(_mockWorkspace.Object, _config, _mockLogger.Object);
@@ -213,25 +169,5 @@ public class MemoryStoreTests : IDisposable
         var memoryPath = Path.Combine(_testDirectory, "memory", "MEMORY.md");
         var content = await File.ReadAllTextAsync(memoryPath);
         Assert.Contains("...", content);
-    }
-
-    [Fact]
-    public async Task MemoryStore_IsThreadSafe()
-    {
-        var store = new MemoryStore(_mockWorkspace.Object, _config, _mockLogger.Object);
-
-        var tasks = Enumerable.Range(0, 10)
-            .Select(i => store.AppendHistoryAsync($"Entry {i}"))
-            .ToArray();
-
-        await Task.WhenAll(tasks);
-
-        var historyPath = Path.Combine(_testDirectory, "memory", "HISTORY.md");
-        var content = await File.ReadAllTextAsync(historyPath);
-
-        for (int i = 0; i < 10; i++)
-        {
-            Assert.Contains($"Entry {i}", content);
-        }
     }
 }

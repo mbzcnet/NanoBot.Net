@@ -310,7 +310,6 @@ public class EndToEndTests : IAsyncLifetime
         mock.Setup(w => w.GetAgentsFile()).Returns(Path.Combine(testDir, "AGENTS.md"));
         mock.Setup(w => w.GetSoulFile()).Returns(Path.Combine(testDir, "SOUL.md"));
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(testDir, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(testDir, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(testDir, "skills"));
         mock.Setup(w => w.GetMemoryPath()).Returns(Path.Combine(testDir, "memory"));
         mock.Setup(w => w.GetToolsFile()).Returns(Path.Combine(testDir, "TOOLS.md"));
@@ -337,7 +336,6 @@ public class EndToEndTests : IAsyncLifetime
         mock.Setup(w => w.GetAgentsFile()).Returns(Path.Combine(testDir, "AGENTS.md"));
         mock.Setup(w => w.GetSoulFile()).Returns(Path.Combine(testDir, "SOUL.md"));
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(testDir, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(testDir, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(testDir, "skills"));
         mock.Setup(w => w.GetMemoryPath()).Returns(Path.Combine(testDir, "memory"));
         mock.Setup(w => w.GetToolsFile()).Returns(Path.Combine(testDir, "TOOLS.md"));
@@ -371,7 +369,6 @@ public class EndToEndTests : IAsyncLifetime
         mock.Setup(w => w.GetAgentsFile()).Returns(Path.Combine(testDir, "AGENTS.md"));
         mock.Setup(w => w.GetSoulFile()).Returns(Path.Combine(testDir, "SOUL.md"));
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(testDir, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(testDir, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(testDir, "skills"));
         mock.Setup(w => w.GetMemoryPath()).Returns(Path.Combine(testDir, "memory"));
         mock.Setup(w => w.GetToolsFile()).Returns(Path.Combine(testDir, "TOOLS.md"));

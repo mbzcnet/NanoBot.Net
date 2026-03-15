@@ -100,7 +100,6 @@ public class TestFixture : IAsyncDisposable
         mock.Setup(w => w.GetAgentsFile()).Returns(Path.Combine(WorkspaceDirectory, "AGENTS.md"));
         mock.Setup(w => w.GetSoulFile()).Returns(Path.Combine(WorkspaceDirectory, "SOUL.md"));
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(WorkspaceDirectory, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(WorkspaceDirectory, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(WorkspaceDirectory, "skills"));
         mock.Setup(w => w.GetMemoryPath()).Returns(Path.Combine(WorkspaceDirectory, "memory"));
         mock.Setup(w => w.GetToolsFile()).Returns(Path.Combine(WorkspaceDirectory, "TOOLS.md"));

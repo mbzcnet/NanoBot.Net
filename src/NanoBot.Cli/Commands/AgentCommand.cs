@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
 using NanoBot.Cli.Extensions;
 using NanoBot.Core.Configuration;
+using NanoBot.Core.Debug;
 using NanoBot.Core.Workspace;
 using NLog.Config;
 using NLog.Extensions.Logging;
@@ -77,6 +78,12 @@ public class AgentCommand : ICliCommand
             getDefaultValue: () => true
         );
 
+        var debugOption = new Option<bool>(
+            name: "--debug",
+            description: "Enable debug mode to log LLM requests/responses",
+            getDefaultValue: () => false
+        );
+
         var command = new Command(Name, Description)
         {
             messageOption,
@@ -86,6 +93,7 @@ public class AgentCommand : ICliCommand
             logsOption,
             skipCheckOption,
             streamingOption,
+            debugOption,
             listSessionsOption
         };
 
@@ -98,9 +106,10 @@ public class AgentCommand : ICliCommand
             var logs = context.ParseResult.GetValueForOption(logsOption);
             var skipCheck = context.ParseResult.GetValueForOption(skipCheckOption);
             var streaming = context.ParseResult.GetValueForOption(streamingOption);
+            var debug = context.ParseResult.GetValueForOption(debugOption);
             var listSessions = context.ParseResult.GetValueForOption(listSessionsOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, streaming, listSessions, cancellationToken);
+            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, streaming, debug, listSessions, cancellationToken);
         });
 
         return command;
@@ -114,6 +123,7 @@ public class AgentCommand : ICliCommand
         bool showLogs,
         bool skipCheck,
         bool streaming,
+        bool debug,
         bool listSessions,
         CancellationToken cancellationToken)
     {
@@ -166,6 +176,16 @@ public class AgentCommand : ICliCommand
 
         // Get or create the current session
         var currentSessionId = sessionId ?? GetLastSessionId(workspace) ?? $"chat_{Guid.NewGuid():N}";
+
+        // Enable debug mode if --debug flag is provided
+        if (debug)
+        {
+            var debugState = serviceProvider.GetService<IDebugState>();
+            if (debugState != null)
+            {
+                debugState.EnableDebug(currentSessionId);
+            }
+        }
 
         // If --list-sessions is specified, show all sessions and exit
         if (listSessions)

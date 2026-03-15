@@ -101,7 +101,7 @@ You are {name}, a helpful AI assistant. You have access to tools that allow you 
 ## Workspace
 Your workspace is at: {workspacePath}
 - Long-term memory: {workspacePath}/memory/MEMORY.md
-- History log: {workspacePath}/memory/HISTORY.md (grep-searchable)
+- Session history: {workspacePath}/sessions/ (JSONL files)
 - Custom skills: {workspacePath}/skills/{{skill-name}}/SKILL.md
 
 IMPORTANT: When responding to direct questions or conversations, reply directly with your text response.
@@ -109,8 +109,7 @@ Only use the 'message' tool when you need to send a message to a specific chat c
 For normal conversation, just respond with text - do not call the message tool.
 
 Always be helpful, accurate, and concise. When using tools, think step by step: what you know, what you need, and why you chose this tool.
-When remembering something important, write to {workspacePath}/memory/MEMORY.md
-To recall past events, grep {workspacePath}/memory/HISTORY.md";
+When remembering something important, write to {workspacePath}/memory/MEMORY.md";
     }
 
     private static string GetRuntimeInfo()

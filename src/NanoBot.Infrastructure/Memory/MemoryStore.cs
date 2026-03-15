@@ -89,33 +89,6 @@ public class MemoryStore : IMemoryStore
         }
     }
 
-    public async Task AppendHistoryAsync(string entry, CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(entry))
-        {
-            return;
-        }
-
-        await _lock.WaitAsync(cancellationToken);
-        try
-        {
-            var historyPath = _workspace.GetHistoryFile();
-            var directory = Path.GetDirectoryName(historyPath);
-            if (!string.IsNullOrEmpty(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            var text = entry.TrimEnd();
-            await File.AppendAllTextAsync(historyPath, text + "\n\n", cancellationToken);
-            _logger?.LogDebug("History appended: {Path}", historyPath);
-        }
-        finally
-        {
-            _lock.Release();
-        }
-    }
-
     public string GetMemoryContext()
     {
         var memory = _cachedMemory ?? LoadAsync().GetAwaiter().GetResult();

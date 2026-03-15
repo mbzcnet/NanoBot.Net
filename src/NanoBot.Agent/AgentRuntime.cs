@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Extensions;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Configuration;
+using NanoBot.Core.Debug;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
@@ -35,6 +36,7 @@ public interface IAgentRuntime
 public sealed class AgentRuntime : IAgentRuntime, IDisposable
 {
     private static readonly Regex MarkdownImageRegex = new(@"!\[(?<alt>[^\]]*)\]\((?<url>[^)\s]+)(?:\s+""[^""]*"")?\)", RegexOptions.Compiled);
+    private static readonly Regex DefaultSessionTitleRegex = new(@"^会话 \d{2}-\d{2} \d{2}:\d{2}$", RegexOptions.Compiled);
     private readonly ChatClientAgent _defaultAgent;
     private readonly IMessageBus _bus;
     private readonly ISessionManager _sessionManager;
@@ -42,6 +44,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private readonly IMemoryStore? _memoryStore;
     private readonly ISubagentManager? _subagentManager;
     private readonly ILogger<AgentRuntime>? _logger;
+    private readonly IDebugState? _debugState;
     private readonly string _sessionsDirectory;
     private readonly int _memoryWindow;
     private CancellationTokenSource? _runningCts;
@@ -81,7 +84,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         IChatClientFactory? chatClientFactory = null,
         LlmConfig? llmConfig = null,
         IServiceProvider? serviceProvider = null,
-        ILogger<AgentRuntime>? logger = null)
+        ILogger<AgentRuntime>? logger = null,
+        IDebugState? debugState = null)
     {
         _defaultAgent = agent ?? throw new ArgumentNullException(nameof(agent));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
@@ -94,6 +98,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         _llmConfig = llmConfig;
         _serviceProvider = serviceProvider;
         _logger = logger;
+        _debugState = debugState;
         _sessionsDirectory = _workspace.GetSessionsPath();
 
         if (!Directory.Exists(_sessionsDirectory))
@@ -317,8 +322,29 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         var agent = GetAgentForSession(sessionKey);
         ToolExecutionContext.SetCurrentSessionKey(sessionKey);
+
+        // Debug logging: Start a new request log and collect LLM request info
+        var requestId = -1;
+        if (_debugState?.IsDebugEnabled(sessionKey) == true)
+        {
+            requestId = await _debugState.StartRequestLogAsync(sessionKey, cancellationToken);
+        }
+
         try
         {
+            // Build LLM request info for debugging
+            if (requestId > 0)
+            {
+                try
+                {
+                    await WriteLLMRequestDebugLogAsync(sessionKey, requestId, agent, session, userMessage, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to write debug log for LLM request");
+                }
+            }
+
             await foreach (var update in agent.RunStreamingAsync([userMessage], session, cancellationToken: cancellationToken))
             {
                 swInner.Stop();
@@ -401,6 +427,20 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
                 swInner.Restart();
                 yield return update;
+            }
+
+            // Debug logging: Log final LLM response after streaming completes
+            if (requestId > 0)
+            {
+                try
+                {
+                    var responseContent = CollectResponseContent(session);
+                    await _debugState!.AppendToLogAsync(sessionKey, requestId, "\n---\n\n## OUT - LLM Response\n\n" + responseContent, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to write debug log for LLM response");
+                }
             }
         }
         finally
@@ -1193,8 +1233,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             // 获取当前标题
             var currentTitle = _sessionManager.GetSessionTitle(sessionKey);
 
-            // 如果标题已设置（非空），则不自动更新
-            if (!string.IsNullOrEmpty(currentTitle))
+            // 如果标题已设置（非空且不是默认格式），则不自动更新
+            if (!string.IsNullOrEmpty(currentTitle) && !IsDefaultSessionTitle(currentTitle))
             {
                 return;
             }
@@ -1230,6 +1270,36 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     // 立即保存以更新文件中的标题
                     await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
                     _logger?.LogInformation("Auto-set session title for {SessionKey} to: {Title}", sessionKey, newTitle);
+                }
+            }
+            // 如果标题仍为默认值，但会话中已有消息，用第一条用户消息回填
+            else if (messages.Count > 0 && IsDefaultSessionTitle(currentTitle))
+            {
+                var firstUserMessage = messages.FirstOrDefault(m => m.Role == ChatRole.User);
+                if (firstUserMessage?.Text is not null)
+                {
+                    var firstContent = firstUserMessage.Text;
+                    string newTitle;
+
+                    if (firstContent.Length > 50)
+                    {
+                        newTitle = await GenerateTitleWithLLMAsync(sessionKey, firstContent, cancellationToken);
+                        if (string.IsNullOrWhiteSpace(newTitle))
+                        {
+                            newTitle = firstContent.Substring(0, 50) + "...";
+                        }
+                    }
+                    else
+                    {
+                        newTitle = firstContent;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(newTitle))
+                    {
+                        _sessionManager.SetSessionTitle(sessionKey, newTitle);
+                        await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
+                        _logger?.LogInformation("Backfilled session title for {SessionKey} to: {Title}", sessionKey, newTitle);
+                    }
                 }
             }
         }
@@ -1277,6 +1347,14 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             _logger?.LogWarning(ex, "Failed to generate title with LLM for session {SessionKey}", sessionKey);
             return string.Empty;
         }
+    }
+
+    /// <summary>
+    /// 检查标题是否为默认格式（如"会话 03-16 14:30"）
+    /// </summary>
+    private static bool IsDefaultSessionTitle(string title)
+    {
+        return !string.IsNullOrEmpty(title) && DefaultSessionTitleRegex.IsMatch(title);
     }
 
     public void Dispose()
@@ -1381,5 +1459,141 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             _logger?.LogError(ex, "Failed to create agent for profile {ProfileId}, using default agent", profileId);
             return _defaultAgent;
         }
+    }
+
+    private async Task WriteLLMRequestDebugLogAsync(
+        string sessionKey,
+        int requestId,
+        ChatClientAgent agent,
+        AgentSession session,
+        ChatMessage userMessage,
+        CancellationToken cancellationToken)
+    {
+        var sb = new StringBuilder();
+
+        // Get LLM configuration info
+        var profileId = _sessionManager.GetSessionProfileId(sessionKey);
+        LlmProfile? profile = null;
+        if (!string.IsNullOrEmpty(profileId) && _llmConfig?.Profiles != null)
+        {
+            _llmConfig.Profiles.TryGetValue(profileId, out profile);
+        }
+
+        sb.AppendLine("### LLM Config");
+        if (profile != null)
+        {
+            sb.AppendLine($"- **Model**: {profile.Model}");
+            sb.AppendLine($"- **Provider**: {profile.Provider ?? "openai"}");
+            sb.AppendLine($"- **API Base**: {profile.ApiBase ?? "(default)"}");
+            sb.AppendLine($"- **Temperature**: {profile.Temperature}");
+            sb.AppendLine($"- **Max Tokens**: {profile.MaxTokens}");
+        }
+        else
+        {
+            sb.AppendLine("- *(Using default agent configuration)*");
+        }
+        sb.AppendLine();
+
+        // Get system prompt / instructions from agent
+        var instructions = NanoBotAgentFactory.BuildInstructions(_workspace, null);
+        sb.AppendLine("### System Prompt (Instructions)");
+        sb.AppendLine("```");
+        sb.AppendLine(instructions);
+        sb.AppendLine("```");
+        sb.AppendLine();
+
+        // Get tools from agent's ChatOptions
+        var chatClient = agent.GetChatClient();
+        if (chatClient != null)
+        {
+            var reflectionField = chatClient.GetType().GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            if (reflectionField?.GetValue(chatClient) is Microsoft.Extensions.AI.ChatOptions chatOptions && chatOptions.Tools != null)
+            {
+                sb.AppendLine("### Tools");
+                foreach (var tool in chatOptions.Tools)
+                {
+                    var toolName = tool.Name ?? "unknown";
+                    var toolDesc = tool.Description ?? "";
+                    sb.AppendLine($"- **{toolName}**: {toolDesc}");
+                }
+                sb.AppendLine();
+            }
+        }
+
+        // Build messages
+        sb.AppendLine("### Messages");
+        sb.AppendLine("| Role | Content |");
+        sb.AppendLine("|------|---------|");
+
+        foreach (var msg in session.GetAllMessages())
+        {
+            var role = msg.Role.Value ?? "unknown";
+            var text = TruncateForDebug(msg.Text, 200);
+            var hasFunctionCalls = msg.Contents.Any(c => c is FunctionCallContent);
+            var functionCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
+            var functionSummary = "";
+
+            if (hasFunctionCalls && functionCalls.Any())
+            {
+                functionSummary = " [tool_calls: " + string.Join(", ", functionCalls.Select(f => f.Name ?? "?")) + "]";
+            }
+
+            sb.AppendLine($"| {role} | {EscapeForMarkdown(text)}{functionSummary} |");
+        }
+
+        var userText = TruncateForDebug(userMessage.Text, 200);
+        var userHasFunctionCalls = userMessage.Contents.Any(c => c is FunctionCallContent);
+        sb.AppendLine($"| user | {EscapeForMarkdown(userText)}{(userHasFunctionCalls ? " [tool_calls]" : "")} |");
+
+        await _debugState!.AppendToLogAsync(sessionKey, requestId, sb.ToString(), cancellationToken);
+    }
+
+    private string CollectResponseContent(AgentSession session)
+    {
+        var sb = new StringBuilder();
+
+        var messages = session.GetAllMessages().ToList();
+        var recentMessages = messages.Skip(Math.Max(0, messages.Count - 10));
+
+        foreach (var msg in recentMessages)
+        {
+            var role = msg.Role.Value ?? "unknown";
+            var text = msg.Text ?? "";
+
+            if (role == "assistant" && !string.IsNullOrEmpty(text))
+            {
+                sb.AppendLine(text);
+                sb.AppendLine();
+            }
+
+            var functionCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
+            foreach (var call in functionCalls)
+            {
+                var argsStr = call.Arguments != null ? JsonSerializer.Serialize(call.Arguments) : "{}";
+                sb.AppendLine($"[tool_call: {call.Name} {argsStr}]");
+                sb.AppendLine();
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string TruncateForDebug(string? text, int maxLength)
+    {
+        if (string.IsNullOrEmpty(text))
+            return "";
+
+        return text.Length <= maxLength ? text : text[..maxLength] + "...";
+    }
+
+    private static string EscapeForMarkdown(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return "";
+
+        return text
+            .Replace("|", "\\|")
+            .Replace("\n", " ")
+            .Replace("**", "\\*\\*");
     }
 }

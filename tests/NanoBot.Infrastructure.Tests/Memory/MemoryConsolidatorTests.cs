@@ -193,10 +193,6 @@ public class MemoryConsolidatorTests : IDisposable
 
         var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
         Assert.NotNull(result);
-
-        _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
-            It.Is<string>(s => s.Contains("weather")),
-            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -230,10 +226,6 @@ public class MemoryConsolidatorTests : IDisposable
 
         var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
         Assert.Null(result);
-
-        _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -268,10 +260,6 @@ public class MemoryConsolidatorTests : IDisposable
 
         var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
         Assert.Null(result);
-
-        _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -348,10 +336,6 @@ public class MemoryConsolidatorTests : IDisposable
 
         var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
         Assert.Null(result);
-
-        _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -395,17 +379,12 @@ public class MemoryConsolidatorTests : IDisposable
 
         var result = await consolidator.ConsolidateAsync(messages, lastConsolidatedIndex: 0);
         Assert.NotNull(result);
-
-        _memoryStoreMock.Verify(m => m.AppendHistoryAsync(
-            It.IsAny<string>(),
-            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static Mock<IWorkspaceManager> CreateWorkspaceMock(string testDir)
     {
         var mock = new Mock<IWorkspaceManager>();
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(testDir, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(testDir, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetWorkspacePath()).Returns(testDir);
         return mock;
     }

@@ -133,6 +133,17 @@ public static class BrowserTools
                     },
                     Require(targetId, "targetId"),
                     resolvedProfile), JsonOptions),
+                "wait" => JsonSerializer.Serialize(await browserService.ExecuteActionAsync(
+                    new BrowserActionRequest
+                    {
+                        Kind = "wait",
+                        Text = text,
+                        TextGone = textGone,
+                        TimeoutMs = timeoutMs,
+                        LoadState = loadState
+                    },
+                    Require(targetId, "targetId"),
+                    resolvedProfile), JsonOptions),
                 _ => $"Error: Unknown action: {action}"
             };
         }
@@ -159,6 +170,7 @@ public static class BrowserTools
             - capture: Capture screenshot. Required: targetId (tab ID). Optional: snapshotFormat ('ai' or 'raw').
             - content: Extract page content. Required: targetId (tab ID). Optional: selector (CSS selector), maxChars (max characters to return).
             - act: Execute action on page. Required: targetId (tab ID), kind (action type: click, hover, scroll, press, wait). Optional: reference (element reference), text (input text), key (key to press), timeoutMs, scrollBy, loadState.
+            - wait: Wait for page condition or timeout. Required: targetId (tab ID). Optional: text (wait for text to appear), textGone (wait for text to disappear), timeoutMs (default 3000ms), loadState (load, domcontentloaded, networkidle).
 
             Recommended workflow:
             1. Use 'open' or 'navigate' to load a page (remember the targetId returned).

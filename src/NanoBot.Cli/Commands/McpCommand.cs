@@ -141,7 +141,7 @@ public class McpCommand : ICliCommand
 
             try
             {
-                var mcpConfig = new Tools.Mcp.McpServerConfig
+                var mcpConfig = new Tools.Mcp.McpConnectionConfig
                 {
                     Command = serverConfig.Command ?? "",
                     Args = serverConfig.Args ?? Array.Empty<string>(),

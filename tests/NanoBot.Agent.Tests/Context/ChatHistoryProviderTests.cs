@@ -20,8 +20,6 @@ public class ChatHistoryProviderTests : IDisposable
         Directory.CreateDirectory(_testDirectory);
 
         _workspaceMock = new Mock<IWorkspaceManager>();
-        _workspaceMock.Setup(w => w.GetHistoryFile())
-            .Returns(Path.Combine(_testDirectory, "history.log"));
         _loggerMock = new Mock<ILogger<FileBackedChatHistoryProvider>>();
     }
 
@@ -171,29 +169,6 @@ public class ChatHistoryProviderTests : IDisposable
         Assert.Equal("Response 2", storedMessages[1].Text);
         Assert.Equal("Message 3", storedMessages[2].Text);
         Assert.Equal("Response 3", storedMessages[3].Text);
-    }
-
-    [Fact]
-    public async Task StoreChatHistoryAsync_AppendsToHistoryFile()
-    {
-        var provider = new FileBackedChatHistoryProvider(_workspaceMock.Object, 100, _loggerMock.Object);
-        var agent = CreateTestAgent();
-        var session = await agent.CreateSessionAsync();
-
-        var requestMessages = new[] { new ChatMessage(ChatRole.User, "Test message") };
-        var responseMessages = new[] { new ChatMessage(ChatRole.Assistant, "Test response") };
-
-        var context = new ChatHistoryProvider.InvokedContext(
-            agent, session, requestMessages, responseMessages);
-
-        await provider.InvokedAsync(context);
-
-        var historyFile = _workspaceMock.Object.GetHistoryFile();
-        Assert.True(File.Exists(historyFile));
-
-        var content = await File.ReadAllTextAsync(historyFile);
-        Assert.Contains("user: Test message", content);
-        Assert.Contains("assistant: Test response", content);
     }
 
     private static ChatClientAgent CreateTestAgent()

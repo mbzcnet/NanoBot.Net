@@ -297,7 +297,6 @@ public class NanoBotAgentFactoryTests
         mock.Setup(w => w.GetUserFile()).Returns(Path.Combine(tempDir, "USER.md"));
         mock.Setup(w => w.GetToolsFile()).Returns(Path.Combine(tempDir, "TOOLS.md"));
         mock.Setup(w => w.GetMemoryFile()).Returns(Path.Combine(tempDir, "memory", "MEMORY.md"));
-        mock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(tempDir, "memory", "HISTORY.md"));
         mock.Setup(w => w.GetMemoryPath()).Returns(Path.Combine(tempDir, "memory"));
         mock.Setup(w => w.GetSkillsPath()).Returns(Path.Combine(tempDir, "skills"));
         return mock;

@@ -8,6 +8,7 @@
 @inject IJSRuntime JSRuntime
 @inject NanoBot.Core.Storage.IFileStorageService FileStorageService
 @inject IConfiguration Configuration
+@inject IDebugState DebugState
 @using NanoBot.WebUI.Services
 @using NanoBot.WebUI.Components.Parts
 @using NanoBot.Core.Configuration
@@ -312,6 +313,15 @@
     protected override async Task OnInitializedAsync()
     {
         _cancellationTokenSource = new CancellationTokenSource();
+
+        // Check for debug=1 query parameter and enable debug mode
+        var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
+        if (HttpUtility.ParseQueryString(uri.Query).Get("debug") == "1")
+        {
+            var sessionKey = $"chat_{SessionId}";
+            DebugState.EnableDebug(sessionKey);
+        }
+
         await LoadProfileOptionsAsync();
         await LoadMessages();
     }

@@ -20,6 +20,14 @@
 | [Testing.md](./design/Testing.md)               | **测试方案**：测试策略、测试用例设计、Mock 策略                                               | 测试工程师 |
 | [Model-Benchmark.md](./design/Model-Benchmark.md) | **模型评测工具**：模型可用性评测工具设计，测试题库、评分规则、CLI 命令                        | 开发者 H   |
 
+### 增强设计文档
+
+| 文档                                               | 内容                                                                               | 说明   |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------- | ------ |
+| [Browser-Tool.md](./design/Browser-Tool.md)        | **浏览器工具**：基于 Playwright 的 Browser Tool 实现，页面快照、元素交互            | 开发者 B |
+| [WebSearch-Enhancement.md](./design/WebSearch-Enhancement.md) | **Web Search 增强**：多 Provider 架构、缓存、结构化响应、错误模型                   | 开发者 B |
+| [FileTools-Enhancement.md](./design/FileTools-Enhancement.md) | **文件工具增强**：多策略匹配、模糊匹配、行尾规范化、编辑预览                        | 开发者 B |
+
 ---
 
 ## 补充方案文档

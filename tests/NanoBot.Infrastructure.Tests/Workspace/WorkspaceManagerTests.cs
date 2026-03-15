@@ -138,7 +138,6 @@ public class WorkspaceManagerTests
             Assert.True(File.Exists(workspaceManager.GetUserFile()));
             Assert.True(File.Exists(workspaceManager.GetHeartbeatFile()));
             Assert.True(File.Exists(workspaceManager.GetMemoryFile()));
-            Assert.True(File.Exists(workspaceManager.GetHistoryFile()));
         }
         finally
         {

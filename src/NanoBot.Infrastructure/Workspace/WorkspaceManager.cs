@@ -42,8 +42,6 @@ public class WorkspaceManager : IWorkspaceManager
 
     public string GetMemoryFile() => _config.GetMemoryFile();
 
-    public string GetHistoryFile() => _config.GetHistoryFile();
-
     public string GetCachePath() => _config.GetCachePath();
 
     public string GetUploadsPath() => _config.GetUploadsPath();
@@ -153,8 +151,7 @@ public class WorkspaceManager : IWorkspaceManager
             [GetToolsFile()] = GetDefaultToolsContent(),
             [GetUserFile()] = GetDefaultUserContent(),
             [GetHeartbeatFile()] = GetDefaultHeartbeatContent(),
-            [GetMemoryFile()] = string.Empty,
-            [GetHistoryFile()] = string.Empty
+            [GetMemoryFile()] = string.Empty
         };
 
         foreach (var (path, content) in defaultFiles)
@@ -194,7 +191,7 @@ You have access to:
 ## Memory
 
 - `memory/MEMORY.md` — long-term facts (preferences, context, relationships)
-- `memory/HISTORY.md` — append-only event log, search with grep to recall past events
+- `sessions/` — conversation history stored as JSONL files
 
 ## Scheduled Reminders
 

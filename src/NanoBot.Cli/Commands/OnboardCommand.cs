@@ -659,11 +659,11 @@ public class OnboardCommand : ICliCommand
             Console.WriteLine("  Created memory/MEMORY.md");
         }
 
-        var historyFile = Path.Combine(memoryDir, "HISTORY.md");
-        if (!File.Exists(historyFile))
+        var sessionsDir = Path.Combine(workspacePath, "sessions");
+        if (!Directory.Exists(sessionsDir))
         {
-            await File.WriteAllTextAsync(historyFile, string.Empty, cancellationToken);
-            Console.WriteLine("  Created memory/HISTORY.md");
+            Directory.CreateDirectory(sessionsDir);
+            Console.WriteLine("  Created sessions/");
         }
 
         var skillsDir = Path.Combine(workspacePath, "skills");
@@ -682,7 +682,7 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Always explain what you're doing before taking actions
 - Ask for clarification when the request is ambiguous
 - Use tools to help accomplish tasks
-- Remember important information in memory/MEMORY.md; past events are logged in memory/HISTORY.md
+- Remember important information in memory/MEMORY.md; past conversations are stored in sessions/
 ";
 
     private static string GetDefaultSoulContent() => @"# Soul

@@ -23,7 +23,6 @@ public class MessageHistoryIntegrationTests : IDisposable
 
         _workspaceMock = new Mock<IWorkspaceManager>();
         _workspaceMock.Setup(w => w.GetWorkspacePath()).Returns(_testDirectory);
-        _workspaceMock.Setup(w => w.GetHistoryFile()).Returns(Path.Combine(_testDirectory, "history.log"));
         _workspaceMock.Setup(w => w.GetAgentsFile()).Returns(Path.Combine(_testDirectory, "AGENTS.md"));
         _workspaceMock.Setup(w => w.GetSoulFile()).Returns(Path.Combine(_testDirectory, "SOUL.md"));
         _workspaceMock.Setup(w => w.GetUserFile()).Returns(Path.Combine(_testDirectory, "USER.md"));

@@ -290,8 +290,25 @@ public record ValidationResult(IReadOnlyList<string> Errors, IReadOnlyList<strin
 
     public string GetWarningMessage()
     {
-        return Warnings.Count > 0 
-            ? string.Join(Environment.NewLine, Warnings) 
+        return Warnings.Count > 0
+            ? string.Join(Environment.NewLine, Warnings)
             : string.Empty;
+    }
+
+    public string GetSummary()
+    {
+        var summary = new List<string>();
+
+        if (Errors.Count > 0)
+        {
+            summary.Add($"错误 ({Errors.Count}):\n- {string.Join("\n- ", Errors)}");
+        }
+
+        if (Warnings.Count > 0)
+        {
+            summary.Add($"警告 ({Warnings.Count}):\n- {string.Join("\n- ", Warnings)}");
+        }
+
+        return string.Join("\n\n", summary);
     }
 }

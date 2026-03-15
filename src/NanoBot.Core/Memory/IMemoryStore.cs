@@ -11,7 +11,5 @@ public interface IMemoryStore
         IEnumerable<ChatMessage> responseMessages,
         CancellationToken cancellationToken = default);
 
-    Task AppendHistoryAsync(string entry, CancellationToken cancellationToken = default);
-
     string GetMemoryContext();
 }
