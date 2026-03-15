@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
+using NanoBot.Channels.Discovery;
 
 namespace NanoBot.Channels;
 
 public class ChannelManager : IChannelManager, IDisposable
 {
     private readonly ConcurrentDictionary<string, IChannel> _channels = new();
+    private readonly ConcurrentDictionary<string, object> _plugins = new();
     private readonly IMessageBus _bus;
     private readonly ILogger<ChannelManager> _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -22,6 +24,41 @@ public class ChannelManager : IChannelManager, IDisposable
     {
         _bus = bus;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Registers a channel plugin (new plugin-based approach).
+    /// </summary>
+    public void RegisterPlugin<TAccount>(string pluginId, IChannelPlugin<TAccount> plugin) where TAccount : class
+    {
+        if (_plugins.TryAdd(pluginId, plugin))
+        {
+            _logger.LogInformation("Channel plugin registered: {Id} ({Type})", pluginId, plugin.Meta.Name);
+        }
+        else
+        {
+            _logger.LogWarning("Channel plugin already registered: {Id}", pluginId);
+        }
+    }
+
+    /// <summary>
+    /// Gets a registered channel plugin.
+    /// </summary>
+    public IChannelPlugin<TAccount>? GetPlugin<TAccount>(string pluginId) where TAccount : class
+    {
+        if (_plugins.TryGetValue(pluginId, out var plugin) && plugin is IChannelPlugin<TAccount> channelPlugin)
+            return channelPlugin;
+        return null;
+    }
+
+    /// <summary>
+    /// Gets all registered plugins of a specific type.
+    /// </summary>
+    public IReadOnlyList<IChannelPlugin<TAccount>> GetPlugins<TAccount>() where TAccount : class
+    {
+        return _plugins.Values
+            .OfType<IChannelPlugin<TAccount>>()
+            .ToList();
     }
 
     public void Register(IChannel channel)

@@ -1,3 +1,19 @@
+# 2026-03-15
+
+- 实现 OpenCrawl 对齐计划 - Channel 插件架构：
+  - 新增 `IChannelPlugin<TAccount>` 泛型接口，支持插件化架构
+  - 新增适配器接口：`IChannelConfigAdapter`、`IChannelSecurityAdapter`、`IChannelOutboundAdapter`、`IChannelGroupAdapter`、`IChannelMentionAdapter`、`IChannelThreadingAdapter`、`IChannelStreamingAdapter`、`IChannelHeartbeatAdapter`
+  - 新增 `ChannelCapabilities`、`ChannelPluginMeta`、`ChannelId` 等模型
+  - 新增 `ChannelAccount` 多账户支持类及状态枚举
+  - 新增 `ISecurityPolicy` 安全策略接口及 `DefaultSecurityPolicy` 默认实现
+  - 新增 `IChannelPluginDiscoverer` 插件发现机制
+  - 新增 Telegram 示例插件 `TelegramPlugin` 展示如何使用新接口
+  - 更新 `ChannelManager` 支持插件注册
+  - 新增单元测试：
+    - `ChannelPluginTests.cs` - 插件发现和工厂测试
+    - `SecurityPolicyTests.cs` - 安全策略各种规则测试（AllowAll、DenyAll、AllowList、BlockList 等）
+  - 所有 56 个 Channel 测试通过
+
 # 2026-03-14
 
 - Agent CLI 多session支持：CLI现在支持多session管理，与WebUI使用相同的session存储位置。CLI新增交互命令：

@@ -1,4 +1,4 @@
-![1773574675812](image/20260315-openclaw-alignment-plan/1773574675812.png)![1773574678766](image/20260315-openclaw-alignment-plan/1773574678766.png)![1773574700935](image/20260315-openclaw-alignment-plan/1773574700935.png)![1773574703050](image/20260315-openclaw-alignment-plan/1773574703050.png)![1773574749403](image/20260315-openclaw-alignment-plan/1773574749403.png)![1773574751020](image/20260315-openclaw-alignment-plan/1773574751020.png)# NanoBot.Net OpenCrawl 对齐计划
+# NanoBot.Net OpenCrawl 对齐计划
 
 **生成日期**: 2026-03-15
 

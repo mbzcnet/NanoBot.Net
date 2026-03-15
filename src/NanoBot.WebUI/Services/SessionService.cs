@@ -536,6 +536,14 @@ public class SessionService : ISessionService
                         MergeToolExecutions(currentResponse.ToolExecutions, msg.ToolExecutions);
                     }
 
+                    // 按顺序合并 Parts，保证多行 assistant/tool 合并后仍能交错渲染
+                    if (msg.Parts != null && msg.Parts.Count > 0)
+                    {
+                        if (currentResponse.Parts == null)
+                            currentResponse.Parts = new List<MessagePartInfo>();
+                        currentResponse.Parts.AddRange(msg.Parts);
+                    }
+
                     currentResponse.Timestamp = msg.Timestamp;
                     currentResponse.SourceIndex = Math.Max(currentResponse.SourceIndex, msg.SourceIndex);
                 }
@@ -742,6 +750,12 @@ public class SessionService : ISessionService
                             if (!string.IsNullOrWhiteSpace(text))
                             {
                                 textParts.Add(text!);
+                                // 添加有序 text part
+                                sessionParts.Add(new MessagePartInfo
+                                {
+                                    Type = "text",
+                                    Text = text
+                                });
                             }
                         }
                         else if (type == "functionCall")
@@ -766,6 +780,15 @@ public class SessionService : ISessionService
                             {
                                 toolExecutionLookup[execution.CallId] = execution;
                             }
+                            
+                            // 添加有序 tool_call part
+                            sessionParts.Add(new MessagePartInfo
+                            {
+                                Type = "tool_call",
+                                CallId = callId ?? string.Empty,
+                                ToolName = name,
+                                Arguments = args
+                            });
                         }
                         else if (type == "functionResult" &&
                                  content.TryGetProperty("result", out var resultEl))
@@ -795,6 +818,16 @@ public class SessionService : ISessionService
                                         IsError = LooksLikeErrorOutput(result!)
                                     });
                                 }
+                                
+                                // 添加有序 tool_result part
+                                sessionParts.Add(new MessagePartInfo
+                                {
+                                    Type = "tool_result",
+                                    CallId = callId,
+                                    ToolName = "tool",
+                                    Output = NormalizeToolOutput(result!),
+                                    IsError = LooksLikeErrorOutput(result!)
+                                });
                             }
                         }
                     }
@@ -831,7 +864,8 @@ public class SessionService : ISessionService
                         Timestamp = timestamp,
                         ToolCall = toolCall,
                         ToolExecutions = toolExecutions,
-                        SourceIndex = index
+                        SourceIndex = index,
+                        Parts = sessionParts.Count > 0 ? sessionParts : new List<MessagePartInfo>()
                     });
                 }
 

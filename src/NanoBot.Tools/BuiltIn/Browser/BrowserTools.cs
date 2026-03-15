@@ -26,6 +26,7 @@ public static class BrowserTools
              string? profile = null,
              string? targetId = null,
              string? targetUrl = null,
+             string? url = null,
              string? snapshotFormat = null,
              string? kind = null,
              string? reference = null,
@@ -38,7 +39,7 @@ public static class BrowserTools
              int? maxChars = null,
              string? loadState = null,
              string? sessionKey = null) =>
-                ExecuteAsync(action, profile, targetId, targetUrl, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService),
+                ExecuteAsync(action, profile, targetId, targetUrl, url, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService),
             new AIFunctionFactoryOptions
             {
                 Name = "browser",
@@ -51,6 +52,7 @@ public static class BrowserTools
         string? profile,
         string? targetId,
         string? targetUrl,
+        string? url,
         string? snapshotFormat,
         string? kind,
         string? reference,
@@ -72,6 +74,7 @@ public static class BrowserTools
 
         var resolvedAction = action?.Trim().ToLowerInvariant();
         var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "nanobot" : profile.Trim();
+        var resolvedUrl = !string.IsNullOrWhiteSpace(url) ? url.Trim() : targetUrl?.Trim();
 
         var resolvedSessionKey = string.IsNullOrWhiteSpace(sessionKey)
             ? ToolExecutionContext.CurrentSessionKey
@@ -92,11 +95,11 @@ public static class BrowserTools
                     Tabs = await browserService.GetTabsAsync(resolvedProfile)
                 }, JsonOptions),
                 "open" => JsonSerializer.Serialize(await browserService.OpenTabAsync(
-                    targetUrl ?? string.Empty,
+                    resolvedUrl ?? string.Empty,
                     resolvedProfile), JsonOptions),
                 "navigate" => JsonSerializer.Serialize(await browserService.NavigateAsync(
                     Require(targetId, "targetId"),
-                    targetUrl ?? string.Empty,
+                    resolvedUrl ?? string.Empty,
                     resolvedProfile), JsonOptions),
                 "close" => JsonSerializer.Serialize(await browserService.CloseTabAsync(
                     Require(targetId, "targetId"),
@@ -149,8 +152,8 @@ public static class BrowserTools
             - start: Start browser instance. No required parameters.
             - stop: Stop browser instance. No required parameters.
             - tabs: List all open tabs. No required parameters.
-            - open: Open a new tab. Required: targetUrl (the URL to open).
-            - navigate: Navigate existing tab to URL. Required: targetId (tab ID), targetUrl (destination URL).
+            - open: Open a new tab. Required: url or targetUrl (the URL to open).
+            - navigate: Navigate existing tab to URL. Required: targetId (tab ID), url or targetUrl (destination URL).
             - close: Close a tab. Required: targetId (tab ID to close).
             - snapshot: Get interactive page snapshot. Required: targetId (tab ID). Optional: snapshotFormat ('ai' or 'raw').
             - capture: Capture screenshot. Required: targetId (tab ID). Optional: snapshotFormat ('ai' or 'raw').

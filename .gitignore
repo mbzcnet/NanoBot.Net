@@ -1,4 +1,4 @@
-[Tt]emp/
+# [Tt]emp/
 dist*/
 ## .NET Build Outputs
 bin/

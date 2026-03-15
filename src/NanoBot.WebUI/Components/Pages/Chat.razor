@@ -471,13 +471,14 @@
         {
             Logger.LogInformation("Sending message to Agent for session {SessionId}", SessionId);
 
-            // 使用流式响应
+            // 使用流式响应；初始化 SessionParts 以便流式时也按顺序交错渲染
             var assistantMessage = new ChatMessage
             {
                 Role = "assistant",
                 Content = string.Empty,
                 Timestamp = DateTime.Now,
-                ToolExecutions = new List<ChatToolExecution>()
+                ToolExecutions = new List<ChatToolExecution>(),
+                SessionParts = new List<MessagePartInfo>()
             };
             _messages.Add(assistantMessage);
 
@@ -502,6 +503,15 @@
                             Arguments = chunk.ToolCallDetails.Arguments ?? "{}"
                         };
                         assistantMessage.ToolExecutions.Add(existingExecution);
+
+                        // 仅在新 execution 时添加一次 tool_call part，避免同一工具调用被后端发两次（tool_hint + functionCalls update）导致 IN 重复
+                        assistantMessage.SessionParts!.Add(new MessagePartInfo
+                        {
+                            Type = "tool_call",
+                            CallId = chunk.ToolCallDetails.CallId ?? string.Empty,
+                            ToolName = chunk.ToolCallDetails.Name ?? string.Empty,
+                            Arguments = chunk.ToolCallDetails.Arguments ?? "{}"
+                        });
                     }
                     else
                     {
@@ -529,10 +539,47 @@
 
                     targetExecution.Output += chunk.Content;
                     targetExecution.IsError = LooksLikeErrorOutput(targetExecution.Output);
+
+                    // 流式时按顺序添加或追加 tool_result part
+                    var lastToolResult = assistantMessage.SessionParts!
+                        .Select((p, i) => (Part: p, Index: i))
+                        .Where(x => x.Part.Type == "tool_result" && string.Equals(x.Part.CallId, chunk.ToolResultCallId, StringComparison.Ordinal))
+                        .LastOrDefault();
+                    if (lastToolResult.Part != null)
+                    {
+                        lastToolResult.Part.Output = (lastToolResult.Part.Output ?? "") + chunk.Content;
+                        lastToolResult.Part.IsError = LooksLikeErrorOutput(lastToolResult.Part.Output ?? "");
+                    }
+                    else
+                    {
+                        assistantMessage.SessionParts.Add(new MessagePartInfo
+                        {
+                            Type = "tool_result",
+                            CallId = chunk.ToolResultCallId ?? string.Empty,
+                            ToolName = targetExecution.Name,
+                            Output = chunk.Content,
+                            IsError = LooksLikeErrorOutput(chunk.Content)
+                        });
+                    }
                 }
                 else if (!chunk.IsToolHint)  // tool-hint 块不追加正文内容（正文中的 [TOOL_CALL] 已被过滤）
                 {
                     assistantMessage.Content += chunk.Content;
+
+                    // 流式时按顺序添加或追加 text part
+                    if (assistantMessage.SessionParts!.Count > 0 && assistantMessage.SessionParts[assistantMessage.SessionParts.Count - 1].Type == "text")
+                    {
+                        var lastText = assistantMessage.SessionParts[assistantMessage.SessionParts.Count - 1];
+                        lastText.Text = (lastText.Text ?? "") + chunk.Content;
+                    }
+                    else
+                    {
+                        assistantMessage.SessionParts.Add(new MessagePartInfo
+                        {
+                            Type = "text",
+                            Text = chunk.Content
+                        });
+                    }
                 }
 
                 StateHasChanged();
