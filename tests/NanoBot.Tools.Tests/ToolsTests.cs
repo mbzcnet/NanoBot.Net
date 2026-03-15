@@ -75,12 +75,12 @@ public class BrowserToolsTests
     {
         var mockService = new Mock<IBrowserService>();
         mockService
-            .Setup(x => x.GetStatusAsync("openclaw", It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetStatusAsync("nanobot", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowserToolResponse
             {
                 Ok = true,
                 Action = "status",
-                Profile = "openclaw",
+                Profile = "nanobot",
                 Message = "Browser is running"
             });
 
@@ -91,7 +91,7 @@ public class BrowserToolsTests
             new AIFunctionArguments
             {
                 ["action"] = "status",
-                ["profile"] = "openclaw",
+                ["profile"] = "nanobot",
                 ["targetId"] = null,
                 ["targetUrl"] = null,
                 ["snapshotFormat"] = null,
@@ -110,8 +110,8 @@ public class BrowserToolsTests
 
         var resultText = result?.ToString() ?? string.Empty;
         Assert.Contains("status", resultText);
-        Assert.Contains("openclaw", resultText);
-        mockService.Verify(x => x.GetStatusAsync("openclaw", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("nanobot", resultText);
+        mockService.Verify(x => x.GetStatusAsync("nanobot", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -119,12 +119,12 @@ public class BrowserToolsTests
     {
         var mockService = new Mock<IBrowserService>();
         mockService
-            .Setup(x => x.GetContentAsync("t1", "main", 2000, "openclaw", It.IsAny<CancellationToken>()))
+            .Setup(x => x.GetContentAsync("t1", "main", 2000, "nanobot", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowserToolResponse
             {
                 Ok = true,
                 Action = "content",
-                Profile = "openclaw",
+                Profile = "nanobot",
                 TargetId = "t1",
                 Content = "headline"
             });
@@ -136,7 +136,7 @@ public class BrowserToolsTests
             new AIFunctionArguments
             {
                 ["action"] = "content",
-                ["profile"] = "openclaw",
+                ["profile"] = "nanobot",
                 ["targetId"] = "t1",
                 ["targetUrl"] = null,
                 ["snapshotFormat"] = null,
@@ -156,7 +156,7 @@ public class BrowserToolsTests
         var resultText = result?.ToString() ?? string.Empty;
         Assert.Contains("content", resultText);
         Assert.Contains("headline", resultText);
-        mockService.Verify(x => x.GetContentAsync("t1", "main", 2000, "openclaw", It.IsAny<CancellationToken>()), Times.Once);
+        mockService.Verify(x => x.GetContentAsync("t1", "main", 2000, "nanobot", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -172,13 +172,13 @@ public class BrowserToolsTests
                     r.TextGone == "loading..." &&
                     r.TimeoutMs == 1500),
                 "t1",
-                "openclaw",
+                "nanobot",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowserToolResponse
             {
                 Ok = true,
                 Action = "act",
-                Profile = "openclaw",
+                Profile = "nanobot",
                 TargetId = "t1",
                 Message = "Action executed: wait(condition)"
             });
@@ -190,7 +190,7 @@ public class BrowserToolsTests
             new AIFunctionArguments
             {
                 ["action"] = "act",
-                ["profile"] = "openclaw",
+                ["profile"] = "nanobot",
                 ["targetId"] = "t1",
                 ["targetUrl"] = null,
                 ["snapshotFormat"] = null,
@@ -223,13 +223,13 @@ public class BrowserToolsTests
                     r.Ref == "1" &&
                     r.TimeoutMs == 1200),
                 "t1",
-                "openclaw",
+                "nanobot",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new BrowserToolResponse
             {
                 Ok = true,
                 Action = "act",
-                Profile = "openclaw",
+                Profile = "nanobot",
                 TargetId = "t1",
                 Message = "Action executed: hover"
             });
@@ -241,7 +241,7 @@ public class BrowserToolsTests
             new AIFunctionArguments
             {
                 ["action"] = "act",
-                ["profile"] = "openclaw",
+                ["profile"] = "nanobot",
                 ["targetId"] = "t1",
                 ["targetUrl"] = null,
                 ["snapshotFormat"] = null,
@@ -280,13 +280,13 @@ public class BrowserToolsTests
         var workspaceMock = new Mock<IWorkspaceManager>();
         using var browserService = new BrowserService(workspaceMock.Object);
 
-        var start = await browserService.StartAsync("openclaw");
+        var start = await browserService.StartAsync("nanobot");
         Assert.True(start.Ok);
 
         var html = "<html><body><main><article>latest news: test headline</article></main><div id='loading'>loading...</div><button>Read more</button><script>setTimeout(() => { const el = document.getElementById('loading'); if (el) el.remove(); }, 150);</script></body></html>";
         var targetUrl = "data:text/html," + Uri.EscapeDataString(html);
 
-        var opened = await browserService.OpenTabAsync(targetUrl, "openclaw");
+        var opened = await browserService.OpenTabAsync(targetUrl, "nanobot");
         Assert.True(opened.Ok);
         Assert.False(string.IsNullOrWhiteSpace(opened.TargetId));
 
@@ -295,16 +295,16 @@ public class BrowserToolsTests
         var waitResult = await browserService.ExecuteActionAsync(
             new BrowserActionRequest { Kind = "wait", TimeoutMs = 1500, LoadState = "load", Text = "latest news" },
             targetId,
-            "openclaw");
+            "nanobot");
         Assert.True(waitResult.Ok);
 
         var waitTextGoneResult = await browserService.ExecuteActionAsync(
             new BrowserActionRequest { Kind = "wait", TimeoutMs = 1500, TextGone = "loading..." },
             targetId,
-            "openclaw");
+            "nanobot");
         Assert.True(waitTextGoneResult.Ok);
 
-        var snapshotResult = await browserService.GetSnapshotAsync(targetId, "ai", "openclaw");
+        var snapshotResult = await browserService.GetSnapshotAsync(targetId, "ai", "nanobot");
         Assert.True(snapshotResult.Ok);
 
         var hoverRef = snapshotResult.Refs?.Keys.FirstOrDefault();
@@ -313,23 +313,23 @@ public class BrowserToolsTests
         var hoverResult = await browserService.ExecuteActionAsync(
             new BrowserActionRequest { Kind = "hover", Ref = hoverRef, TimeoutMs = 1200 },
             targetId,
-            "openclaw");
+            "nanobot");
         Assert.True(hoverResult.Ok);
 
         var pressResult = await browserService.ExecuteActionAsync(
             new BrowserActionRequest { Kind = "press", Key = "Tab" },
             targetId,
-            "openclaw");
+            "nanobot");
         Assert.True(pressResult.Ok);
 
-        var contentResult = await browserService.GetContentAsync(targetId, "main", 2000, "openclaw");
+        var contentResult = await browserService.GetContentAsync(targetId, "main", 2000, "nanobot");
         Assert.True(contentResult.Ok);
         Assert.Contains("latest news", contentResult.Content ?? string.Empty);
 
-        var tabs = await browserService.GetTabsAsync("openclaw");
+        var tabs = await browserService.GetTabsAsync("nanobot");
         Assert.Contains(tabs, t => t.TargetId == targetId);
 
-        var stopped = await browserService.StopAsync("openclaw");
+        var stopped = await browserService.StopAsync("nanobot");
         Assert.True(stopped.Ok);
     }
 
@@ -359,17 +359,17 @@ public class BrowserToolsTests
         {
             using var browserService = new BrowserService(workspaceMock.Object, logger);
 
-            var start = await browserService.StartAsync("openclaw");
+            var start = await browserService.StartAsync("nanobot");
             Assert.True(start.Ok);
 
-            var open = await browserService.OpenTabAsync("https://www.baidu.com", "openclaw");
+            var open = await browserService.OpenTabAsync("https://www.baidu.com", "nanobot");
             Assert.True(open.Ok);
             Assert.False(string.IsNullOrWhiteSpace(open.TargetId));
 
             var response = await browserService.CaptureSnapshotAsync(
                 open.TargetId!,
                 "ai",
-                "openclaw",
+                "nanobot",
                 "webui:baidu-snapshot-test");
 
             Assert.True(response.Ok);
@@ -383,7 +383,7 @@ public class BrowserToolsTests
             Console.WriteLine($"Snapshot image local path: {localPath}");
             Console.WriteLine($"Snapshot image url: /api/files/sessions/{response.ImagePath.Replace('\\', '/')}");
 
-            var stop = await browserService.StopAsync("openclaw");
+            var stop = await browserService.StopAsync("nanobot");
             Assert.True(stop.Ok);
         }
         finally
@@ -417,18 +417,18 @@ public class BrowserToolsTests
         {
             using var browserService = new BrowserService(workspaceMock.Object, logger);
 
-            var start = await browserService.StartAsync("openclaw");
+            var start = await browserService.StartAsync("nanobot");
             Assert.True(start.Ok);
 
             var html = "<html><body><main><h1>fallback snapshot</h1></main></body></html>";
             var targetUrl = "data:text/html," + Uri.EscapeDataString(html);
-            var open = await browserService.OpenTabAsync(targetUrl, "openclaw");
+            var open = await browserService.OpenTabAsync(targetUrl, "nanobot");
             Assert.True(open.Ok);
 
-            var response = await browserService.CaptureSnapshotAsync(open.TargetId!, "ai", "openclaw", null);
+            var response = await browserService.CaptureSnapshotAsync(open.TargetId!, "ai", "nanobot", null);
             Assert.True(response.Ok);
             Assert.False(string.IsNullOrWhiteSpace(response.ImagePath));
-            Assert.StartsWith("fallback_openclaw/", response.ImagePath, StringComparison.Ordinal);
+            Assert.StartsWith("fallback_nanobot/", response.ImagePath, StringComparison.Ordinal);
 
             var localPath = Path.Combine(sessionsPath, response.ImagePath!.Replace('/', Path.DirectorySeparatorChar));
             Assert.True(File.Exists(localPath), $"Snapshot file not found: {localPath}");

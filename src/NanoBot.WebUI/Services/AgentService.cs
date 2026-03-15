@@ -42,7 +42,7 @@ public class AgentService : IAgentService
         
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             var response = await _agentRuntime.ProcessDirectAsync(
                 message, 
                 sessionKey, 
@@ -70,7 +70,7 @@ public class AgentService : IAgentService
         var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _activeSessions[sessionId] = cts;
         
-        var sessionKey = $"webui:{sessionId}";
+        var sessionKey = $"chat_{sessionId}";
         Exception? error = null;
         
         IAsyncEnumerable<Microsoft.Agents.AI.AgentResponseUpdate>? stream = null;
@@ -234,7 +234,7 @@ public class AgentService : IAgentService
         _logger.LogInformation("Stopping generation for session {SessionId}", sessionId);
 
         // 使用正确的 sessionKey 格式，与 AgentRuntime 保持一致
-        var sessionKey = $"webui:{sessionId}";
+        var sessionKey = $"chat_{sessionId}";
 
         // 取消 AgentService 管理的 CTS
         if (_activeSessions.TryRemove(sessionId, out var cts))

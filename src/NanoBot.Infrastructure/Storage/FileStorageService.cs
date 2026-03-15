@@ -21,11 +21,11 @@ public class FileStorageService : IFileStorageService
     {
         var ext = string.IsNullOrWhiteSpace(extension) ? ".png" : extension;
         
-        var sessionUploadsRoot = Path.Combine(_workspaceManager.GetSessionsPath(), sessionId, "uploads");
-        _workspaceManager.EnsureDirectory(sessionUploadsRoot);
+        var sessionDocumentsRoot = Path.Combine(_workspaceManager.GetSessionsPath(), sessionId, "documents");
+        _workspaceManager.EnsureDirectory(sessionDocumentsRoot);
 
         var fileName = $"{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}_{Guid.NewGuid():N}{ext}";
-        var relativePath = Path.Combine(sessionId, "uploads", fileName);
+        var relativePath = Path.Combine(sessionId, "documents", fileName);
         var fullPath = Path.Combine(_workspaceManager.GetSessionsPath(), relativePath);
 
         await using var writeStream = File.Create(fullPath);

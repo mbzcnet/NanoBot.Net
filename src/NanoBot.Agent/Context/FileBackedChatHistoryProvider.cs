@@ -79,9 +79,6 @@ public class FileBackedChatHistoryProvider : ChatHistoryProvider
         // Store back to session state
         context.Session.StateBag.SetValue(StateKey, allMessages);
         _logger?.LogDebug("Stored {Count} messages to session state", allMessages.Count);
-
-        // Also append to history file for logging
-        await AppendToHistoryFileAsync(context, cancellationToken);
     }
 
     private async ValueTask AppendToHistoryFileAsync(InvokedContext context, CancellationToken cancellationToken)

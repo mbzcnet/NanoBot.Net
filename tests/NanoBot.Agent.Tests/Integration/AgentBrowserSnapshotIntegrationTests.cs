@@ -83,7 +83,7 @@ public class AgentBrowserSnapshotIntegrationTests : IDisposable
             It.IsAny<CancellationToken>()))
             .ReturnsAsync((string id, string fmt, string prof, string? key, CancellationToken ct) => 
             {
-                var effectiveKey = key ?? "fallback_openclaw"; // Use fallback if null
+                var effectiveKey = key ?? "fallback_nanobot"; // Use fallback if null
                 return new BrowserToolResponse
                 {
                     Ok = true,

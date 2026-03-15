@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -24,8 +25,8 @@ public interface IAgentRuntime
 {
     Task RunAsync(CancellationToken cancellationToken = default);
     void Stop();
-    Task<string> ProcessDirectAsync(string content, string sessionKey = "cli:direct", string channel = "cli", string chatId = "direct", CancellationToken cancellationToken = default);
-    IAsyncEnumerable<AgentResponseUpdate> ProcessDirectStreamingAsync(string content, string sessionKey = "cli:direct", string channel = "cli", string chatId = "direct", CancellationToken cancellationToken = default);
+    Task<string> ProcessDirectAsync(string content, string sessionKey = "chat_direct", string channel = "cli", string chatId = "direct", CancellationToken cancellationToken = default);
+    IAsyncEnumerable<AgentResponseUpdate> ProcessDirectStreamingAsync(string content, string sessionKey = "chat_direct", string channel = "cli", string chatId = "direct", CancellationToken cancellationToken = default);
     Task<bool> TryCancelSessionAsync(string sessionKey);
     void SetRuntimeMetadata(string sessionKey, IReadOnlyDictionary<string, string> metadata);
     void ClearAgentCache();
@@ -217,7 +218,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
     public async Task<string> ProcessDirectAsync(
         string content,
-        string sessionKey = "cli:direct",
+        string sessionKey = "chat_direct",
         string channel = "cli",
         string chatId = "direct",
         CancellationToken cancellationToken = default)
@@ -239,7 +240,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
     public async IAsyncEnumerable<AgentResponseUpdate> ProcessDirectStreamingAsync(
         string content,
-        string sessionKey = "cli:direct",
+        string sessionKey = "chat_direct",
         string channel = "cli",
         string chatId = "direct",
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -1094,12 +1095,47 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
     private IChatClient? GetChatClientFromAgent(string? sessionKey = null)
     {
+        Console.WriteLine($"[TITLE_LLM] GetChatClientFromAgent called with sessionKey: '{sessionKey}'");
+        
         if (!string.IsNullOrEmpty(sessionKey))
         {
+            Console.WriteLine($"[TITLE_LLM] Getting agent for session: {sessionKey}");
             var agent = GetAgentForSession(sessionKey);
-            return agent.GetChatClient();
+            Console.WriteLine($"[TITLE_LLM] Got agent: {agent?.GetType().Name}");
+            
+            if (agent == null)
+            {
+                Console.WriteLine("[TITLE_LLM] Agent is null");
+                return null;
+            }
+            
+            var client = agent.GetChatClient();
+            Console.WriteLine($"[TITLE_LLM] Got chat client via GetChatClient: {client?.GetType().Name ?? "null"}");
+            
+            if (client == null)
+            {
+                // 尝试直接反射获取
+                Console.WriteLine("[TITLE_LLM] GetChatClient returned null, trying reflection...");
+                var chatClientField = typeof(Microsoft.Agents.AI.ChatClientAgent)
+                    .GetField("_chatClient", BindingFlags.NonPublic | BindingFlags.Instance);
+                if (chatClientField != null)
+                {
+                    client = chatClientField.GetValue(agent) as IChatClient;
+                    Console.WriteLine($"[TITLE_LLM] Got chat client via reflection: {client?.GetType().Name ?? "null"}");
+                }
+                else
+                {
+                    Console.WriteLine("[TITLE_LLM] Could not find _chatClient field");
+                }
+            }
+            
+            return client;
         }
-        return _defaultAgent.GetChatClient();
+        
+        Console.WriteLine("[TITLE_LLM] No session key, using default agent");
+        var defaultClient = _defaultAgent?.GetChatClient();
+        Console.WriteLine($"[TITLE_LLM] Default chat client: {defaultClient?.GetType().Name ?? "null"}");
+        return defaultClient;
     }
 
     private List<ChatMessage> GetSessionMessages(AgentSession session)
@@ -1155,15 +1191,22 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     {
         try
         {
+            Console.WriteLine($"[TITLE_DEBUG] TryAutoSetSessionTitleAsync called for {sessionKey}, content length: {userContent.Length}");
+            
             // 获取当前标题
             var currentTitle = _sessionManager.GetSessionTitle(sessionKey);
+            Console.WriteLine($"[TITLE_DEBUG] Current title from manager: '{currentTitle ?? "(null)"}'");
 
             // 如果标题已设置（非空），则不自动更新
             if (!string.IsNullOrEmpty(currentTitle))
+            {
+                Console.WriteLine("[TITLE_DEBUG] Title already set, skipping");
                 return;
+            }
 
             // 获取会话中的消息数量
             var messages = GetSessionMessages(session);
+            Console.WriteLine($"[TITLE_DEBUG] Session message count: {messages.Count}");
 
             // 如果这是第一条用户消息（session 中还没有消息），则使用内容作为标题
             if (messages.Count == 0)
@@ -1172,32 +1215,39 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 
                 if (userContent.Length > 50)
                 {
+                    Console.WriteLine("[TITLE_DEBUG] Content > 50 chars, calling LLM for title generation");
                     // 如果消息超过 50 字符，使用 LLM 生成标题
                     newTitle = await GenerateTitleWithLLMAsync(sessionKey, userContent, cancellationToken);
+                    Console.WriteLine($"[TITLE_DEBUG] LLM returned title: '{newTitle ?? "(empty)"}'");
                     
                     // 如果 LLM 生成失败，回退到截断方式
                     if (string.IsNullOrWhiteSpace(newTitle))
                     {
                         newTitle = userContent.Substring(0, 50) + "...";
+                        Console.WriteLine($"[TITLE_DEBUG] Using fallback title: '{newTitle}'");
                     }
                 }
                 else
                 {
                     // 短消息直接使用截断方式
                     newTitle = userContent;
+                    Console.WriteLine($"[TITLE_DEBUG] Short content, using as-is: '{newTitle}'");
                 }
 
                 if (!string.IsNullOrWhiteSpace(newTitle))
                 {
                     _sessionManager.SetSessionTitle(sessionKey, newTitle);
+                    Console.WriteLine($"[TITLE_DEBUG] SetSessionTitle called with: '{newTitle}'");
                     // 立即保存以更新文件中的标题
                     await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
+                    Console.WriteLine($"[TITLE_DEBUG] SaveSessionAsync completed");
                     _logger?.LogInformation("Auto-set session title for {SessionKey} to: {Title}", sessionKey, newTitle);
                 }
             }
         }
         catch (Exception ex)
         {
+            Console.WriteLine($"[TITLE_DEBUG] Exception: {ex}");
             _logger?.LogWarning(ex, "Failed to auto-set session title for {SessionKey}", sessionKey);
         }
     }
@@ -1206,14 +1256,18 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     {
         try
         {
+            Console.WriteLine($"[TITLE_LLM] Generating title for session {sessionKey}, content length: {userContent.Length}");
+            
             var chatClient = GetChatClientFromAgent(sessionKey);
             if (chatClient == null)
             {
+                Console.WriteLine("[TITLE_LLM] No chat client available");
                 _logger?.LogWarning("No chat client available for session {SessionKey}", sessionKey);
                 return string.Empty;
             }
 
-            var systemPrompt = "你是一个会话标题生成器。根据用户的第一条消息，生成一个简短（不超过10个字）的会话标题。只返回标题文本，不要任何解释、标点符号或换行。";
+            Console.WriteLine("[TITLE_LLM] Got chat client, making request...");
+            var systemPrompt = "You are a title generator. Generate a very short title (max 10 characters, Chinese OK) for the user's message. ONLY output the title, nothing else. No punctuation, no quotes, no explanation.";
             
             var response = await chatClient.GetResponseAsync(
                 [
@@ -1223,10 +1277,19 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 cancellationToken: cancellationToken);
 
             var title = response.Messages.FirstOrDefault()?.Text?.Trim() ?? string.Empty;
+            Console.WriteLine($"[TITLE_LLM] Raw response: '{title}'");
             
             // 清理标题：移除可能的标点符号和引号
-            title = title.Trim('"', '\'', '。', '.', '！', '!', '？', '?');
+            title = title.Trim('"', '\'', '。', '.', '！', '!', '？', '?', ' ', '\n', '\r');
             
+            // 如果标题为空或和原消息完全一样，说明 LLM 没有正确处理，回退到截断
+            if (string.IsNullOrWhiteSpace(title) || title == userContent)
+            {
+                Console.WriteLine("[TITLE_LLM] Empty or same as original, returning empty for fallback");
+                return string.Empty; // 信号回退
+            }
+            
+            Console.WriteLine($"[TITLE_LLM] Final title: '{title}'");
             return title;
         }
         catch (Exception ex)

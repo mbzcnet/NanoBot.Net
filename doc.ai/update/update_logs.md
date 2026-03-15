@@ -1,14 +1,17 @@
 # 2026-03-14
 
-- Agent CLI 多session支持：CLI现在支持多session管理，与WebUI使用相同的session存储位置。CLI session使用`cli:`前缀，WebUI使用`webui:`前缀，两者可独立管理。CLI新增交互命令：
+- Agent CLI 多session支持：CLI现在支持多session管理，与WebUI使用相同的session存储位置。CLI新增交互命令：
   - `/new` 或 `/n` - 创建新session
-  - `/list` 或 `/l` - 列出所有CLI session
+  - `/list` 或 `/l` - 列出所有session
   - `/resume <id>` 或 `/r <id>` - 切换到指定session
   - `/clear` 或 `/c` - 清除当前session历史
   - `/sessions` 或 `/s` - 显示session列表
   - `/switch` - 交互式切换session
 - `--session` 参数改为可选，不指定时自动使用上次使用的session
 - 新增 `--list-sessions` 选项列出所有session后退出
+- 统一session前缀为 `chat_`：CLI和WebUI现在共享相同的session存储（之前CLI用`cli:`，WebUI用`webui:`）
+- 移除HISTORY.md机制：所有session消息统一保存到`sessions/*.jsonl`，不再写入`memory/HISTORY.md`
+- 修复fallback截图路径：截图不再保存到`fallback_openclaw/screenshots`，而是使用`chat_default`作为默认session
 - 修复工具调用失败问题：移除 SanitizingChatClient.cs 中 commit 9d5955b 引入的 orphaned tool message 过滤逻辑。
 - 聊天頁新增「新對話」按鈕：頂部標題列可一鍵建立新會話並導向新聊天頁，生成中時按鈕停用。
 - 修復用戶消息氣泡內邊距過大：`.nb-message-bubble-user` 與助手氣泡統一為 `padding: 20px 24px`。

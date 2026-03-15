@@ -71,7 +71,7 @@ public static class BrowserTools
         }
 
         var resolvedAction = action?.Trim().ToLowerInvariant();
-        var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
+        var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "nanobot" : profile.Trim();
 
         var resolvedSessionKey = string.IsNullOrWhiteSpace(sessionKey)
             ? ToolExecutionContext.CurrentSessionKey

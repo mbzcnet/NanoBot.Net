@@ -45,12 +45,22 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessions = _sessionManager.ListSessions()
-                .Where(s => s.Key.StartsWith("webui:"))
+            // SessionManager 从文件名提取 key 时会把 "_" 替换成 ":"（如 chat_xxx -> chat:xxx）
+            // 所以需要同时匹配 "chat:" 和 "chat_" 两种格式
+            var allSessions = _sessionManager.ListSessions().ToList();
+            _logger.LogDebug("Total sessions from SessionManager: {Count}", allSessions.Count);
+            
+            foreach (var s in allSessions.Take(5))
+            {
+                _logger.LogDebug("Session key: {Key}", s.Key);
+            }
+
+            var sessions = allSessions
+                .Where(s => s.Key.StartsWith("chat:") || s.Key.StartsWith("chat_"))
                 .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt ?? DateTimeOffset.MinValue)
                 .Select(s => new SessionInfo
                 {
-                    Id = s.Key.Replace("webui:", ""),
+                    Id = s.Key.Replace("chat:", "").Replace("chat_", ""),
                     Title = s.Title ?? GenerateDefaultTitle(s.Key),
                     CreatedAt = (s.CreatedAt ?? DateTimeOffset.Now).DateTime,
                     UpdatedAt = (s.UpdatedAt ?? DateTimeOffset.Now).DateTime,
@@ -58,6 +68,7 @@ public class SessionService : ISessionService
                 })
                 .ToList();
 
+            _logger.LogDebug("Filtered sessions count: {Count}", sessions.Count);
             return Task.FromResult(sessions);
         }
         catch (Exception ex)
@@ -71,9 +82,11 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            // 尝试匹配两种 key 格式：chat_xxx 和 chat:xxx
+            var sessionKeyWithUnderscore = $"chat_{sessionId}";
+            var sessionKeyWithColon = $"chat:{sessionId}";
             var agentSession = _sessionManager.ListSessions()
-                .FirstOrDefault(s => s.Key == sessionKey);
+                .FirstOrDefault(s => s.Key == sessionKeyWithUnderscore || s.Key == sessionKeyWithColon);
 
             if (agentSession == null)
                 return null;
@@ -81,7 +94,7 @@ public class SessionService : ISessionService
             return new SessionInfo
             {
                 Id = sessionId,
-                Title = agentSession.Title ?? GenerateDefaultTitle(sessionKey),
+                Title = agentSession.Title ?? GenerateDefaultTitle(agentSession.Key),
                 CreatedAt = (agentSession.CreatedAt ?? DateTimeOffset.Now).DateTime,
                 UpdatedAt = (agentSession.UpdatedAt ?? DateTimeOffset.Now).DateTime,
                 ProfileId = agentSession.ProfileId
@@ -97,7 +110,7 @@ public class SessionService : ISessionService
     public async Task<SessionInfo> CreateSessionAsync(string? title = null, string? profileId = null)
     {
         var sessionId = Guid.NewGuid().ToString("N");
-        var sessionKey = $"webui:{sessionId}";
+        var sessionKey = $"chat_{sessionId}";
 
         try
         {
@@ -138,7 +151,7 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
             _sessionManager.SetSessionTitle(sessionKey, newTitle);
             await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
@@ -156,7 +169,7 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
             _sessionManager.SetSessionProfileId(sessionKey, profileId);
             await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
@@ -173,7 +186,7 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             await _sessionManager.ClearSessionAsync(sessionKey);
             await _fileStorage.DeleteSessionDirectoryAsync(sessionId);
 
@@ -190,7 +203,7 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             await _sessionManager.GetOrCreateSessionAsync(sessionKey);
 
             var sessionsPath = _workspace.GetSessionsPath();
@@ -803,7 +816,7 @@ public class SessionService : ISessionService
     {
         try
         {
-            var sessionKey = $"webui:{sessionId}";
+            var sessionKey = $"chat_{sessionId}";
             var sessionsPath = _workspace.GetSessionsPath();
             var sessionFile = Path.Combine(sessionsPath, $"{sessionKey.Replace(":", "_")}.jsonl");
 
@@ -876,7 +889,7 @@ public class SessionService : ISessionService
 
     private string GenerateDefaultTitle(string sessionKey)
     {
-        var sessionId = sessionKey.Replace("webui:", "");
+        var sessionId = sessionKey.Replace("chat_", "").Replace("chat:", "");
         return $"会话 {sessionId.Substring(0, Math.Min(8, sessionId.Length))}";
     }
 

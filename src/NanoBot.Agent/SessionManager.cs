@@ -326,6 +326,17 @@ public sealed class SessionManager : ISessionManager
                     }
                 }
 
+                // Restore title from metadata
+                if (metadataLine.TryGetPropertyValue("title", out var titleNode) && titleNode != null)
+                {
+                    var title = titleNode.GetValue<string?>();
+                    if (!string.IsNullOrEmpty(title))
+                    {
+                        SetSessionTitle(sessionKey, title);
+                        _logger?.LogDebug("Restored title {Title} for session {SessionKey}", title, sessionKey);
+                    }
+                }
+
                 var raw = agentSessionNode.ToJsonString(_jsonOptions);
                 var jsonElement = JsonSerializer.Deserialize<JsonElement>(raw, _jsonOptions);
                 var session = await _agent.DeserializeSessionAsync(jsonElement, cancellationToken: cancellationToken);

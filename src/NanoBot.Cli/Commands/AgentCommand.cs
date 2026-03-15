@@ -165,7 +165,7 @@ public class AgentCommand : ICliCommand
         var sessionManager = serviceProvider.GetRequiredService<ISessionManager>();
 
         // Get or create the current session
-        var currentSessionId = sessionId ?? GetLastSessionId(workspace) ?? $"cli:{Guid.NewGuid():N}";
+        var currentSessionId = sessionId ?? GetLastSessionId(workspace) ?? $"chat_{Guid.NewGuid():N}";
 
         // If --list-sessions is specified, show all sessions and exit
         if (listSessions)
@@ -203,7 +203,7 @@ public class AgentCommand : ICliCommand
             if (File.Exists(lastSessionFile))
             {
                 var sessionId = File.ReadAllText(lastSessionFile).Trim();
-                if (!string.IsNullOrEmpty(sessionId) && sessionId.StartsWith("cli:"))
+                if (!string.IsNullOrEmpty(sessionId) && sessionId.StartsWith("chat_"))
                 {
                     return sessionId;
                 }
@@ -234,7 +234,7 @@ public class AgentCommand : ICliCommand
     private static async Task ListAllSessionsAsync(ISessionManager sessionManager, IWorkspaceManager workspace)
     {
         var sessions = sessionManager.ListSessions()
-            .Where(s => s.Key.StartsWith("cli:"))
+            .Where(s => s.Key.StartsWith("chat_"))
             .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt ?? DateTimeOffset.MinValue)
             .ToList();
 
@@ -252,7 +252,7 @@ public class AgentCommand : ICliCommand
             var title = session.Title ?? "Untitled";
             var created = session.CreatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "Unknown";
             var updated = session.UpdatedAt?.ToString("yyyy-MM-dd HH:mm") ?? "Unknown";
-            var key = session.Key.Replace("cli:", "");
+            var key = session.Key.Replace("chat_", "");
 
             Console.WriteLine($"  {key}");
             Console.WriteLine($"    Title: {title}");
@@ -432,7 +432,7 @@ public class AgentCommand : ICliCommand
         await SaveLastSessionIdAsync(workspace, currentSessionId);
 
         Console.WriteLine("🐈 NBot Interactive mode (type 'exit' or Ctrl+C to quit)");
-        Console.WriteLine($"📋 Current session: {currentSessionId.Replace("cli:", "")}");
+        Console.WriteLine($"📋 Current session: {currentSessionId.Replace("chat_", "")}");
         Console.WriteLine("💡 Use /new, /list, /resume, /clear to manage sessions\n");
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -479,17 +479,17 @@ public class AgentCommand : ICliCommand
             // Handle session management commands
             if (trimmedInput.StartsWith("/new") || trimmedInput.Equals("/n", StringComparison.OrdinalIgnoreCase))
             {
-                currentSessionId = $"cli:{Guid.NewGuid():N}";
+                currentSessionId = $"chat_{Guid.NewGuid():N}";
                 await SaveLastSessionIdAsync(workspace, currentSessionId);
-                Console.WriteLine($"\n✓ Created new session: {currentSessionId.Replace("cli:", "")}");
-                Console.WriteLine("📋 Current session: {0}\n", currentSessionId.Replace("cli:", ""));
+                Console.WriteLine($"\n✓ Created new session: {currentSessionId.Replace("chat_", "")}");
+                Console.WriteLine("📋 Current session: {0}\n", currentSessionId.Replace("chat_", ""));
                 continue;
             }
 
             if (trimmedInput.StartsWith("/list") || trimmedInput.Equals("/l", StringComparison.OrdinalIgnoreCase))
             {
                 await ListAllSessionsAsync(sessionManager, workspace);
-                Console.WriteLine($"📋 Current session: {currentSessionId.Replace("cli:", "")}\n");
+                Console.WriteLine($"📋 Current session: {currentSessionId.Replace("chat_", "")}\n");
                 continue;
             }
 
@@ -499,9 +499,9 @@ public class AgentCommand : ICliCommand
                 if (parts.Length >= 2)
                 {
                     var targetSession = parts[1].Trim();
-                    if (!targetSession.StartsWith("cli:"))
+                    if (!targetSession.StartsWith("chat_"))
                     {
-                        targetSession = $"cli:{targetSession}";
+                        targetSession = $"chat_{targetSession}";
                     }
 
                     // Verify session exists
@@ -510,7 +510,7 @@ public class AgentCommand : ICliCommand
                     {
                         currentSessionId = targetSession;
                         await SaveLastSessionIdAsync(workspace, currentSessionId);
-                        Console.WriteLine($"\n✓ Switched to session: {currentSessionId.Replace("cli:", "")}");
+                        Console.WriteLine($"\n✓ Switched to session: {currentSessionId.Replace("chat_", "")}");
                         Console.WriteLine($"   Title: {existingSession.Title ?? "Untitled"}\n");
                     }
                     else
@@ -518,7 +518,7 @@ public class AgentCommand : ICliCommand
                         // Create new session with the given ID
                         currentSessionId = targetSession;
                         await SaveLastSessionIdAsync(workspace, currentSessionId);
-                        Console.WriteLine($"\n✓ Created/resumed session: {currentSessionId.Replace("cli:", "")}\n");
+                        Console.WriteLine($"\n✓ Created/resumed session: {currentSessionId.Replace("chat_", "")}\n");
                     }
                 }
                 else
@@ -531,14 +531,14 @@ public class AgentCommand : ICliCommand
             if (trimmedInput.StartsWith("/clear") || trimmedInput.Equals("/c", StringComparison.OrdinalIgnoreCase))
             {
                 await sessionManager.ClearSessionAsync(currentSessionId);
-                Console.WriteLine($"\n✓ Cleared session: {currentSessionId.Replace("cli:", "")}\n");
+                Console.WriteLine($"\n✓ Cleared session: {currentSessionId.Replace("chat_", "")}\n");
                 continue;
             }
 
             if (trimmedInput.Equals("/sessions") || trimmedInput.Equals("/s", StringComparison.OrdinalIgnoreCase))
             {
                 await ListAllSessionsAsync(sessionManager, workspace);
-                Console.WriteLine($"📋 Current session: {currentSessionId.Replace("cli:", "")}\n");
+                Console.WriteLine($"📋 Current session: {currentSessionId.Replace("chat_", "")}\n");
                 continue;
             }
 
@@ -547,7 +547,7 @@ public class AgentCommand : ICliCommand
             {
                 Console.WriteLine("\nAvailable sessions:");
                 var sessions = sessionManager.ListSessions()
-                    .Where(s => s.Key.StartsWith("cli:"))
+                    .Where(s => s.Key.StartsWith("chat_"))
                     .OrderByDescending(s => s.UpdatedAt ?? s.CreatedAt ?? DateTimeOffset.MinValue)
                     .Take(10)
                     .ToList();
@@ -562,7 +562,7 @@ public class AgentCommand : ICliCommand
                     {
                         var s = sessions[i];
                         var marker = s.Key == currentSessionId ? "→ " : "  ";
-                        Console.WriteLine($"{marker}{i + 1}. {s.Key.Replace("cli:", "")} - {s.Title ?? "Untitled"}");
+                        Console.WriteLine($"{marker}{i + 1}. {s.Key.Replace("chat_", "")} - {s.Title ?? "Untitled"}");
                     }
                 }
 
@@ -579,9 +579,9 @@ public class AgentCommand : ICliCommand
                     else
                     {
                         var inputId = selection.Trim();
-                        if (!inputId.StartsWith("cli:"))
+                        if (!inputId.StartsWith("chat_"))
                         {
-                            inputId = $"cli:{inputId}";
+                            inputId = $"chat_{inputId}";
                         }
                         targetSessionId = inputId;
                     }
@@ -590,7 +590,7 @@ public class AgentCommand : ICliCommand
                     {
                         currentSessionId = targetSessionId;
                         await SaveLastSessionIdAsync(workspace, currentSessionId);
-                        Console.WriteLine($"\n✓ Switched to session: {currentSessionId.Replace("cli:", "")}\n");
+                        Console.WriteLine($"\n✓ Switched to session: {currentSessionId.Replace("chat_", "")}\n");
                     }
                 }
                 else

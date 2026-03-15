@@ -389,16 +389,18 @@ public sealed class BrowserService : IBrowserService
     {
         var normalized = NormalizeProfile(profile);
         var page = await GetPageAsync(normalized, targetId, cancellationToken);
-        // Use underscore instead of colon to avoid path issues on Windows and URL encoding issues
+
+        // When sessionKey is empty, use "default" instead of "chat_default"
+        // So screenshots go to .nbot/workspace/sessions/default/screenshots
         var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey)
-            ? $"fallback_{normalized}"
+            ? "default"
             : sessionKey;
 
         string? imageRelativePath = null;
 
         if (string.IsNullOrWhiteSpace(sessionKey))
         {
-            _logger?.LogWarning("Snapshot called without sessionKey. Fallback key applied: {SessionKey}", effectiveSessionKey);
+            _logger?.LogWarning("Snapshot called without sessionKey. Using default session: {SessionKey}", effectiveSessionKey);
         }
 
         try
@@ -570,13 +572,10 @@ public sealed class BrowserService : IBrowserService
 
     private string GetSessionScreenshotsPath(string sessionKey)
     {
-        var normalizedSessionFolder = sessionKey;
-        if (sessionKey.StartsWith("webui:", StringComparison.OrdinalIgnoreCase))
-        {
-            normalizedSessionFolder = sessionKey["webui:".Length..];
-        }
-
-        var safeKey = normalizedSessionFolder.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
+        // Keep the full sessionKey as the folder name (e.g., "chat_2f0689551a4d4adab58b738a3eb985d3")
+        // so screenshots go to .nbot/workspace/sessions/chat_<id>/screenshots
+        // This matches the session file naming convention: chat_<id>.jsonl
+        var safeKey = sessionKey.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
         foreach (var c in Path.GetInvalidFileNameChars())
         {
             safeKey = safeKey.Replace(c, '_');
