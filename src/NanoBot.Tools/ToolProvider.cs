@@ -50,7 +50,13 @@ public static class ToolProvider
 
         tools.Add(BuiltIn.WebTools.CreateWebSearchTool(httpClient));
         tools.Add(BuiltIn.WebTools.CreateWebFetchTool(httpClient));
-        tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService));
+
+        // Only add browser tools if not explicitly disabled in config
+        var browserEnabled = config?.Browser?.Enabled != false;
+        if (browserEnabled)
+        {
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService));
+        }
 
         tools.Add(BuiltIn.MessageTools.CreateMessageTool(messageBus, defaultChannel, defaultChatId));
         tools.Add(BuiltIn.CronTools.CreateCronTool(cronService, defaultChannel, defaultChatId));

@@ -157,17 +157,19 @@ public class OnboardCommand : ICliCommand
 
         await CreateWorkspaceTemplatesAsync(resolvedWorkspacePath, cancellationToken);
 
-        // Install Playwright browsers
-        if (!skipBrowserInstall)
-        {
-            await InstallPlaywrightBrowsersAsync(nonInteractive, cancellationToken);
-        }
-
+        // Configure LLM and workspace first, then offer browser tools at the end
         if (nonInteractive)
         {
             ApplyNonInteractiveOptions(config, provider, model, apiKey, apiBase, workspace);
             await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
             PrintNextSteps(config, configPath);
+
+            // Offer browser tools installation at the end (optional)
+            if (!skipBrowserInstall)
+            {
+                Console.WriteLine();
+                await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive, cancellationToken);
+            }
             return;
         }
 
@@ -181,6 +183,13 @@ public class OnboardCommand : ICliCommand
         }
 
         await RunInteractiveAsync(config, configPath, cancellationToken);
+
+        // Browser tools setup is offered after LLM configuration is complete
+        if (!skipBrowserInstall)
+        {
+            Console.WriteLine();
+            await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive, cancellationToken);
+        }
     }
 
     private static void ApplyNonInteractiveOptions(
@@ -191,7 +200,23 @@ public class OnboardCommand : ICliCommand
         string? apiBase,
         string? workspace)
     {
-        // 如果没有配置 LLM profile，创建 default profile
+        // 只有当用户提供了 LLM 相关参数时，才创建 default profile
+        var hasLlmConfig = !string.IsNullOrEmpty(provider) ||
+                           !string.IsNullOrEmpty(model) ||
+                           !string.IsNullOrEmpty(apiKey) ||
+                           !string.IsNullOrEmpty(apiBase);
+
+        if (!hasLlmConfig)
+        {
+            // 用户没有提供任何 LLM 配置，保持 llm 为空
+            if (!string.IsNullOrEmpty(workspace))
+            {
+                config.Workspace.Path = workspace;
+            }
+            return;
+        }
+
+        // 用户提供了 LLM 配置，创建或更新 default profile
         var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
         if (!config.Llm.Profiles.ContainsKey(profileName))
         {
@@ -407,7 +432,7 @@ public class OnboardCommand : ICliCommand
         await CreateWorkspaceTemplatesAsync(workspacePath, cancellationToken);
 
         // Install Playwright browsers (if not already installed)
-        await InstallPlaywrightBrowsersAsync(nonInteractive: true, cancellationToken);
+        await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive: true, cancellationToken);
 
         Console.WriteLine("\n🐈 nbot is ready!");
         PrintNextSteps(config, configPath);
@@ -457,60 +482,28 @@ public class OnboardCommand : ICliCommand
         return Path.GetFullPath(path);
     }
 
-    private static async Task InstallPlaywrightBrowsersAsync(bool nonInteractive, CancellationToken cancellationToken)
+    private static async Task<bool> InstallPlaywrightBrowsersAsync(
+        AgentConfig config,
+        string configPath,
+        bool nonInteractive,
+        CancellationToken cancellationToken)
     {
         Console.WriteLine("\n=== Browser Tools Setup ===\n");
 
-        // First ensure PowerShell is available (needed for Playwright installation)
         var powerShellInstaller = new PowerShellInstaller();
-        var pwshPath = await powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
-
-        if (string.IsNullOrEmpty(pwshPath))
-        {
-            Console.WriteLine("PowerShell Core (pwsh) is required for browser automation tools.");
-
-            if (!nonInteractive)
-            {
-                Console.Write("Install PowerShell Core now? [Y/n]: ");
-                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-                if (response == "n" || response == "no")
-                {
-                    Console.WriteLine("⚠ Skipped PowerShell installation. Browser tools will not be available.");
-                    Console.WriteLine("  You can install manually later from: https://aka.ms/powershell");
-                    return;
-                }
-            }
-
-            Console.WriteLine("Installing PowerShell Core (this may take a few minutes)...");
-            var psInstalled = await powerShellInstaller.InstallAsync(cancellationToken);
-
-            if (!psInstalled)
-            {
-                Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
-                Console.WriteLine("  Browser tools require PowerShell. Please install manually from:");
-                Console.WriteLine("  https://aka.ms/powershell");
-                return;
-            }
-
-            Console.WriteLine("✓ PowerShell Core installed successfully");
-        }
-        else
-        {
-            Console.WriteLine($"✓ PowerShell Core found at: {pwshPath}");
-        }
-
-        // Now install Playwright browsers
         var installer = new PlaywrightInstaller(powerShellInstaller: powerShellInstaller);
 
-        // Check if already installed
-        Console.WriteLine("\nChecking Playwright browser installation...");
+        // First check if Playwright browsers are already installed
+        Console.WriteLine("Checking Playwright browser installation...");
         if (await installer.IsInstalledAsync(cancellationToken))
         {
             Console.WriteLine("✓ Playwright browsers already installed");
-            return;
+            config.Browser = new BrowserToolsConfig { Enabled = true };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return true;
         }
 
-        // Ask user if they want to install (unless non-interactive)
+        // Playwright not installed, ask user whether to install
         if (!nonInteractive)
         {
             Console.WriteLine("Browser automation tools require Playwright browsers to be installed.");
@@ -522,12 +515,70 @@ public class OnboardCommand : ICliCommand
                 Console.WriteLine("  You can install manually later by running:");
                 Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
                 Console.WriteLine("    playwright install chromium");
-                return;
+                config.Browser = new BrowserToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return false;
             }
         }
+        else
+        {
+            // In non-interactive mode, skip installation silently
+            config.Browser = new BrowserToolsConfig { Enabled = false };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return false;
+        }
 
-        // Install browsers
-        Console.WriteLine("Installing Playwright browsers (this may take a few minutes)...");
+        // User agreed to install, check PowerShell availability
+        Console.WriteLine("Checking PowerShell availability...");
+        var pwshPath = await powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
+
+        if (string.IsNullOrEmpty(pwshPath))
+        {
+            // PowerShell not found, ask user whether to install
+            Console.WriteLine("PowerShell Core (pwsh) is required for Playwright installation.");
+            Console.WriteLine("  You can install manually from: https://aka.ms/powershell");
+
+            if (!nonInteractive)
+            {
+                Console.Write("\nInstall PowerShell Core now? [Y/n]: ");
+                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (response == "n" || response == "no")
+                {
+                    Console.WriteLine("⚠ Skipped PowerShell installation. Playwright installation aborted.");
+                    config.Browser = new BrowserToolsConfig { Enabled = false };
+                    await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                    return false;
+                }
+
+                Console.WriteLine("Installing PowerShell Core (this may take a few minutes)...");
+                var psInstalled = await powerShellInstaller.InstallAsync(cancellationToken);
+
+                if (!psInstalled)
+                {
+                    Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
+                    Console.WriteLine("  Please install manually from: https://aka.ms/powershell");
+                    config.Browser = new BrowserToolsConfig { Enabled = false };
+                    await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                    return false;
+                }
+
+                Console.WriteLine("✓ PowerShell Core installed successfully");
+            }
+            else
+            {
+                // In non-interactive mode, skip silently
+                config.Browser = new BrowserToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return false;
+            }
+        }
+        else
+        {
+            Console.WriteLine("✓ PowerShell Core found");
+        }
+
+        // Now install Playwright browsers
+        Console.WriteLine("\nInstalling Playwright browsers (this may take a few minutes)...");
         Console.WriteLine("  Installing Chromium...");
 
         try
@@ -536,6 +587,9 @@ public class OnboardCommand : ICliCommand
             if (success)
             {
                 Console.WriteLine("✓ Playwright browsers installed successfully");
+                config.Browser = new BrowserToolsConfig { Enabled = true };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return true;
             }
             else
             {
@@ -549,7 +603,6 @@ public class OnboardCommand : ICliCommand
                     Console.WriteLine("  You can try one of the following:");
                     Console.WriteLine("    1. Use Docker with a supported Linux distribution (Ubuntu 20.04/22.04/24.04)");
                     Console.WriteLine("    2. Use WSL2 if on Windows");
-                    Console.WriteLine("    3. Skip browser installation with --skip-browser-install flag");
                 }
                 else
                 {
@@ -557,6 +610,9 @@ public class OnboardCommand : ICliCommand
                     Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
                     Console.WriteLine("    playwright install chromium");
                 }
+                config.Browser = new BrowserToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return false;
             }
         }
         catch (Exception ex)
@@ -565,6 +621,9 @@ public class OnboardCommand : ICliCommand
             Console.WriteLine("  Please install manually:");
             Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
             Console.WriteLine("    playwright install chromium");
+            config.Browser = new BrowserToolsConfig { Enabled = false };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return false;
         }
     }
 

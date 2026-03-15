@@ -17,7 +17,7 @@ public class WebToolsIntegrationTests : IDisposable
 
     public WebToolsIntegrationTests()
     {
-        // Use the Ollama qwen3.5:4b model provided by user
+        // Use the Ollama qwen3.5:4b model with correct local configuration
         var config = new LlmConfig
         {
             DefaultProfile = "ollama_qwen3.5_4b",
@@ -25,10 +25,13 @@ public class WebToolsIntegrationTests : IDisposable
             {
                 ["ollama_qwen3.5_4b"] = new LlmProfile
                 {
-                    Provider = "openai", // Ollama exposes OpenAI-compatible API
+                    Name = "Ollama qwen3.5 4b",
+                    Provider = "openai",
                     Model = "qwen3.5:4b",
                     ApiKey = "ollama",
-                    ApiBase = "http://172.16.3.220:11435/v1"
+                    ApiBase = "http://172.16.3.220:11435/v1",
+                    Temperature = 0.7f,
+                    MaxTokens = 64000
                 }
             }
         };

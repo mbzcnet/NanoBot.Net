@@ -1,7 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Configuration;
-using NanoBot.Core.Workspace;
 using NanoBot.Providers;
 using NanoBot.Tools.BuiltIn;
 using Xunit;
@@ -18,7 +17,7 @@ public class AgentIntegrationTests : IDisposable
 
     public AgentIntegrationTests()
     {
-        // Use the Ollama qwen3.5:4b model
+        // Use the Ollama qwen3.5:4b model with correct local configuration
         var config = new LlmConfig
         {
             DefaultProfile = "ollama_qwen3.5_4b",
@@ -26,11 +25,13 @@ public class AgentIntegrationTests : IDisposable
             {
                 ["ollama_qwen3.5_4b"] = new LlmProfile
                 {
+                    Name = "Ollama qwen3.5 4b",
                     Provider = "openai",
                     Model = "qwen3.5:4b",
                     ApiKey = "ollama",
                     ApiBase = "http://172.16.3.220:11435/v1",
-                    Temperature = 0.7
+                    Temperature = 0.7f,
+                    MaxTokens = 64000
                 }
             }
         };

@@ -363,7 +363,7 @@ public class SessionService : ISessionService
                             CallId = toolCallId,
                             Name = toolName,
                             Arguments = "{}",
-                            Output = content,
+                            Output = NormalizeToolOutput(content),
                             IsError = LooksLikeErrorOutput(content)
                         });
                     }
@@ -490,7 +490,7 @@ public class SessionService : ISessionService
         {
             var existing = !string.IsNullOrWhiteSpace(incoming.CallId)
                 ? target.LastOrDefault(t => string.Equals(t.CallId, incoming.CallId, StringComparison.Ordinal))
-                : null;
+                : target.LastOrDefault();
 
             if (existing == null)
             {
@@ -503,6 +503,12 @@ public class SessionService : ISessionService
                     IsError = incoming.IsError
                 });
                 continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(incoming.CallId) &&
+                string.IsNullOrWhiteSpace(existing.CallId))
+            {
+                existing.CallId = incoming.CallId;
             }
 
             if (string.IsNullOrWhiteSpace(existing.Name) && !string.IsNullOrWhiteSpace(incoming.Name))
@@ -545,6 +551,24 @@ public class SessionService : ISessionService
                value.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
                value.Contains("ERR_", StringComparison.OrdinalIgnoreCase) ||
                value.Contains("SSL", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private string NormalizeToolOutput(string? rawOutput)
+    {
+        if (string.IsNullOrWhiteSpace(rawOutput))
+        {
+            return string.Empty;
+        }
+
+        var normalized = rawOutput.Trim();
+        if (TryExtractSnapshotMarkdown(normalized, out var snapshotMarkdown))
+        {
+            return string.IsNullOrWhiteSpace(snapshotMarkdown)
+                ? normalized
+                : $"{normalized}\n\n{snapshotMarkdown}";
+        }
+
+        return normalized;
     }
 
     private bool TryReadMessagesFromMetadata(string metadataLine, string sessionId, out List<MessageInfo> messages)
@@ -682,7 +706,7 @@ public class SessionService : ISessionService
                                     : string.Empty;
                                 if (!string.IsNullOrWhiteSpace(callId) && toolExecutionLookup.TryGetValue(callId, out var existingExecution))
                                 {
-                                    existingExecution.Output = result!;
+                                    existingExecution.Output = NormalizeToolOutput(result!);
                                     existingExecution.IsError = LooksLikeErrorOutput(result!);
                                 }
                                 else
@@ -692,7 +716,7 @@ public class SessionService : ISessionService
                                         CallId = callId,
                                         Name = "tool",
                                         Arguments = "{}",
-                                        Output = result!,
+                                        Output = NormalizeToolOutput(result!),
                                         IsError = LooksLikeErrorOutput(result!)
                                     });
                                 }
@@ -705,14 +729,19 @@ public class SessionService : ISessionService
 
                 if (role == "tool")
                 {
-                    toolExecutions.Add(new ToolExecutionInfo
+                    if (!string.IsNullOrWhiteSpace(combinedContent) ||
+                        !string.IsNullOrWhiteSpace(itemToolCallId) ||
+                        !string.IsNullOrWhiteSpace(itemToolName))
                     {
-                        CallId = itemToolCallId,
-                        Name = itemToolName,
-                        Arguments = "{}",
-                        Output = combinedContent,
-                        IsError = LooksLikeErrorOutput(combinedContent)
-                    });
+                        toolExecutions.Add(new ToolExecutionInfo
+                        {
+                            CallId = itemToolCallId,
+                            Name = itemToolName,
+                            Arguments = "{}",
+                            Output = NormalizeToolOutput(combinedContent),
+                            IsError = LooksLikeErrorOutput(combinedContent)
+                        });
+                    }
                     combinedContent = string.Empty;
                 }
 
@@ -946,6 +975,19 @@ public class SessionService : ISessionService
         }
 
         imageUrl = resolved;
+        return true;
+    }
+
+    private bool TryExtractSnapshotMarkdown(string toolContent, out string markdown)
+    {
+        markdown = string.Empty;
+        if (!TryExtractSnapshotImageUrl(toolContent, out var imageUrl) ||
+            string.IsNullOrWhiteSpace(imageUrl))
+        {
+            return false;
+        }
+
+        markdown = $"![snapshot]({imageUrl})";
         return true;
     }
 

@@ -1,86 +1,282 @@
 {
   "tool": [
     {
-      "id": "tool_file_read",
-      "name": "文件读取",
-      "input": "List files in /tmp directory",
-      "requiredTools": ["list_dir", "exec"],
-      "score": 10,
-      "keywords": ["list_dir", "exec", "ls", "tmp"]
-    },
-    {
-      "id": "tool_file_write",
-      "name": "文件写入",
-      "input": "Create a file at /tmp/test.txt with content hello",
-      "requiredTools": ["write_file", "exec"],
-      "score": 10,
-      "keywords": ["write_file", "exec", "echo", "tmp", "test.txt"]
-    },
-    {
-      "id": "tool_shell",
-      "name": "Shell命令",
-      "input": "Execute pwd command",
+      "id": "tool_simple_exec",
+      "name": "Simple Shell Command",
+      "category": "simple",
+      "input": "Execute pwd command to get current working directory",
       "requiredTools": ["exec"],
-      "score": 10,
-      "keywords": ["exec", "pwd"]
+      "score": 5,
+      "keywords": ["exec", "pwd", "shell", "command"]
+    },
+    {
+      "id": "tool_simple_list",
+      "name": "List Directory Files",
+      "category": "simple",
+      "input": "List files in /tmp directory",
+      "requiredTools": ["list_dir"],
+      "score": 5,
+      "keywords": ["list_dir", "ls", "tmp", "directory"]
+    },
+    {
+      "id": "tool_simple_write",
+      "name": "Write File",
+      "category": "simple",
+      "input": "Create a file at /tmp/test.txt with content 'hello world'",
+      "requiredTools": ["write_file"],
+      "score": 5,
+      "keywords": ["write_file", "create", "tmp", "test.txt"]
+    },
+    {
+      "id": "tool_simple_read",
+      "name": "Read File",
+      "category": "simple",
+      "input": "Read the content of /etc/hostname file",
+      "requiredTools": ["read_file"],
+      "score": 5,
+      "keywords": ["read_file", "cat", "file", "read"]
     },
     {
       "id": "tool_web_search",
-      "name": "网页搜索",
-      "input": "Search for today's weather",
+      "name": "Web Search",
+      "category": "simple",
+      "input": "Search for the latest news about artificial intelligence",
       "requiredTools": ["web_search"],
-      "score": 10,
-      "keywords": ["web_search", "search"]
+      "score": 5,
+      "keywords": ["web_search", "search", "news", "information"]
     },
     {
-      "id": "tool_multi",
-      "name": "多工具调用",
-      "input": "First list /tmp directory, then create a file there",
-      "requiredTools": ["list_dir", "write_file", "exec"],
+      "id": "tool_web_fetch",
+      "name": "Fetch Web Content",
+      "category": "simple",
+      "input": "Fetch the main content from https://httpbin.org/html",
+      "requiredTools": ["web_fetch"],
+      "score": 5,
+      "keywords": ["web_fetch", "fetch", "http", "content"]
+    },
+    {
+      "id": "tool_args_json",
+      "name": "JSON Parameters",
+      "category": "parameters",
+      "input": "Call a weather API tool with parameters: city='Beijing', unit='celsius'",
+      "requiredTools": ["web_fetch"],
+      "score": 10,
+      "keywords": ["parameters", "JSON", "arguments", "weather", "city"]
+    },
+    {
+      "id": "tool_args_complex",
+      "name": "Complex JSON Object",
+      "category": "parameters",
+      "input": "Create a JSON config file with nested structure containing app name, version, and database settings",
+      "requiredTools": ["write_file"],
+      "score": 10,
+      "keywords": ["JSON", "nested", "object", "config", "complex"]
+    },
+    {
+      "id": "tool_parallel_weather",
+      "name": "Parallel Weather Query",
+      "category": "parallel",
+      "input": "Get weather information for Beijing, Shanghai, and Guangzhou simultaneously",
+      "requiredTools": ["web_fetch"],
       "score": 15,
-      "keywords": ["list", "write", "exec", "tmp"]
+      "keywords": ["parallel", "multiple", "concurrent", "weather", "batch"]
     },
     {
-      "id": "browser_navigate",
-      "name": "浏览器导航",
-      "input": "Open https://example.com webpage",
+      "id": "tool_parallel_file",
+      "name": "Parallel File Read",
+      "category": "parallel",
+      "input": "Read three configuration files: /etc/hosts, /etc/hostname, /etc/resolv.conf at the same time",
+      "requiredTools": ["read_file"],
+      "score": 15,
+      "keywords": ["parallel", "read", "multiple", "files", "batch"]
+    },
+    {
+      "id": "tool_sequential_list",
+      "name": "Sequential Directory Ops",
+      "category": "sequential",
+      "input": "First list /tmp directory, then create a new file named report.txt in /tmp",
+      "requiredTools": ["list_dir", "write_file"],
+      "score": 15,
+      "keywords": ["sequential", "list", "write", "order", "dependent"]
+    },
+    {
+      "id": "tool_sequential_read_modify",
+      "name": "Read Then Process",
+      "category": "sequential",
+      "input": "Read the file /tmp/test.txt, then count the number of lines in it",
+      "requiredTools": ["read_file", "exec"],
+      "score": 15,
+      "keywords": ["sequential", "read", "process", "wc", "count"]
+    },
+    {
+      "id": "tool_conditional_branch",
+      "name": "Conditional Branch",
+      "category": "reasoning",
+      "input": "Check if /tmp directory exists, if it exists list its contents, otherwise create it first",
+      "requiredTools": ["list_dir", "exec", "write_file"],
+      "score": 20,
+      "keywords": ["conditional", "if", "branch", "check", "exist"]
+    },
+    {
+      "id": "tool_loop_iteration",
+      "name": "Loop Iteration",
+      "category": "reasoning",
+      "input": "List files in /tmp directory, then for each file, get its file size",
+      "requiredTools": ["list_dir", "exec"],
+      "score": 20,
+      "keywords": ["loop", "iterate", "for", "each", "size"]
+    },
+    {
+      "id": "tool_error_recovery",
+      "name": "Error Recovery",
+      "category": "reasoning",
+      "input": "Try to read a non-existent file /tmp/nonexistent.txt, if it fails create it with default content",
+      "requiredTools": ["read_file", "write_file"],
+      "score": 20,
+      "keywords": ["error", "recovery", "fallback", "handle", "retry"]
+    },
+    {
+      "id": "browser_navigate_google",
+      "name": "Navigate to Google",
+      "category": "browser_simple",
+      "input": "Navigate to https://www.google.com",
       "requiredTools": ["browser_navigate"],
-      "score": 10,
-      "keywords": ["browser", "navigate", "example.com"]
+      "score": 5,
+      "keywords": ["browser", "navigate", "google", "search"]
     },
     {
-      "id": "browser_click",
-      "name": "浏览器点击",
-      "input": "Navigate to https://www.google.com and click the search button",
-      "requiredTools": ["browser_navigate", "browser_click"],
-      "score": 10,
-      "keywords": ["browser", "navigate", "click", "google.com"]
-    },
-    {
-      "id": "browser_type",
-      "name": "浏览器输入",
-      "input": "Navigate to https://www.google.com and type hello world in the search box",
+      "id": "browser_type_search",
+      "name": "Browser Type and Search",
+      "category": "browser_interaction",
+      "input": "Navigate to https://www.google.com and type 'test' in the search box",
       "requiredTools": ["browser_navigate", "browser_type"],
       "score": 10,
-      "keywords": ["browser", "navigate", "type", "google.com"]
+      "keywords": ["browser", "type", "input", "search", "google"]
+    },
+    {
+      "id": "browser_scroll",
+      "name": "Browser Scroll",
+      "category": "browser_interaction",
+      "input": "Navigate to https://en.wikipedia.org/wiki/Python_(programming_language) and scroll down to the bottom",
+      "requiredTools": ["browser_navigate", "browser_scroll"],
+      "score": 10,
+      "keywords": ["browser", "scroll", "page", "down", "up"]
+    },
+    {
+      "id": "browser_screenshot",
+      "name": "Browser Screenshot",
+      "category": "browser_interaction",
+      "input": "Navigate to https://httpbin.org/html and take a screenshot of the page",
+      "requiredTools": ["browser_navigate", "browser_snapshot"],
+      "score": 10,
+      "keywords": ["browser", "screenshot", "snapshot", "capture", "image"]
+    },
+    {
+      "id": "browser_form_fill",
+      "name": "Browser Form Fill",
+      "category": "browser_complex",
+      "input": "Navigate to https://mdn.github.io/learning-area/html/forms/your-first-HTML-form/first-form.html, fill in the name field with 'John Doe', email field with 'john@example.com', message field with 'Hello world', then click the submit button",
+      "requiredTools": ["browser_navigate", "browser_type", "browser_click"],
+      "score": 15,
+      "keywords": ["browser", "form", "fill", "input", "submit", "contact", "MDN"]
+    },
+    {
+      "id": "browser_multi_step",
+      "name": "Browser Multi-Step",
+      "category": "browser_complex",
+      "input": "Navigate to https://httpbin.org/html, get the page title, then take a screenshot",
+      "requiredTools": ["browser_navigate", "browser_snapshot"],
+      "score": 20,
+      "keywords": ["browser", "multi-step", "title", "snapshot", "workflow"]
+    },
+    {
+      "id": "tool_code_python",
+      "name": "Python Code Execution",
+      "category": "code",
+      "input": "Execute a Python script that calculates the sum of numbers from 1 to 100",
+      "requiredTools": ["exec"],
+      "score": 10,
+      "keywords": ["python", "code", "execute", "script", "calculate"]
+    },
+    {
+      "id": "tool_code_json_parse",
+      "name": "JSON Parse",
+      "category": "code",
+      "input": "Parse this JSON string and extract the 'name' field: {\"user\": {\"name\": \"Alice\", \"age\": 30}}",
+      "requiredTools": ["exec"],
+      "score": 10,
+      "keywords": ["JSON", "parse", "extract", "python", "jq"]
+    },
+    {
+      "id": "tool_compose_mixed",
+      "name": "Mixed Tool Orchestration",
+      "category": "orchestration",
+      "input": "Search for current time in Beijing, then fetch weather data for Beijing, then create a summary report",
+      "requiredTools": ["web_search", "web_fetch", "write_file"],
+      "score": 25,
+      "keywords": ["orchestration", "compose", "multiple", "workflow", "integrate"]
     }
   ],
   "vision": [
     {
-      "id": "vision_desc",
-      "name": "图像描述",
-      "input": "Describe what you see in this image",
+      "id": "vision_simple_desc",
+      "name": "Image Description",
+      "category": "simple",
+      "input": "Describe what you see in this image in detail",
       "imagePath": "vision_things_v1.jpg",
-      "expectedContent": ["circle", "square", "cube", "mug", "phone", "apple", "blue", "red", "green"],
-      "score": 10
+      "expectedContent": ["object", "scene", "describe", "visual"],
+      "score": 10,
+      "keywords": ["vision", "describe", "image", "recognize"]
     },
     {
       "id": "vision_ocr",
-      "name": "文字识别",
+      "name": "OCR Text Extraction",
+      "category": "ocr",
       "input": "Extract all text from this image",
-      "imagePath": "vison_ocr_v1.jpg",
-      "expectedContent": ["AI Image Recognition Test", "bar chart", "line graph"],
-      "score": 10
+      "imagePath": "vision_ocr_v1.jpg",
+      "expectedContent": ["text", "OCR", "extract", "read"],
+      "score": 10,
+      "keywords": ["OCR", "text", "extract", "read"]
+    },
+    {
+      "id": "vision_counting",
+      "name": "Object Counting",
+      "category": "analysis",
+      "input": "Count the number of each type of object in this image",
+      "imagePath": "vision_things_v1.jpg",
+      "expectedContent": ["count", "number", "objects", "items"],
+      "score": 15,
+      "keywords": ["count", "number", "objects", "quantify"]
+    },
+    {
+      "id": "vision_color_analysis",
+      "name": "Color Analysis",
+      "category": "analysis",
+      "input": "Identify and list all the colors present in this image",
+      "imagePath": "vision_things_v1.jpg",
+      "expectedContent": ["color", "red", "blue", "green", "yellow"],
+      "score": 10,
+      "keywords": ["color", "RGB", "hue", "palette"]
+    },
+    {
+      "id": "vision_chart_data",
+      "name": "Chart Data Extraction",
+      "category": "data_extraction",
+      "input": "Extract all data from this chart and present it in tabular format",
+      "imagePath": "vision_chart_v1.jpg",
+      "expectedContent": ["chart", "data", "table", "graph", "bar", "line"],
+      "score": 20,
+      "keywords": ["chart", "graph", "data", "extract", "table"]
+    },
+    {
+      "id": "vision_screenshot_ui",
+      "name": "UI Screenshot Analysis",
+      "category": "ui_analysis",
+      "input": "Analyze this UI screenshot and describe the layout, components, and interactive elements",
+      "imagePath": "vision_ui_v1.jpg",
+      "expectedContent": ["button", "input", "menu", "layout", "UI", "interface"],
+      "score": 15,
+      "keywords": ["UI", "interface", "layout", "component", "element"]
     }
   ]
 }

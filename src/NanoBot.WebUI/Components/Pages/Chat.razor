@@ -26,6 +26,16 @@
         
         <div @ref="_messagesContainerRef" style="flex:1;min-height:0;overflow:auto;">
             <div class="nb-chat-content" style="max-width: 1500px; margin: 0 auto;">
+                <div class="nb-chat-header">
+                    <MudButton Variant="Variant.Text"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               Class="nb-new-chat-btn"
+                               OnClick="StartNewChat"
+                               Disabled="@_isGenerating">
+                        新對話
+                    </MudButton>
+                </div>
                 @if (_messages == null || !_messages.Any())
                 {
                     <div class="nb-chat-empty">
@@ -68,7 +78,16 @@
                                                     <span>OUT</span>
                                                 </div>
                                                 <div class="nb-tool-io-body">
-                                                    <pre><code>@FormatToolOutput(toolExecution.Output)</code></pre>
+                                                    @if (ShouldRenderToolOutputAsMarkdown(toolExecution.Output))
+                                                    {
+                                                        <div class="nb-tool-io-markdown">
+                                                            <MarkdownRenderer Content="@FormatToolOutput(toolExecution.Output)" />
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <pre><code>@FormatToolOutput(toolExecution.Output)</code></pre>
+                                                    }
                                                 </div>
                                             </div>
                                         }
@@ -756,11 +775,68 @@
         }
     }
 
+    private async Task StartNewChat()
+    {
+        if (_isGenerating)
+            return;
+        try
+        {
+            var session = await SessionService.CreateSessionAsync();
+            NavigationManager.NavigateTo($"/chat/{session.Id}", forceLoad: false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create new chat session");
+            Snackbar.Add($"建立新對話失敗: {ex.Message}", Severity.Error);
+        }
+    }
+
     private static string FormatToolPayload(string? payload)
         => string.IsNullOrWhiteSpace(payload) ? "{}" : payload;
 
     private static string FormatToolOutput(string? output)
         => string.IsNullOrWhiteSpace(output) ? "(no output)" : output;
+
+    private static bool ShouldRenderToolOutputAsMarkdown(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return false;
+        }
+
+        return output.Contains("![", StringComparison.Ordinal) ||
+               output.Contains("/api/files/sessions/", StringComparison.OrdinalIgnoreCase) ||
+               output.Contains("](", StringComparison.Ordinal) ||
+               LooksLikeMarkdownTable(output);
+    }
+
+    private static bool LooksLikeMarkdownTable(string output)
+    {
+        var lines = output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length < 2)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < lines.Length - 1; i++)
+        {
+            var header = lines[i];
+            var separator = lines[i + 1];
+            if (!header.Contains('|', StringComparison.Ordinal) ||
+                !separator.Contains('|', StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var normalizedSeparator = separator.Replace(" ", string.Empty);
+            if (normalizedSeparator.All(ch => ch == '|' || ch == '-' || ch == ':'))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private static bool LooksLikeErrorOutput(string? value)
     {

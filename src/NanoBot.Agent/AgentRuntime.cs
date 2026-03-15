@@ -1155,15 +1155,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     {
         try
         {
-            // 只处理 webui 会话
-            if (!sessionKey.StartsWith("webui:"))
-                return;
-
             // 获取当前标题
             var currentTitle = _sessionManager.GetSessionTitle(sessionKey);
 
-            // 如果标题已自定义（不是默认格式），则不自动更新
-            if (!string.IsNullOrEmpty(currentTitle) && !currentTitle.StartsWith("会话 "))
+            // 如果标题已设置（非空），则不自动更新
+            if (!string.IsNullOrEmpty(currentTitle))
                 return;
 
             // 获取会话中的消息数量
@@ -1172,7 +1168,25 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             // 如果这是第一条用户消息（session 中还没有消息），则使用内容作为标题
             if (messages.Count == 0)
             {
-                var newTitle = userContent.Length > 30 ? userContent.Substring(0, 30) + "..." : userContent;
+                string newTitle;
+                
+                if (userContent.Length > 50)
+                {
+                    // 如果消息超过 50 字符，使用 LLM 生成标题
+                    newTitle = await GenerateTitleWithLLMAsync(sessionKey, userContent, cancellationToken);
+                    
+                    // 如果 LLM 生成失败，回退到截断方式
+                    if (string.IsNullOrWhiteSpace(newTitle))
+                    {
+                        newTitle = userContent.Substring(0, 50) + "...";
+                    }
+                }
+                else
+                {
+                    // 短消息直接使用截断方式
+                    newTitle = userContent;
+                }
+
                 if (!string.IsNullOrWhiteSpace(newTitle))
                 {
                     _sessionManager.SetSessionTitle(sessionKey, newTitle);
@@ -1185,6 +1199,40 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         catch (Exception ex)
         {
             _logger?.LogWarning(ex, "Failed to auto-set session title for {SessionKey}", sessionKey);
+        }
+    }
+
+    private async Task<string> GenerateTitleWithLLMAsync(string sessionKey, string userContent, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var chatClient = GetChatClientFromAgent(sessionKey);
+            if (chatClient == null)
+            {
+                _logger?.LogWarning("No chat client available for session {SessionKey}", sessionKey);
+                return string.Empty;
+            }
+
+            var systemPrompt = "你是一个会话标题生成器。根据用户的第一条消息，生成一个简短（不超过10个字）的会话标题。只返回标题文本，不要任何解释、标点符号或换行。";
+            
+            var response = await chatClient.GetResponseAsync(
+                [
+                    new ChatMessage(ChatRole.System, systemPrompt),
+                    new ChatMessage(ChatRole.User, userContent)
+                ],
+                cancellationToken: cancellationToken);
+
+            var title = response.Messages.FirstOrDefault()?.Text?.Trim() ?? string.Empty;
+            
+            // 清理标题：移除可能的标点符号和引号
+            title = title.Trim('"', '\'', '。', '.', '！', '!', '？', '?');
+            
+            return title;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to generate title with LLM for session {SessionKey}", sessionKey);
+            return string.Empty;
         }
     }
 

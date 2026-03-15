@@ -243,8 +243,8 @@ public class BenchmarkEngine : IBenchmarkEngine
             return false;
         }
 
-        // Check for tool call markers [TABLET_TOOL_CALL]...[/TABLET_TOOL_CALL]
-        var toolCallPattern = @"\[TABLET_TOOL_CALL\](.*?)\[/TABLET_TOOL_CALL\]";
+        // Check for tool call markers [TOOL_CALL]...[/TOOL_CALL]
+        var toolCallPattern = @"\[TOOL_CALL\](.*?)\[/TOOL_CALL\]";
         var matches = System.Text.RegularExpressions.Regex.Matches(output, toolCallPattern);
         
         if (matches.Count == 0)

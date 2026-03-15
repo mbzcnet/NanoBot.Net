@@ -22,12 +22,27 @@ public static class BrowserTools
     public static AITool CreateBrowserTool(IBrowserService? browserService)
     {
         return AIFunctionFactory.Create(
-            (string action, string? profile = null, string? targetId = null, string? targetUrl = null, string? snapshotFormat = null, string? kind = null, string? reference = null, string? text = null, string? textGone = null, string? key = null, int? timeoutMs = null, int? scrollBy = null, string? selector = null, int? maxChars = null, string? loadState = null, string? sessionKey = null) =>
+            (string action,
+             string? profile = null,
+             string? targetId = null,
+             string? targetUrl = null,
+             string? snapshotFormat = null,
+             string? kind = null,
+             string? reference = null,
+             string? text = null,
+             string? textGone = null,
+             string? key = null,
+             int? timeoutMs = null,
+             int? scrollBy = null,
+             string? selector = null,
+             int? maxChars = null,
+             string? loadState = null,
+             string? sessionKey = null) =>
                 ExecuteAsync(action, profile, targetId, targetUrl, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService),
             new AIFunctionFactoryOptions
             {
                 Name = "browser",
-                Description = "Control browser tabs with actions: status, start, stop, tabs, open, navigate, close, snapshot, capture, content, act. Recommended flow: open/navigate -> snapshot/capture -> act -> content. Use capture for screenshot with image output."
+                Description = GetToolDescription()
             });
     }
 
@@ -122,6 +137,35 @@ public static class BrowserTools
         {
             return $"Error: {ex.Message}";
         }
+    }
+
+    private static string GetToolDescription()
+    {
+        return """
+            Control browser tabs for web automation and data extraction.
+
+            Actions and required parameters:
+            - status: Get browser status. No required parameters.
+            - start: Start browser instance. No required parameters.
+            - stop: Stop browser instance. No required parameters.
+            - tabs: List all open tabs. No required parameters.
+            - open: Open a new tab. Required: targetUrl (the URL to open).
+            - navigate: Navigate existing tab to URL. Required: targetId (tab ID), targetUrl (destination URL).
+            - close: Close a tab. Required: targetId (tab ID to close).
+            - snapshot: Get interactive page snapshot. Required: targetId (tab ID). Optional: snapshotFormat ('ai' or 'raw').
+            - capture: Capture screenshot. Required: targetId (tab ID). Optional: snapshotFormat ('ai' or 'raw').
+            - content: Extract page content. Required: targetId (tab ID). Optional: selector (CSS selector), maxChars (max characters to return).
+            - act: Execute action on page. Required: targetId (tab ID), kind (action type: click, hover, scroll, press, wait). Optional: reference (element reference), text (input text), key (key to press), timeoutMs, scrollBy, loadState.
+
+            Recommended workflow:
+            1. Use 'open' or 'navigate' to load a page (remember the targetId returned).
+            2. Use 'act' with kind='wait' to wait for page load if needed.
+            3. Use 'snapshot' to get page structure with element references.
+            4. Use 'act' to interact with elements (click, hover, etc.).
+            5. Use 'content' to extract text content.
+
+            Important: Always include targetId for navigate, close, snapshot, capture, content, and act actions.
+            """;
     }
 
     private static string Require(string? value, string name)

@@ -23,6 +23,8 @@ public class AgentConfig
     public WebToolsConfig? WebTools { get; set; }
 
     public FileToolsConfig? FileTools { get; set; }
+
+    public BrowserToolsConfig? Browser { get; set; }
 }
 
 public class WebToolsConfig

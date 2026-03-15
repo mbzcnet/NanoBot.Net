@@ -4,7 +4,7 @@ public sealed class BrowserToolRequest
 {
     public string Action { get; set; } = string.Empty;
 
-    public string Profile { get; set; } = "openclaw";
+    public string Profile { get; set; } = "nanobot";
 
     public string? TargetId { get; set; }
 

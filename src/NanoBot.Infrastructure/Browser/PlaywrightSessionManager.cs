@@ -201,7 +201,7 @@ public sealed class PlaywrightSessionManager : IPlaywrightSessionManager, IAsync
 
     private static string NormalizeProfile(string profile)
     {
-        return string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
+        return string.IsNullOrWhiteSpace(profile) ? "nanobot" : profile.Trim();
     }
 
     private static void RefreshClosedPages(ProfileState state)
