@@ -37,6 +37,17 @@ public partial class TelegramChannel : ChannelBase
         public Dictionary<string, object> Metadata { get; set; } = new();
     }
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["token"] = "",
+            ["allowFrom"] = Array.Empty<string>(),
+            ["replyToMessage"] = false
+        };
+    }
+
     public TelegramChannel(TelegramConfig config, IMessageBus bus, ILogger<TelegramChannel> logger)
         : base(bus, logger)
     {

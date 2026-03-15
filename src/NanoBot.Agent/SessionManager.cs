@@ -497,11 +497,13 @@ public sealed class SessionManager : ISessionManager
         JsonArray? toolCalls = null;
         string? toolCallId = null;
         string? name = null;
+        bool hasToolCalls = false;
 
         foreach (var c in message.Contents)
         {
             if (c is FunctionCallContent fcc)
             {
+                hasToolCalls = true;
                 toolCalls ??= new JsonArray();
 
                 var argsDict = fcc.Arguments as IDictionary<string, object?>;
@@ -550,6 +552,14 @@ public sealed class SessionManager : ISessionManager
                     }
                 }
             }
+        }
+        
+        // 如果有 tool_calls，从 content 中移除 [TOOL_CALL] 标记
+        // 因为这些标记是展示用的，不应该保存到会话历史中
+        // 否则会导致模型误判，放弃真正的工具调用
+        if (hasToolCalls && !string.IsNullOrEmpty(content))
+        {
+            content = RemoveToolCallMarkers(content);
         }
         
         content ??= string.Empty;
@@ -763,4 +773,27 @@ public sealed class SessionManager : ISessionManager
     {
         return $"/api/files/sessions/{relativePath.Replace('\\', '/')}";
     }
+
+    /// <summary>
+    /// 从 content 中移除 [TOOL_CALL] 标记
+    /// 这些标记是展示用的，不应该保存到会话历史中
+    /// </summary>
+    private static string RemoveToolCallMarkers(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return content;
+        }
+
+        // 移除 [TOOL_CALL]xxx[/TOOL_CALL] 格式
+        var result = ToolCallMarkerRegex.Replace(content, "");
+
+        // 清理多余的空白行
+        result = MultiBlankLineRegex.Replace(result, "\n\n");
+
+        return result.Trim();
+    }
+
+    private static readonly Regex ToolCallMarkerRegex = new(@"\[TOOL_CALL\].*?\[/TOOL_CALL\]", RegexOptions.Singleline | RegexOptions.Compiled);
+    private static readonly Regex MultiBlankLineRegex = new(@"\n{3,}", RegexOptions.Compiled);
 }

@@ -21,6 +21,19 @@ public partial class SlackChannel : ChannelBase
 
     private const string SlackApiBase = "https://slack.com/api";
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["mode"] = "socket",
+            ["botToken"] = "",
+            ["appToken"] = "",
+            ["groupPolicy"] = "mention",
+            ["groupAllowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public SlackChannel(SlackConfig config, IMessageBus bus, ILogger<SlackChannel> logger)
         : base(bus, logger)
     {

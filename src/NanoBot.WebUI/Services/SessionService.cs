@@ -238,6 +238,10 @@ public class SessionService : ISessionService
     private List<MessageInfo> ReadMessagesFromJsonLines(string[] lines, string sessionId)
     {
         var messagesList = new List<MessageInfo>();
+        MessageInfo? currentAssistant = null;
+        
+        // 用于跟踪 tool_call 的 callId 与对应 assistant 消息的索引
+        var pendingToolCalls = new Dictionary<string, int>(StringComparer.Ordinal);
 
         foreach (var line in lines)
         {
@@ -297,6 +301,9 @@ public class SessionService : ISessionService
 
                 ToolCallInfo? toolCallInfo = null;
                 var toolExecutions = new List<ToolExecutionInfo>();
+                var parts = new List<MessagePartInfo>();
+                
+                // 解析 tool_calls
                 if (msg.TryGetProperty("tool_calls", out var toolCallsElement) && toolCallsElement.ValueKind == JsonValueKind.Array)
                 {
                     var toolCalls = new List<FunctionCallContent>();
@@ -333,6 +340,21 @@ public class SessionService : ISessionService
                                 ? idElement.GetString() ?? string.Empty
                                 : string.Empty;
                             toolCalls.Add(new FunctionCallContent(callId, functionName, arguments));
+                            
+                            // 添加 tool_call part
+                            parts.Add(new MessagePartInfo
+                            {
+                                Type = "tool_call",
+                                CallId = callId,
+                                ToolName = functionName,
+                                Arguments = argsString ?? "{}"
+                            });
+                            
+                            // 记录 pending tool call
+                            if (!string.IsNullOrWhiteSpace(callId))
+                            {
+                                pendingToolCalls[callId] = messagesList.Count;
+                            }
                         }
                     }
 
@@ -360,6 +382,16 @@ public class SessionService : ISessionService
                     }
                 }
 
+                // 如果有文本内容，添加 text part
+                if (!string.IsNullOrWhiteSpace(content))
+                {
+                    parts.Add(new MessagePartInfo
+                    {
+                        Type = "text",
+                        Text = content
+                    });
+                }
+
                 if (role == "tool")
                 {
                     var toolCallId = msg.TryGetProperty("tool_call_id", out var toolCallIdElement)
@@ -369,6 +401,25 @@ public class SessionService : ISessionService
                         ? toolNameElement.GetString() ?? string.Empty
                         : string.Empty;
 
+                    var normalizedOutput = NormalizeToolOutput(content);
+                    var isError = LooksLikeErrorOutput(content);
+                    
+                    // 添加 tool_result part
+                    parts.Add(new MessagePartInfo
+                    {
+                        Type = "tool_result",
+                        CallId = toolCallId,
+                        ToolName = toolName,
+                        Output = normalizedOutput,
+                        IsError = isError
+                    });
+                    
+                    // 清理 pending tool call 记录
+                    if (!string.IsNullOrWhiteSpace(toolCallId))
+                    {
+                        pendingToolCalls.Remove(toolCallId);
+                    }
+
                     if (!string.IsNullOrWhiteSpace(content) || !string.IsNullOrWhiteSpace(toolCallId) || !string.IsNullOrWhiteSpace(toolName))
                     {
                         toolExecutions.Add(new ToolExecutionInfo
@@ -376,8 +427,8 @@ public class SessionService : ISessionService
                             CallId = toolCallId,
                             Name = toolName,
                             Arguments = "{}",
-                            Output = NormalizeToolOutput(content),
-                            IsError = LooksLikeErrorOutput(content)
+                            Output = normalizedOutput,
+                            IsError = isError
                         });
                     }
                 }
@@ -411,11 +462,12 @@ public class SessionService : ISessionService
                     content = AppendImageSummaries(content, sessionImages);
                 }
 
-                if (!string.IsNullOrWhiteSpace(content) || toolCallInfo != null || attachments.Count > 0 || toolExecutions.Count > 0)
+                if (!string.IsNullOrWhiteSpace(content) || toolCallInfo != null || attachments.Count > 0 || toolExecutions.Count > 0 || parts.Count > 0)
                 {
-                    messagesList.Add(new MessageInfo
+                    var messageIndex = messagesList.Count;
+                    var messageInfo = new MessageInfo
                     {
-                        Id = $"{sessionId}_{messagesList.Count}",
+                        Id = $"{sessionId}_{messageIndex}",
                         SessionId = sessionId,
                         Role = role,
                         Content = content,
@@ -423,8 +475,17 @@ public class SessionService : ISessionService
                         Attachments = attachments,
                         ToolCall = toolCallInfo,
                         ToolExecutions = toolExecutions,
-                        SourceIndex = messagesList.Count
-                    });
+                        SourceIndex = messageIndex,
+                        Parts = parts.Count > 0 ? parts : new List<MessagePartInfo>()
+                    };
+                    
+                    // 如果是 assistant 消息且有 parts，记录为 currentAssistant
+                    if (role == "assistant" && parts.Count > 0)
+                    {
+                        currentAssistant = messageInfo;
+                    }
+                    
+                    messagesList.Add(messageInfo);
                 }
             }
             catch
@@ -616,6 +677,7 @@ public class SessionService : ISessionService
                 }
 
                 var textParts = new List<string>();
+                var sessionParts = new List<MessagePartInfo>();  // 用于有序渲染
                 ToolCallInfo? toolCall = null;
                 var toolExecutions = new List<ToolExecutionInfo>();
                 var toolExecutionLookup = new Dictionary<string, ToolExecutionInfo>(StringComparer.Ordinal);

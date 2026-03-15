@@ -23,6 +23,17 @@ public class QQChannel : ChannelBase
 
     private const string QQApiBase = "https://api.sgroup.qq.com";
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["botId"] = "",
+            ["token"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public QQChannel(QQConfig config, IMessageBus bus, ILogger<QQChannel> logger)
         : base(bus, logger)
     {

@@ -19,5 +19,6 @@ public record AgentResponseChunk(
     string? ToolCall = null,
     ToolCallInfo? ToolCallDetails = null,
     bool IsToolResult = false,
-    string? ToolResultCallId = null
+    string? ToolResultCallId = null,
+    bool IsToolHint = false
 );

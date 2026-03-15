@@ -210,6 +210,86 @@ public class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveSessionAsync_RemovesToolCallMarkersFromContent()
+    {
+        var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
+        var sessionKey = "test:tool_call_markers";
+        var session = await manager.GetOrCreateSessionAsync(sessionKey);
+        
+        if (!session.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var list) || list == null)
+        {
+            list = new List<ChatMessage>();
+            session.StateBag.SetValue("ChatHistoryProvider", list);
+        }
+        
+        // Add a message with tool call and content containing [TOOL_CALL] markers
+        var args = new Dictionary<string, object?> { { "query", "test" } };
+        var toolCall = new FunctionCallContent("call_1", "search", args);
+        
+        // Create content with [TOOL_CALL] markers (as they would appear in the display)
+        var contentWithMarkers = "\n[TOOL_CALL]search(\"test\")[/TOOL_CALL]\n\nHere are the results:";
+        var callMessage = new ChatMessage(ChatRole.Assistant, contentWithMarkers)
+        {
+            Contents = { toolCall }
+        };
+        list.Add(callMessage);
+        
+        await manager.SaveSessionAsync(session, sessionKey);
+        
+        // Read file content
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_tool_call_markers.jsonl");
+        Assert.True(File.Exists(sessionFile));
+        
+        var lines = await File.ReadAllLinesAsync(sessionFile);
+        var json = JsonSerializer.Deserialize<JsonElement>(lines.Last());
+        
+        // Verify content has markers removed
+        var content = json.GetProperty("content").GetString();
+        Assert.DoesNotContain("[TOOL_CALL]", content);
+        Assert.DoesNotContain("[/TOOL_CALL]", content);
+        
+        // Verify tool_calls are still preserved
+        Assert.True(json.TryGetProperty("tool_calls", out var savedToolCalls));
+        Assert.Equal(1, savedToolCalls.GetArrayLength());
+    }
+
+    [Fact]
+    public async Task SaveSessionAsync_CleansMultipleBlankLines()
+    {
+        var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
+        var sessionKey = "test:blank_lines";
+        var session = await manager.GetOrCreateSessionAsync(sessionKey);
+        
+        if (!session.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var list) || list == null)
+        {
+            list = new List<ChatMessage>();
+            session.StateBag.SetValue("ChatHistoryProvider", list);
+        }
+        
+        // Add a message with tool call and multiple blank lines
+        var args = new Dictionary<string, object?> { { "query", "test" } };
+        var toolCall = new FunctionCallContent("call_1", "search", args);
+        
+        // Create content with multiple blank lines after markers
+        var contentWithMultipleBlanks = "\n[TOOL_CALL]search(\"test\")[/TOOL_CALL]\n\n\n\nSome content";
+        var callMessage = new ChatMessage(ChatRole.Assistant, contentWithMultipleBlanks)
+        {
+            Contents = { toolCall }
+        };
+        list.Add(callMessage);
+        
+        await manager.SaveSessionAsync(session, sessionKey);
+        
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_blank_lines.jsonl");
+        var lines = await File.ReadAllLinesAsync(sessionFile);
+        var json = JsonSerializer.Deserialize<JsonElement>(lines.Last());
+        
+        var content = json.GetProperty("content").GetString();
+        // Should have at most 2 newlines, not 4+
+        Assert.DoesNotContain("\n\n\n", content);
+    }
+
+    [Fact]
     public void Constructor_ThrowsOnNullAgent()
     {
         Assert.Throws<ArgumentNullException>(() =>

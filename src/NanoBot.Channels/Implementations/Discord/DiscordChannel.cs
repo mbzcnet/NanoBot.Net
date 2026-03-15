@@ -25,6 +25,16 @@ public class DiscordChannel : ChannelBase
     private const string DiscordApiBase = "https://discord.com/api/v10";
     private const int MaxAttachmentBytes = 20 * 1024 * 1024;
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["token"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public DiscordChannel(DiscordConfig config, IMessageBus bus, ILogger<DiscordChannel> logger)
         : base(bus, logger)
     {

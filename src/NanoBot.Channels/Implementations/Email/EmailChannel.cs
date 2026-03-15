@@ -24,6 +24,22 @@ public partial class EmailChannel : ChannelBase
     private readonly ConcurrentDictionary<string, byte> _processedUids = new();
     private const int MaxProcessedUids = 100000;
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["imapHost"] = "",
+            ["imapPort"] = 993,
+            ["username"] = "",
+            ["password"] = "",
+            ["smtpHost"] = "",
+            ["smtpPort"] = 587,
+            ["fromAddress"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public EmailChannel(EmailConfig config, IMessageBus bus, ILogger<EmailChannel> logger)
         : base(bus, logger)
     {

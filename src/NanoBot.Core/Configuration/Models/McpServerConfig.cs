@@ -13,4 +13,10 @@ public class McpServerConfig
     public Dictionary<string, string>? Headers { get; set; }
 
     public int ToolTimeout { get; set; } = 30;
+
+    /// <summary>
+    /// List of enabled tools. ["*"] means all tools are enabled.
+    /// Supports raw tool names and wrapped names (mcp_server_toolname).
+    /// </summary>
+    public List<string> EnabledTools { get; set; } = new();
 }

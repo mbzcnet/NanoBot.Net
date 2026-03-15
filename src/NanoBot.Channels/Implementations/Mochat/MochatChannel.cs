@@ -22,6 +22,17 @@ public class MochatChannel : ChannelBase
     private readonly ConcurrentDictionary<string, DateTime> _lastMessageTime = new();
     private readonly ConcurrentDictionary<string, string> _pendingReplies = new();
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["apiUrl"] = "",
+            ["apiToken"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public MochatChannel(MochatConfig config, IMessageBus bus, ILogger<MochatChannel> logger)
         : base(bus, logger)
     {

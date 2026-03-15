@@ -143,7 +143,10 @@ public class AgentService : IAgentService
                                        update.AdditionalProperties.TryGetValue("tool_call_id", out var toolCallIdValue)
                     ? toolCallIdValue?.ToString()
                     : null;
-
+                
+                // 检测是否为 tool-hint（仅用于展示 tool 调用信息的标记，不应显示在正文）
+                var isToolHint = update.AdditionalProperties?.ContainsKey("_tool_hint") == true;
+                
                 // 构建详细的工具调用信息
                 ToolCallInfo? toolCallDetails = null;
                 if (functionCalls.Any())
@@ -158,14 +161,48 @@ public class AgentService : IAgentService
                         CallId: firstCall.CallId
                     );
                 }
+                else if (isToolHint && update.AdditionalProperties != null)
+                {
+                    // 从 AgentRuntime 序列化的 _tool_call_info 中提取 tool call 信息
+                    if (update.AdditionalProperties.TryGetValue("_tool_call_info", out var toolInfoValue) && toolInfoValue != null)
+                    {
+                        try
+                        {
+                            var toolInfoJson = toolInfoValue.ToString();
+                            if (!string.IsNullOrEmpty(toolInfoJson))
+                            {
+                                var toolInfo = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(toolInfoJson);
+                                if (toolInfo != null)
+                                {
+                                    var name = toolInfo.TryGetValue("name", out var nameEl) ? nameEl.GetString() : null;
+                                    var callId = toolInfo.TryGetValue("callId", out var callIdEl) ? callIdEl.GetString() : null;
+                                    var args = toolInfo.TryGetValue("arguments", out var argsEl) ? argsEl.GetString() : "{}";
+                                    toolCallDetails = new ToolCallInfo(
+                                        Name: name ?? "",
+                                        Arguments: args,
+                                        CallId: callId
+                                    );
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to deserialize tool call info from _tool_call_info");
+                        }
+                    }
+                }
+
+                // tool-hint 不应有正文内容（正文中的 [TOOL_CALL] 标记会在前端被过滤，不应发送到前端）
+                var content = isToolHint ? string.Empty : text;
 
                 yield return new AgentResponseChunk(
-                    Content: text,
+                    Content: content,
                     IsComplete: false,
                     ToolCall: toolCall,
                     ToolCallDetails: toolCallDetails,
                     IsToolResult: isToolResult,
-                    ToolResultCallId: toolResultCallId
+                    ToolResultCallId: toolResultCallId,
+                    IsToolHint: isToolHint
                 );
             }
 

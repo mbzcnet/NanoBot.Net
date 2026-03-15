@@ -19,6 +19,17 @@ public class WhatsAppChannel : ChannelBase
     public event EventHandler<WhatsAppStatusEventArgs>? StatusChanged;
     public event EventHandler<string>? QrCodeReceived;
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["bridgeUrl"] = "ws://localhost:3001",
+            ["bridgeToken"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public WhatsAppChannel(WhatsAppConfig config, IMessageBus bus, ILogger<WhatsAppChannel> logger)
         : base(bus, logger)
     {

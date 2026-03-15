@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Playwright;
+using NanoBot.Core.Tools;
 using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Workspace;
 using SixLabors.ImageSharp;
@@ -390,15 +391,16 @@ public sealed class BrowserService : IBrowserService
         var normalized = NormalizeProfile(profile);
         var page = await GetPageAsync(normalized, targetId, cancellationToken);
 
-        // When sessionKey is empty, use "default" instead of "chat_default"
-        // So screenshots go to .nbot/workspace/sessions/default/screenshots
+        // 当 sessionKey 为空时，优先使用 ToolExecutionContext.CurrentSessionKey
+        // 只有当两者都为空时才使用 "default"
+        var contextSessionKey = ToolExecutionContext.CurrentSessionKey;
         var effectiveSessionKey = string.IsNullOrWhiteSpace(sessionKey)
-            ? "default"
+            ? (string.IsNullOrWhiteSpace(contextSessionKey) ? "default" : contextSessionKey)
             : sessionKey;
 
         string? imageRelativePath = null;
 
-        if (string.IsNullOrWhiteSpace(sessionKey))
+        if (string.IsNullOrWhiteSpace(sessionKey) && string.IsNullOrWhiteSpace(contextSessionKey))
         {
             _logger?.LogWarning("Snapshot called without sessionKey. Using default session: {SessionKey}", effectiveSessionKey);
         }

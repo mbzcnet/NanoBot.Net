@@ -32,15 +32,6 @@ public class NanoBotMcpClient : IMcpClient
         {
             _logger?.LogInformation("Connecting to MCP server '{ServerName}'...", serverName);
 
-            // Headers support will be added when stdio transport supports it
-            // if (config.Headers != null && config.Headers.Count > 0)
-            // {
-            //     foreach (var header in config.Headers)
-            //     {
-            //         _logger?.LogDebug("MCP server '{ServerName}' using custom header: {Key}", serverName, header.Key);
-            //     }
-            // }
-
             var transportOptions = new StdioClientTransportOptions
             {
                 Name = serverName,

@@ -22,6 +22,17 @@ public class DingTalkChannel : ChannelBase
 
     private const string DingTalkApiBase = "https://api.dingtalk.com";
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["appId"] = "",
+            ["appSecret"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public DingTalkChannel(DingTalkConfig config, IMessageBus bus, ILogger<DingTalkChannel> logger)
         : base(bus, logger)
     {

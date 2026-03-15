@@ -35,6 +35,19 @@ public class FeishuChannel : ChannelBase
     private static readonly HashSet<string> AudioExtensions = new() { ".opus" };
     private readonly string _mediaDirectory;
 
+    public override IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false,
+            ["appId"] = "",
+            ["appSecret"] = "",
+            ["encryptKey"] = "",
+            ["verificationToken"] = "",
+            ["allowFrom"] = Array.Empty<string>()
+        };
+    }
+
     public FeishuChannel(FeishuConfig config, IMessageBus bus, ILogger<FeishuChannel> logger)
         : base(bus, logger)
     {

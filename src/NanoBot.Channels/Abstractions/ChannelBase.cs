@@ -82,4 +82,12 @@ public abstract class ChannelBase : IChannel
     {
         MessageReceived?.Invoke(this, message);
     }
+
+    public virtual IDictionary<string, object?>? DefaultConfig()
+    {
+        return new Dictionary<string, object?>
+        {
+            ["enabled"] = false
+        };
+    }
 }
