@@ -909,7 +909,7 @@ public sealed class BrowserService : IBrowserService
 
     private static string NormalizeProfile(string profile)
     {
-        return string.IsNullOrWhiteSpace(profile) ? "openclaw" : profile.Trim();
+        return string.IsNullOrWhiteSpace(profile) ? "nanobot" : profile.Trim();
     }
 
     private static string SnapshotKey(string profile, string targetId)
