@@ -147,6 +147,7 @@ dotnet run --project src/NanoBot.Cli -- web --port 18888
 | `nbot mcp` | Manage MCP servers |
 | `nbot channels` | Manage channels |
 | `nbot provider` | Manage OAuth providers |
+| `nbot benchmark` | Run LLM model availability benchmark |
 
 ### Image / Vision Support
 

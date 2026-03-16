@@ -20,7 +20,7 @@ public class AgentCommand : ICliCommand
 
     private static readonly HashSet<string> ExitCommands = new(StringComparer.OrdinalIgnoreCase)
     {
-        "exit", "quit", "/exit", "/quit", ":q"
+        "/exit", "/quit"
     };
 
     private static readonly HashSet<string> SessionCommands = new(StringComparer.OrdinalIgnoreCase)
@@ -451,7 +451,7 @@ public class AgentCommand : ICliCommand
         // Save the session ID as the last used session
         await SaveLastSessionIdAsync(workspace, currentSessionId);
 
-        Console.WriteLine("🐈 NBot Interactive mode (type 'exit' or Ctrl+C to quit)");
+        Console.WriteLine("🐈 NBot Interactive mode (type '/exit' or Ctrl+C to quit)");
         Console.WriteLine($"📋 Current session: {currentSessionId.Replace("chat_", "")}");
         Console.WriteLine("💡 Use /new, /list, /resume, /clear to manage sessions\n");
 
