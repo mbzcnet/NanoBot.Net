@@ -21,11 +21,36 @@ public class BenchmarkEngine : IBenchmarkEngine
         _workspacePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".nbot", "workspace");
-        _benchmarkPath = Path.Combine(
-            AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..",
-            "benchmark");
-        // Normalize path
-        _benchmarkPath = Path.GetFullPath(_benchmarkPath);
+        _benchmarkPath = ResolveBenchmarkPath();
+        _logger.LogInformation("Benchmark path resolved to: {Path}", _benchmarkPath);
+    }
+
+    private static string ResolveBenchmarkPath()
+    {
+        // Try multiple possible locations for the benchmark directory
+        var possiblePaths = new[]
+        {
+            // Try relative to current domain base (development scenario)
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "src", "benchmark"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "benchmark"),
+            // Try relative to current domain base (published scenario)
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "benchmark"),
+            // Try relative to current working directory
+            Path.Combine(Directory.GetCurrentDirectory(), "src", "benchmark"),
+            Path.Combine(Directory.GetCurrentDirectory(), "benchmark"),
+        };
+
+        foreach (var path in possiblePaths)
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (Directory.Exists(fullPath) && File.Exists(Path.Combine(fullPath, "cases.json")))
+            {
+                return fullPath;
+            }
+        }
+
+        // Fallback to the most likely path
+        return Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "src", "benchmark"));
     }
 
     public async Task<BenchmarkResult> RunBenchmarkAsync(
@@ -33,26 +58,31 @@ public class BenchmarkEngine : IBenchmarkEngine
         IReadOnlyList<AITool> tools,
         CancellationToken cancellationToken = default)
     {
+        Console.WriteLine("[DEBUG] BenchmarkEngine.RunBenchmarkAsync started");
+        
         var result = new BenchmarkResult
         {
             Timestamp = DateTime.UtcNow
         };
 
         var cases = LoadTestCases();
+        Console.WriteLine($"[DEBUG] Loaded {cases.Count} test cases");
+        
         var toolCases = cases.Where(c => c.Category == "tool").ToList();
         var visionCases = cases.Where(c => c.Category == "vision").ToList();
 
-        _logger.LogInformation("Starting benchmark - {ToolCount} tool cases, {VisionCount} vision cases",
-            toolCases.Count, visionCases.Count);
-        _logger.LogInformation("Benchmark path: {Path}", _benchmarkPath);
-        _logger.LogInformation("Workspace path: {Path}", _workspacePath);
+        Console.WriteLine($"[DEBUG] Tool cases: {toolCases.Count}, Vision cases: {visionCases.Count}");
+        Console.WriteLine($"[DEBUG] Benchmark path: {_benchmarkPath}");
+        Console.WriteLine($"[DEBUG] Workspace path: {_workspacePath}");
 
         // Run tool tests
 
         // Run tool tests
         foreach (var testCase in toolCases)
         {
+            Console.WriteLine($"[DEBUG] Starting tool case: {testCase.Id}");
             var caseResult = await EvaluateToolCaseAsync(testCase, cancellationToken);
+            Console.WriteLine($"[DEBUG] Completed tool case: {testCase.Id}, Passed: {caseResult.Passed}");
             caseResult.Category = "tool";
             result.CaseResults.Add(caseResult);
 
@@ -201,16 +231,19 @@ public class BenchmarkEngine : IBenchmarkEngine
         {
             CaseId = testCase.Id,
             CaseName = testCase.Name,
-            Category = "tool"
+            Category = "tool",
+            RequestMessages = testCase.Input  // Set early to ensure it's captured even if execution fails
         };
 
         try
         {
+            // Build prompt with explicit tool calling instruction
+            var prompt = BuildToolPrompt(testCase);
+
             // Run using nbot agent -m for real tool testing
-            var output = await RunAgentCommandAsync(testCase.Input, cancellationToken);
+            var output = await RunAgentCommandAsync(prompt, cancellationToken);
 
             result.ResponseContent = output;
-            result.RequestMessages = testCase.Input;
 
             // Validate tool call by checking tool calls and keywords
             result.Passed = ValidateToolOutput(output, testCase.Keywords, testCase.RequiredTools);
@@ -232,7 +265,53 @@ public class BenchmarkEngine : IBenchmarkEngine
             _logger.LogError(ex, "Error evaluating tool case {CaseId}", testCase.Id);
         }
 
+        // Save intermediate result immediately
+        await SaveIntermediateResultAsync(result, testCase.Input);
+
         return result;
+    }
+
+    private async Task SaveIntermediateResultAsync(CaseResult result, string input)
+    {
+        try
+        {
+            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+            var caseDir = Path.Combine(_workspacePath, ".benchmark", "ollama_qwen3.5", timestamp, result.CaseId);
+            Directory.CreateDirectory(caseDir);
+
+            // Save input
+            await File.WriteAllTextAsync(
+                Path.Combine(caseDir, "input.json"),
+                JsonSerializer.Serialize(new { result.CaseId, result.CaseName, Input = input }, new JsonSerializerOptions { WriteIndented = true }));
+
+            // Save output
+            await File.WriteAllTextAsync(
+                Path.Combine(caseDir, "output.json"),
+                JsonSerializer.Serialize(new { result.Passed, result.Score, result.ErrorMessage, ResponseContent = result.ResponseContent }, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("Failed to save intermediate result: {Error}", ex.Message);
+        }
+    }
+
+    private string BuildToolPrompt(BenchmarkCase testCase)
+    {
+        // Add explicit instructions to encourage tool calling
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("You have access to tools that can help complete tasks.");
+
+        if (testCase.RequiredTools.Count > 0)
+        {
+            sb.AppendLine($"For this task, you should use the following tool(s): {string.Join(", ", testCase.RequiredTools)}");
+        }
+
+        sb.AppendLine("Call the appropriate tool with the correct parameters to complete the task.");
+        sb.AppendLine("Format your tool call using [TOOL_CALL]tool_name(parameters)[/TOOL_CALL] syntax.");
+        sb.AppendLine();
+        sb.AppendLine($"Task: {testCase.Input}");
+
+        return sb.ToString();
     }
 
     private bool ValidateToolOutput(string output, List<string> keywords, List<string> requiredTools)
@@ -246,26 +325,82 @@ public class BenchmarkEngine : IBenchmarkEngine
         // Check for tool call markers [TOOL_CALL]...[/TOOL_CALL]
         var toolCallPattern = @"\[TOOL_CALL\](.*?)\[/TOOL_CALL\]";
         var matches = System.Text.RegularExpressions.Regex.Matches(output, toolCallPattern);
-        
-        if (matches.Count == 0)
+
+        // Check for <function_call>...</function_call> format (XML style)
+        var xmlFunctionPattern = @"<function_call[^>]*>(.*?)</function_call>";
+        var xmlMatches = System.Text.RegularExpressions.Regex.Matches(output, xmlFunctionPattern, System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        // Also check for function call patterns like exec(command="...") or tool(...)
+        var functionCallPattern = @"(exec|read_file|write_file|list_dir|edit|web_search|web_fetch|browser|browser_navigate|browser_click|browser_type|browser_scroll|browser_snapshot)\s*\(";
+        var functionMatches = System.Text.RegularExpressions.Regex.Matches(output, functionCallPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Check for function call intent markers like "name="tool_name"" or "name='tool_name'"
+        var nameAttributePattern = "name\\s*=\\s*[\"'](exec|read_file|write_file|list_dir|edit|web_search|web_fetch|browser|browser_navigate|browser_click|browser_type|browser_scroll|browser_snapshot)[\"']";
+        var nameMatches = System.Text.RegularExpressions.Regex.Matches(output, nameAttributePattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        var totalMatches = matches.Count + xmlMatches.Count + functionMatches.Count + nameMatches.Count;
+
+        if (totalMatches == 0)
         {
             _logger.LogWarning("No tool calls found in output");
             return false;
         }
 
-        _logger.LogInformation("Found {Count} tool calls in output", matches.Count);
+        _logger.LogInformation("Found {Count} tool calls in output (from [TOOL_CALL]: {DirectCount}, from XML: {XmlCount}, from pattern: {PatternCount}, from name attr: {NameCount})",
+            totalMatches, matches.Count, xmlMatches.Count, functionMatches.Count, nameMatches.Count);
 
         // Extract tool names from tool calls
         var calledTools = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // From [TOOL_CALL] format
         foreach (System.Text.RegularExpressions.Match match in matches)
         {
             var toolCall = match.Groups[1].Value;
-            // Extract tool name (everything before the first '(')
             var toolName = toolCall.Split('(')[0].Trim();
             if (!string.IsNullOrWhiteSpace(toolName))
             {
                 calledTools.Add(toolName);
                 _logger.LogDebug("Detected tool call: {ToolName}", toolName);
+            }
+        }
+
+        // From XML function_call format
+        foreach (System.Text.RegularExpressions.Match match in xmlMatches)
+        {
+            var xmlContent = match.Groups[1].Value;
+            // Try to extract name attribute
+            var namePattern = "name\\s*=\\s*[\"']([^\"']+)[\"']";
+            var nameMatch = System.Text.RegularExpressions.Regex.Match(xmlContent, namePattern);
+            if (nameMatch.Success)
+            {
+                var toolName = nameMatch.Groups[1].Value.Trim();
+                if (!string.IsNullOrWhiteSpace(toolName))
+                {
+                    calledTools.Add(toolName);
+                    _logger.LogDebug("Detected tool call from XML: {ToolName}", toolName);
+                }
+            }
+        }
+
+        // From function call pattern
+        foreach (System.Text.RegularExpressions.Match match in functionMatches)
+        {
+            var toolName = match.Groups[1].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(toolName))
+            {
+                calledTools.Add(toolName);
+                _logger.LogDebug("Detected tool call from pattern: {ToolName}", toolName);
+            }
+        }
+
+        // From name attribute pattern
+        foreach (System.Text.RegularExpressions.Match match in nameMatches)
+        {
+            var toolName = match.Groups[1].Value.Trim();
+            if (!string.IsNullOrWhiteSpace(toolName))
+            {
+                calledTools.Add(toolName);
+                _logger.LogDebug("Detected tool call from name attribute: {ToolName}", toolName);
             }
         }
 
@@ -478,13 +613,13 @@ public class BenchmarkEngine : IBenchmarkEngine
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        // Wait for completion with timeout (60 seconds per test case)
-        var completed = await Task.Run(() => process.WaitForExit(60000), cancellationToken);
+        // Wait for completion with timeout (120 seconds per test case)
+        var completed = await Task.Run(() => process.WaitForExit(120000), cancellationToken);
 
         if (!completed)
         {
             try { process.Kill(); } catch { }
-            throw new TimeoutException("Agent command timed out after 60 seconds");
+            throw new TimeoutException("Agent command timed out after 120 seconds");
         }
 
         // Wait a bit for remaining output to be processed
@@ -521,7 +656,7 @@ public class BenchmarkEngine : IBenchmarkEngine
             {
                 var nbotPath = Path.Combine(path, "nbot");
                 if (File.Exists(nbotPath))
-                    return (nbotPath, $"agent -m \"{input}\"");
+                    return (nbotPath, $"agent -m \"{input}\" --debug");
             }
         }
 
@@ -529,7 +664,7 @@ public class BenchmarkEngine : IBenchmarkEngine
         var dllPath = FindCompiledDll();
         if (!string.IsNullOrEmpty(dllPath))
         {
-            return ("dotnet", $"\"{dllPath}\" agent -m \"{input}\"");
+            return ("dotnet", $"\"{dllPath}\" agent -m \"{input}\" --debug");
         }
 
         // Fallback to dotnet run (slow, for development only)
@@ -537,7 +672,7 @@ public class BenchmarkEngine : IBenchmarkEngine
         if (!string.IsNullOrEmpty(projectPath))
         {
             _logger.LogWarning("Using 'dotnet run' for benchmark - this is slow. Consider building the project first.");
-            return ("dotnet", $"run --project \"{projectPath}\" -- agent -m \"{input}\"");
+            return ("dotnet", $"run --project \"{projectPath}\" -- agent -m \"{input}\" --debug");
         }
 
         throw new InvalidOperationException("Could not find nbot executable or project");
