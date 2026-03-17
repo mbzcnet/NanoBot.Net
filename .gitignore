@@ -5,6 +5,9 @@ bin/
 obj/
 [Dd]ebug/
 [Rr]elease/
+
+## Keep NanoBot.Core/Debug source directory
+!src/NanoBot.Core/Debug/
 x64/
 x86/
 [Aa][Rr][Mm]/
@@ -64,11 +67,14 @@ $RECYCLE.BIN/
 *.user
 *.userprefs
 
-## Build results
+## Build results (excluding source code directories)
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+
+## Keep NanoBot.Core/Debug source directory
+!src/NanoBot.Core/Debug/
 x64/
 x86/
 build/
