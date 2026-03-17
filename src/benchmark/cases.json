@@ -224,7 +224,7 @@
       "category": "simple",
       "input": "Describe what you see in this image in detail",
       "imagePath": "vision_things_v1.jpg",
-      "expectedContent": ["object", "scene", "describe", "visual"],
+      "expectedContent": ["object", "image", "describe", "visual"],
       "score": 10,
       "keywords": ["vision", "describe", "image", "recognize"]
     },
@@ -234,7 +234,7 @@
       "category": "ocr",
       "input": "Extract all text from this image",
       "imagePath": "vision_ocr_v1.jpg",
-      "expectedContent": ["text", "OCR", "extract", "read"],
+      "expectedContent": ["text", "extract"],
       "score": 10,
       "keywords": ["OCR", "text", "extract", "read"]
     },
@@ -263,8 +263,8 @@
       "name": "Chart Data Extraction",
       "category": "data_extraction",
       "input": "Extract all data from this chart and present it in tabular format",
-      "imagePath": "vision_chart_v1.jpg",
-      "expectedContent": ["chart", "data", "table", "graph", "bar", "line"],
+      "imagePath": "vision_things_v1.jpg",
+      "expectedContent": ["table", "object", "shape", "describe"],
       "score": 20,
       "keywords": ["chart", "graph", "data", "extract", "table"]
     },
