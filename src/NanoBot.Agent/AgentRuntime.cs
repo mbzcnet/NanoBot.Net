@@ -266,7 +266,6 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         sw.Restart();
         var userMessage = BuildUserMessage(content);
         userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
-        _logger?.LogInformation("[DEBUG] Created user message with content length: {Length}, source type: External", content.Length);
         _logger?.LogInformation("[TIMING] Create user message: {ElapsedMs}ms", sw.ElapsedMilliseconds);
 
         // 自动提取标题：如果是第一条用户消息，使用消息内容作为标题
@@ -1549,15 +1548,15 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         sb.AppendLine("```");
         sb.AppendLine();
 
-        // Get tools from agent's ChatOptions
+        // Get tools from FunctionInvokingChatClient.AdditionalTools
         var chatClient = agent.GetChatClient();
         if (chatClient != null)
         {
-            var reflectionField = chatClient.GetType().GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (reflectionField?.GetValue(chatClient) is Microsoft.Extensions.AI.ChatOptions chatOptions && chatOptions.Tools != null)
+            var functionInvoker = chatClient.GetService<FunctionInvokingChatClient>();
+            if (functionInvoker?.AdditionalTools != null && functionInvoker.AdditionalTools.Count > 0)
             {
                 sb.AppendLine("### Tools");
-                foreach (var tool in chatOptions.Tools)
+                foreach (var tool in functionInvoker.AdditionalTools)
                 {
                     var toolName = tool.Name ?? "unknown";
                     var toolDesc = tool.Description ?? "";

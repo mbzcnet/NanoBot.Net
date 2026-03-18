@@ -1,12 +1,14 @@
 # 2026-03-18
 
 - **修复工具调用失败问题**（关键修复）：
-  - 问题：非流式处理路径（`ProcessDirectAsync`）中工具调用成功，但响应为空
-  - 根本原因：`AgentRuntime.ProcessMessageAsync` 第 564 行使用 `response.Messages.FirstOrDefault()?.Text` 只取第一条消息的文本
-  - 当第一条消息是工具调用消息（只包含 `FunctionCallContent`）时，`.Text` 为 null
-  - 修复：使用 `response.Text` 代替，它会正确连接所有消息的文本内容
-  - 新增诊断测试：`ToolCallingDiagnosticTests`、`NanoBotAgentDiagnosticTests`、`AgentRuntimeDiagnosticTests`
-  - 验证：所有工具调用测试通过，CLI 工具调用恢复正常
+  - 问题：CLI 的 `agent -m` 命令不进行实际工具调用，LLM 输出文本格式的工具描述
+  - 根本原因 1：`CompositeAIContextProvider` 返回 `Tools = context.AIContext.Tools` 导致工具被合并两次（AIContextProvider 框架会合并 input 和 provided 的 tools）
+  - 根本原因 2：指令太长（9454 字符）导致 qwen3.5:4b 模型无法正确进行工具调用
+  - 修复：
+    1. `CompositeAIContextProvider.ProvideAIContextAsync` 返回 `Tools = null`，避免重复
+    2. 在 `ChatOptions.Tools` 中设置工具（`AdditionalTools` 只用于本地调用，不发送给 LLM）
+    3. 简化 `AGENTS.md` 指令，确保模型能正确理解工具使用场景
+  - 验证：所有工具调用测试通过（8/8），CLI 工具调用正常工作
 
 - 优化会话存储冗余：
   - 移除 metadata 行中的 `serializedSession` 存储，避免消息重复存储

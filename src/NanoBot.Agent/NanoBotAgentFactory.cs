@@ -50,6 +50,7 @@ public static class NanoBotAgentFactory
                 maxInstructionChars)
         };
 
+        var toolList = tools?.ToList();
         var agentOptions = new ChatClientAgentOptions
         {
             Name = options?.Name ?? "NanoBot",
@@ -57,7 +58,7 @@ public static class NanoBotAgentFactory
             ChatOptions = new ChatOptions
             {
                 Instructions = instructions,
-                Tools = tools?.ToList()
+                Tools = toolList
             },
             ChatHistoryProvider = compositeProvider,
             AIContextProviders = aiContextProviders
@@ -182,18 +183,6 @@ internal class CompositeAIContextProvider : AIContextProvider
         InvokingContext context,
         CancellationToken cancellationToken)
     {
-        var inputMessages = context.AIContext.Messages?.ToList();
-        var inputMessageCount = inputMessages?.Count ?? 0;
-        _logger?.LogInformation("[DEBUG] CompositeAIContextProvider.ProvideAIContextAsync - Input messages: {Count}", inputMessageCount);
-        if (inputMessages != null)
-        {
-            foreach (var msg in inputMessages)
-            {
-                var preview = msg.Text?.Length > 50 ? msg.Text[..50] + "..." : msg.Text;
-                _logger?.LogInformation("[DEBUG]   - Message: role={Role}, text={Text}", msg.Role, preview);
-            }
-        }
-        
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var instructions = new StringBuilder();
 
@@ -226,8 +215,6 @@ internal class CompositeAIContextProvider : AIContextProvider
             instructions.AppendLine(skillsContext.Instructions);
         }
 
-        // Append current time as dynamic context (after stable base instructions,
-        // so Ollama can cache the KV state for the prefix)
         var now = DateTime.Now;
         var tz = TimeZoneInfo.Local;
         instructions.AppendLine($"\n## Current Time\n{now:yyyy-MM-dd HH:mm (dddd)} ({tz.DisplayName})");
@@ -252,9 +239,8 @@ internal class CompositeAIContextProvider : AIContextProvider
         return new AIContext
         {
             Instructions = result.Length > 0 ? result : null,
-            // Don't return Messages or Tools - the base class will merge them automatically
             Messages = null,
-            Tools = null
+            Tools = null  // Return null to avoid duplicating tools - the input tools will be used unchanged
         };
     }
 

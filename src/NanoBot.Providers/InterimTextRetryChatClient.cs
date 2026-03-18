@@ -113,7 +113,6 @@ public sealed class InterimTextRetryChatClient : IInterimTextRetryChatClient, ID
             "[PROMPT] {Method}: {MsgCount} messages ({MsgChars} chars) + instructions ({InstrChars} chars) + {ToolCount} tools = ~{TotalChars} total chars",
             method, messages.Count, messageChars, instructionChars, toolCount, totalChars);
 
-        // Log per-message breakdown for diagnosis
         foreach (var msg in messages)
         {
             var len = msg.Text?.Length ?? 0;
