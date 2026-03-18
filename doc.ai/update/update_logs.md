@@ -1,3 +1,42 @@
+# 2026-03-18
+
+- **修复工具调用失败问题**（关键修复）：
+  - 问题：非流式处理路径（`ProcessDirectAsync`）中工具调用成功，但响应为空
+  - 根本原因：`AgentRuntime.ProcessMessageAsync` 第 564 行使用 `response.Messages.FirstOrDefault()?.Text` 只取第一条消息的文本
+  - 当第一条消息是工具调用消息（只包含 `FunctionCallContent`）时，`.Text` 为 null
+  - 修复：使用 `response.Text` 代替，它会正确连接所有消息的文本内容
+  - 新增诊断测试：`ToolCallingDiagnosticTests`、`NanoBotAgentDiagnosticTests`、`AgentRuntimeDiagnosticTests`
+  - 验证：所有工具调用测试通过，CLI 工具调用恢复正常
+
+- 优化会话存储冗余：
+  - 移除 metadata 行中的 `serializedSession` 存储，避免消息重复存储
+  - metadata 行现在只包含元数据：`key`, `created_at`, `updated_at`, `title`, `profile_id`, `last_consolidated`
+  - 消息只存储在普通 JSONL 行中
+  - 简化读取逻辑：`GetMessagesAsync` 直接使用 `ReadMessagesFromJsonLines`，移除 `TryReadMessagesFromMetadata` 的消息读取逻辑
+  - SessionManager 测试全部通过 (15/15)
+
+# 2026-03-17
+
+- 为 CLI agent 模式添加 `/model` 命令：
+  - `/model` - 查看当前模型配置（Profile、Provider、Model、API Base）
+  - `/model <profile-name>` - 切换到已配置的 profile
+  - `/model <provider>/<model>` - 切换到特定模型（如 `/model openai/gpt-4o`）
+  - `/model <model-name>` - 按模型名称模糊匹配
+  - 显示可用 profiles 列表（当配置了多个 profiles 时）
+  - 自动保存配置到 config.json
+  - 注意：模型切换后需要重启 agent 才能生效
+
+- 为 CLI agent 模式添加常用命令：
+  - `/help`, `/?` - 显示帮助信息，列出所有可用命令
+  - `/bye`, `/q` - 退出命令的快捷方式
+  - 改进欢迎信息，提示用户使用 `/help` 查看命令
+  - 美化的帮助信息输出（使用边框格式）
+
+- 优化 `/model` 命令：
+  - 支持数字快捷选择：`/model 1` 切换到第一个 profile
+  - 模型切换立即生效，无需手动重启 agent
+  - 显示 profiles 列表时带有编号 [1], [2], [3] 等
+
 # 2026-03-15
 
 - 统一 ValidationResult 类型：

@@ -330,6 +330,14 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             requestId = await _debugState.StartRequestLogAsync(sessionKey, cancellationToken);
         }
 
+        // Accumulate response content for debug logging (only current request)
+        var responseContentBuilder = new StringBuilder();
+
+        // Timing tracking for debug logging
+        var requestTime = DateTime.UtcNow;
+        DateTime? responseStartTime = null;
+        DateTime? responseEndTime = null;
+
         try
         {
             // Build LLM request info for debugging
@@ -351,6 +359,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 if (!firstChunkReceived)
                 {
                     firstChunkReceived = true;
+                    responseStartTime = DateTime.UtcNow;
                     _logger?.LogInformation("[TIMING] ★★★ FIRST CHUNK from agent.RunStreamingAsync: {ElapsedMs}ms ★★★", swInner.ElapsedMilliseconds);
                 }
                 else
@@ -425,17 +434,51 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     yield return imageUpdate;
                 }
 
+                // Accumulate response text for debug logging (only current request)
+                if (!string.IsNullOrEmpty(update.Text))
+                {
+                    responseContentBuilder.Append(update.Text);
+                }
+
+                // Accumulate tool calls for debug logging
+                foreach (var call in functionCalls)
+                {
+                    var argsStr = call.Arguments != null ? JsonSerializer.Serialize(call.Arguments) : "{}";
+                    responseContentBuilder.AppendLine($"```\nact tool call {call.Name}\ncommand: {argsStr}\n```");
+                    responseContentBuilder.AppendLine();
+                }
+
                 swInner.Restart();
                 yield return update;
             }
+
+            responseEndTime = DateTime.UtcNow;
 
             // Debug logging: Log final LLM response after streaming completes
             if (requestId > 0)
             {
                 try
                 {
-                    var responseContent = CollectResponseContent(session);
-                    await _debugState!.AppendToLogAsync(sessionKey, requestId, "\n---\n\n## OUT - LLM Response\n\n" + responseContent, cancellationToken);
+                    var responseContent = responseContentBuilder.ToString();
+                    var timingInfo = new StringBuilder();
+                    timingInfo.AppendLine("\n---\n");
+                    timingInfo.AppendLine("## OUT - LLM Response");
+                    timingInfo.AppendLine();
+                    timingInfo.AppendLine("### Timing");
+                    timingInfo.AppendLine($"- **Request Time**: {requestTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                    timingInfo.AppendLine($"- **Response Start**: {(responseStartTime.HasValue ? responseStartTime.Value.ToString("yyyy-MM-dd HH:mm:ss.fff") : "N/A")} UTC");
+                    timingInfo.AppendLine($"- **Response End**: {responseEndTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
+                    if (responseStartTime.HasValue && responseEndTime.HasValue)
+                    {
+                        var duration = responseEndTime.Value - responseStartTime.Value;
+                        timingInfo.AppendLine($"- **Duration**: {duration.TotalMilliseconds:F0}ms");
+                    }
+                    timingInfo.AppendLine();
+                    timingInfo.AppendLine("### Content");
+                    timingInfo.AppendLine();
+                    timingInfo.AppendLine(responseContent);
+                    
+                    await _debugState!.AppendToLogAsync(sessionKey, requestId, timingInfo.ToString(), cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -518,7 +561,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             sessionCts.Dispose();
         }
 
-        var responseText = response.Messages.FirstOrDefault()?.Text ?? "I've completed processing but have no response to give.";
+        var responseText = response.Text;
+        if (string.IsNullOrWhiteSpace(responseText))
+        {
+            responseText = "I've completed processing but have no response to give.";
+        }
         var snapshotImageMarkdown = BuildSnapshotImageMarkdown(response.Messages.SelectMany(m => m.Contents));
         if (!string.IsNullOrWhiteSpace(snapshotImageMarkdown))
         {
@@ -1522,8 +1569,8 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         // Build messages
         sb.AppendLine("### Messages");
-        sb.AppendLine("| Role | Content |");
-        sb.AppendLine("|------|---------|");
+        sb.AppendLine("| Time | Role | Content |");
+        sb.AppendLine("|------|------|---------|");
 
         foreach (var msg in session.GetAllMessages())
         {
@@ -1538,12 +1585,15 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 functionSummary = " [tool_calls: " + string.Join(", ", functionCalls.Select(f => f.Name ?? "?")) + "]";
             }
 
-            sb.AppendLine($"| {role} | {EscapeForMarkdown(text)}{functionSummary} |");
+            // Use current UTC time as timestamp since ChatMessage doesn't have timestamp
+            var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+            sb.AppendLine($"| {timestamp} | {role} | {EscapeForMarkdown(text)}{functionSummary} |");
         }
 
         var userText = TruncateForDebug(userMessage.Text, 200);
         var userHasFunctionCalls = userMessage.Contents.Any(c => c is FunctionCallContent);
-        sb.AppendLine($"| user | {EscapeForMarkdown(userText)}{(userHasFunctionCalls ? " [tool_calls]" : "")} |");
+        var userTimestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
+        sb.AppendLine($"| {userTimestamp} | user | {EscapeForMarkdown(userText)}{(userHasFunctionCalls ? " [tool_calls]" : "")} |");
 
         await _debugState!.AppendToLogAsync(sessionKey, requestId, sb.ToString(), cancellationToken);
     }

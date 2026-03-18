@@ -213,18 +213,7 @@ public class SessionService : ISessionService
                 return new List<MessageInfo>();
 
             var lines = await File.ReadAllLinesAsync(sessionFile);
-            var messagesList = new List<MessageInfo>();
-
-            if (lines.Length > 0 &&
-                TryReadMessagesFromMetadata(lines[0], sessionId, out var metadataMessages) &&
-                metadataMessages.Count > 0)
-            {
-                messagesList = metadataMessages;
-            }
-            else
-            {
-                messagesList = ReadMessagesFromJsonLines(lines, sessionId);
-            }
+            var messagesList = ReadMessagesFromJsonLines(lines, sessionId);
 
             return ConsolidateMessages(messagesList);
         }

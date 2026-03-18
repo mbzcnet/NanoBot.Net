@@ -133,10 +133,9 @@ public sealed class SessionManager : ISessionManager
 
         try
         {
-            var serializedSession = await _agent.SerializeSessionAsync(session, cancellationToken: cancellationToken);
             var allMessages = GetAllMessages(session);
 
-            var metadata = await BuildMetadataLineAsync(sessionKey, sessionFile, serializedSession, cancellationToken);
+            var metadata = await BuildMetadataLineAsync(sessionKey, sessionFile, cancellationToken);
 
             await using var fs = new FileStream(sessionFile, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var writer = new StreamWriter(fs);
@@ -422,7 +421,6 @@ public sealed class SessionManager : ISessionManager
     private async Task<string> BuildMetadataLineAsync(
         string sessionKey,
         string sessionFile,
-        JsonElement serializedSession,
         CancellationToken cancellationToken)
     {
         var createdAt = DateTimeOffset.Now;
@@ -468,11 +466,6 @@ public sealed class SessionManager : ISessionManager
         var title = GetSessionTitle(sessionKey) ?? existingTitle;
         var profileId = GetSessionProfileId(sessionKey) ?? existingProfileId;
 
-        var metaObj = new JsonObject
-        {
-            ["agent_session"] = JsonNode.Parse(serializedSession.GetRawText())
-        };
-
         var metadataLine = new JsonObject
         {
             ["_type"] = "metadata",
@@ -481,7 +474,6 @@ public sealed class SessionManager : ISessionManager
             ["updated_at"] = DateTimeOffset.Now.ToString("o"),
             ["title"] = title,
             ["profile_id"] = profileId,
-            ["metadata"] = metaObj,
             ["last_consolidated"] = lastConsolidated
         };
 
@@ -554,13 +546,9 @@ public sealed class SessionManager : ISessionManager
             }
         }
         
-        // 如果有 tool_calls，从 content 中移除 [TOOL_CALL] 标记
-        // 因为这些标记是展示用的，不应该保存到会话历史中
-        // 否则会导致模型误判，放弃真正的工具调用
-        if (hasToolCalls && !string.IsNullOrEmpty(content))
-        {
-            content = RemoveToolCallMarkers(content);
-        }
+        // 保留原始消息内容，不做任何转换
+        // 注意：tool_calls 的信息已经保存在上面的 toolCalls JSON 数组中
+        // content 字段用于纯文本展示，但不应影响工具调用的实际功能
         
         content ??= string.Empty;
         List<SessionImageMetadata>? sessionImages = null;
