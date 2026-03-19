@@ -5,6 +5,7 @@ using NanoBot.Core.Configuration;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Tools.Rpa;
 using NanoBot.Tools.BuiltIn;
 using NanoBot.Tools.Mcp;
 
@@ -25,6 +26,7 @@ public static class ToolProvider
         var cronService = services.GetService<ICronService>();
         var subagentManager = services.GetService<ISubagentManager>();
         var browserService = services.GetService<IBrowserService>();
+        var rpaService = services.GetService<IRpaService>();
         var httpClientFactory = services.GetService<IHttpClientFactory>();
         var mcpClient = services.GetService<IMcpClient>();
         var config = services.GetService<AgentConfig>();
@@ -56,6 +58,12 @@ public static class ToolProvider
         if (browserEnabled)
         {
             tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService));
+        }
+
+        // Only add RPA tools if explicitly enabled in config
+        if (config?.Rpa?.Enabled == true && rpaService != null)
+        {
+            tools.Add(BuiltIn.Rpa.RpaTools.CreateRpaTool(rpaService));
         }
 
         tools.Add(BuiltIn.MessageTools.CreateMessageTool(messageBus, defaultChannel, defaultChatId));

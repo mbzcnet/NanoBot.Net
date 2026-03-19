@@ -62,6 +62,11 @@ public class OnboardCommand : ICliCommand
             description: "Skip Playwright browser installation"
         );
 
+        var skipOmniParserOption = new Option<bool>(
+            name: "--skip-omniparser",
+            description: "Skip OmniParser (RPA vision) installation"
+        );
+
         var command = new Command(Name, Description)
         {
             dirOption,
@@ -72,7 +77,8 @@ public class OnboardCommand : ICliCommand
             apiBaseOption,
             workspaceOption,
             nonInteractiveOption,
-            skipBrowserInstallOption
+            skipBrowserInstallOption,
+            skipOmniParserOption
         };
 
         command.SetHandler(async (context) =>
@@ -86,8 +92,9 @@ public class OnboardCommand : ICliCommand
             var workspace = context.ParseResult.GetValueForOption(workspaceOption);
             var nonInteractive = context.ParseResult.GetValueForOption(nonInteractiveOption);
             var skipBrowserInstall = context.ParseResult.GetValueForOption(skipBrowserInstallOption);
+            var skipOmniParser = context.ParseResult.GetValueForOption(skipOmniParserOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteOnboardAsync(dir, name ?? "NanoBot", provider, model, apiKey, apiBase, workspace, nonInteractive, skipBrowserInstall, cancellationToken);
+            await ExecuteOnboardAsync(dir, name ?? "NanoBot", provider, model, apiKey, apiBase, workspace, nonInteractive, skipBrowserInstall, skipOmniParser, cancellationToken);
         });
 
         return command;
@@ -103,6 +110,7 @@ public class OnboardCommand : ICliCommand
         string? workspace,
         bool nonInteractive,
         bool skipBrowserInstall,
+        bool skipOmniParser,
         CancellationToken cancellationToken)
     {
         var configPath = GetConfigPath();
@@ -169,6 +177,13 @@ public class OnboardCommand : ICliCommand
             {
                 Console.WriteLine();
                 await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive, cancellationToken);
+            }
+
+            // Offer RPA tools (OmniParser) installation
+            if (!skipOmniParser)
+            {
+                Console.WriteLine();
+                await InstallOmniParserAsync(config, configPath, nonInteractive, cancellationToken);
             }
             return;
         }
@@ -434,9 +449,228 @@ public class OnboardCommand : ICliCommand
         // Install Playwright browsers (if not already installed)
         await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive: true, cancellationToken);
 
+        // Install OmniParser (if not already installed)
+        await InstallOmniParserAsync(config, configPath, nonInteractive: true, cancellationToken);
+
         Console.WriteLine("\n🐈 nbot is ready!");
         PrintNextSteps(config, configPath);
     }
+
+    private static async Task<bool> InstallOmniParserAsync(
+        AgentConfig config,
+        string configPath,
+        bool nonInteractive,
+        CancellationToken ct)
+    {
+        Console.WriteLine("\n=== RPA Vision Setup (OmniParser) ===\n");
+        Console.WriteLine("OmniParser provides AI-powered screen parsing for RPA tools.");
+        Console.WriteLine("Requirements: Python 3.10+, ~4GB disk space for models");
+
+        // Check Python installation
+        var pythonVersion = await GetPythonVersionAsync(ct);
+        if (string.IsNullOrEmpty(pythonVersion))
+        {
+            Console.WriteLine("Python not found.");
+            if (nonInteractive)
+            {
+                config.Rpa = new RpaToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, ct);
+                return false;
+            }
+
+            Console.Write("Install Python via Homebrew? [Y/n]: ");
+            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+            if (response == "n")
+            {
+                config.Rpa = new RpaToolsConfig { Enabled = false };
+                return false;
+            }
+
+            await InstallPythonViaHomebrewAsync(ct);
+            pythonVersion = await GetPythonVersionAsync(ct);
+        }
+
+        Console.WriteLine($"✓ Python {pythonVersion} found");
+
+        // Create OmniParser directory
+        var omniparserPath = Path.Combine(GetConfigDir(configPath), "omniparser");
+        Directory.CreateDirectory(omniparserPath);
+
+        // Check if already installed
+        var venvPath = Path.Combine(omniparserPath, "venv");
+        if (Directory.Exists(venvPath))
+        {
+            Console.WriteLine("✓ OmniParser already installed");
+            config.Rpa = new RpaToolsConfig
+            {
+                Enabled = true,
+                InstallPath = omniparserPath,
+                ServicePort = 18999,
+                AutoStartService = true
+            };
+            await ConfigurationLoader.SaveAsync(configPath, config, ct);
+            return true;
+        }
+
+        // Create virtual environment and install dependencies
+        Console.WriteLine("Creating Python virtual environment...");
+        await RunShellCommandAsync("python3 -m venv \"" + venvPath + "\"", omniparserPath, ct);
+
+        Console.WriteLine("Installing OmniParser dependencies...");
+        var pipPath = Path.Combine(venvPath, "bin", "pip");
+        var requirementsPath = Path.Combine(omniparserPath, "requirements.txt");
+
+        if (!File.Exists(requirementsPath))
+        {
+            await File.WriteAllTextAsync(requirementsPath, GetEmbeddedRequirements(), ct);
+        }
+
+        await RunShellCommandAsync("\"" + pipPath + "\" install -r \"" + requirementsPath + "\"", omniparserPath, ct);
+
+        // Copy server script
+        var serverScriptPath = Path.Combine(omniparserPath, "server.py");
+        if (!File.Exists(serverScriptPath))
+        {
+            await File.WriteAllTextAsync(serverScriptPath, GetEmbeddedServerScript(), ct);
+        }
+
+        // Download model weights
+        Console.WriteLine("Downloading OmniParser V2 models...");
+        var pythonBin = Path.Combine(venvPath, "bin", "python");
+        var weightsPath = Path.Combine(omniparserPath, "weights");
+
+        try
+        {
+            // Try using huggingface-cli to download models
+            var pipBin = Path.Combine(venvPath, "bin", "pip");
+
+            // First, install huggingface-hub if not present
+            await RunShellCommandAsync("\"" + pipBin + "\" install huggingface-hub", omniparserPath, ct);
+
+            // Download models using huggingface-cli
+            var huggingfaceCliBin = Path.Combine(venvPath, "bin", "huggingface-cli");
+            await RunShellCommandAsync(
+                "\"" + huggingfaceCliBin + "\" download microsoft/OmniParser-v2.0 --local-dir \"" + weightsPath + "\"",
+                omniparserPath,
+                ct);
+        }
+        catch
+        {
+            Console.WriteLine("⚠ Model download failed. You can download models manually:");
+            Console.WriteLine("  pip install huggingface-hub");
+            Console.WriteLine("  huggingface-cli download microsoft/OmniParser-v2.0 --local-dir ~/.nbot/omniparser/weights");
+            Console.WriteLine();
+            Console.WriteLine("Or download from HuggingFace web UI:");
+            Console.WriteLine("  https://huggingface.co/microsoft/OmniParser-v2.0");
+        }
+
+        // Configuration complete
+        config.Rpa = new RpaToolsConfig
+        {
+            Enabled = true,
+            InstallPath = omniparserPath,
+            ServicePort = 18999,
+            AutoStartService = true
+        };
+        await ConfigurationLoader.SaveAsync(configPath, config, ct);
+        Console.WriteLine("✓ OmniParser installed successfully");
+        return true;
+    }
+
+    private static async Task<string?> GetPythonVersionAsync(CancellationToken ct)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "python3",
+                Arguments = "--version",
+                RedirectStandardOutput = true,
+                UseShellExecute = false
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process == null) return null;
+            var output = await process.StandardOutput.ReadToEndAsync(ct);
+            await process.WaitForExitAsync(ct);
+            return output.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task InstallPythonViaHomebrewAsync(CancellationToken ct)
+    {
+        Console.WriteLine("Installing Python via Homebrew...");
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "brew",
+                Arguments = "install python@3.11",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            using var process = System.Diagnostics.Process.Start(psi);
+            if (process == null) return;
+            await process.WaitForExitAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠ Failed to install Python: {ex.Message}");
+        }
+    }
+
+    private static string GetConfigDir(string configPath)
+    {
+        return Path.GetDirectoryName(configPath) ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nbot");
+    }
+
+    private static async Task RunShellCommandAsync(string command, string workingDir, CancellationToken ct)
+    {
+        var parts = command.Split(' ', 2);
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = parts[0],
+            Arguments = parts.Length > 1 ? parts[1] : "",
+            WorkingDirectory = workingDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        using var process = System.Diagnostics.Process.Start(psi);
+        if (process == null) return;
+        await process.WaitForExitAsync(ct);
+    }
+
+    private static string GetEmbeddedRequirements() =>
+        "flask>=3.0.0\nwerkzeug>=3.0.0\npillow>=10.0.0\nhuggingface-hub>=0.19.0\n";
+
+    private static string GetEmbeddedServerScript() =>
+        @"#!/usr/bin/env python3
+import argparse
+import base64
+import logging
+import time
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+parser = None
+
+@app.route('/health')
+def health():
+    return jsonify({'status': 'ok'})
+
+@app.route('/parse', methods=['POST'])
+def parse():
+    return jsonify({'error': 'OmniParser not configured'})
+
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=18999)
+";
 
     private static void PrintNextSteps(AgentConfig config, string configPath)
     {

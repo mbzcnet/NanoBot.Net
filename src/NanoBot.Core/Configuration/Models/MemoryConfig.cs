@@ -4,12 +4,6 @@ public class MemoryConfig
 {
     public string MemoryFile { get; set; } = "MEMORY.md";
 
-    /// <summary>
-    /// DEPRECATED: History file is no longer used. All session messages are stored in sessions/*.jsonl
-    /// </summary>
-    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-    public string HistoryFile { get; set; } = "HISTORY.md";
-
     public int MaxHistoryEntries { get; set; } = 500;
 
     public bool Enabled { get; set; } = true;

@@ -29,7 +29,7 @@ public class OnboardCommandTests
             var root = new RootCommand("test");
             root.AddCommand(command);
 
-            var exitCode = await root.InvokeAsync(new[] { "onboard", "--non-interactive" });
+            var exitCode = await root.InvokeAsync(new[] { "onboard", "--non-interactive", "--skip-omniparser" });
 
             exitCode.Should().Be(0);
 
@@ -47,7 +47,6 @@ public class OnboardCommandTests
             File.Exists(Path.Combine(workspaceDir, "SOUL.md")).Should().BeTrue();
             File.Exists(Path.Combine(workspaceDir, "USER.md")).Should().BeTrue();
             File.Exists(Path.Combine(workspaceDir, "memory", "MEMORY.md")).Should().BeTrue();
-            File.Exists(Path.Combine(workspaceDir, "memory", "HISTORY.md")).Should().BeTrue();
             Directory.Exists(Path.Combine(workspaceDir, "skills")).Should().BeTrue();
         }
         finally
@@ -93,6 +92,7 @@ public class OnboardCommandTests
             {
                 "onboard",
                 "--non-interactive",
+                "--skip-omniparser",
                 "--provider", "openai",
                 "--model", "gpt-4o-mini",
                 "--api-key", "test-key-12345",

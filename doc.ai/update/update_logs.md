@@ -1,3 +1,34 @@
+# 2026-03-19
+
+- **完成 RPA 工具设计实现**：
+  - 新增 RPA 工具接口和模型 (`NanoBot.Core/Tools/Rpa/`):
+    - `RpaModels.cs` - 操作类型枚举、数据模型（RpaAction 系列类、OmniParserResult 等）
+    - `IRpaService.cs` - RPA 服务接口
+    - `IInputSimulator.cs` - 输入模拟器接口
+    - `IScreenCapture.cs` - 截图接口
+  - 新增 RPA 服务实现 (`NanoBot.Infrastructure/Tools/Rpa/`):
+    - `SharpHookInputSimulator.cs` - 基于 SharpHook 的鼠标/键盘模拟实现（支持 Windows/macOS/Linux）
+    - `RpaService.cs` - RPA 服务核心实现（流程执行、操作解析）
+    - `OmniParserClient.cs` - OmniParser HTTP 客户端
+    - `OmniParserServiceManager.cs` - OmniParser 服务生命周期管理
+    - `ScreenCaptureService.cs` - 截图服务（含平台特定实现工厂）
+    - `ImageOptimizer.cs` - 截图优化（缩放 + JPEG 压缩，支持 25-187x 压缩比）
+    - `Mac/MacScreenCapture.cs` - macOS CGWindowListCreateImage 截图实现
+    - `Win/WinScreenCapture.cs` - Windows GDI BitBlt 截图实现
+    - `Linux/LinuxScreenCapture.cs` - Linux XLib 截图实现
+  - 新增 RPA 工具定义 (`NanoBot.Tools/BuiltIn/Rpa/RpaTools.cs`)
+  - 新增 OmniParser Python 服务资源 (`NanoBot.Tools/Resources/omniparser/`):
+    - `server.py` - Flask HTTP 服务，支持 /health、/parse、/parse/simple、/config 端点
+    - `requirements.txt` - Python 依赖
+  - 新增 RPA 配置 (`NanoBot.Core/Configuration/RpaToolsConfig.cs`):
+    - `RpaToolsConfig` - RPA 工具配置（Enabled、InstallPath、ServicePort、AutoStartService 等）
+    - `ScreenshotOptimizationConfig` - 截图优化配置
+  - 更新 `OnboardCommand.cs` - 新增 OmniParser 安装选项 (`--skip-omniparser`)
+  - 更新 `ToolProvider.cs` - 条件注册 RPA 工具
+  - 更新 `AgentConfig.cs` - 添加 `Rpa` 配置属性
+  - 更新 `ServiceCollectionExtensions.cs` - 添加 `AddRpaServices` 扩展方法
+  - 功能支持：鼠标移动/点击/双击/右键/拖拽、键盘按键/组合键/文本输入、截图与 OmniParser 视觉分析
+
 # 2026-03-18
 
 - **修复工具调用失败问题**（关键修复）：

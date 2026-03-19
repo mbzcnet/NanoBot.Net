@@ -541,6 +541,9 @@ public class SessionService : ISessionService
                     if (msg.Role == "tool")
                     {
                         msg.Role = "assistant";
+                        // Tool 消息的内容应该只在 tool_result part 中显示，
+                        // 不应该作为普通消息内容显示
+                        msg.Content = string.Empty;
                     }
 
                     var retryCandidate = consolidatedList.LastOrDefault(m => m.Role == "user");

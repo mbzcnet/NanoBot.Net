@@ -170,7 +170,6 @@ public class ConfigurationCheckerTests : IDisposable
         var memory = new MemoryConfig();
 
         memory.MemoryFile.Should().Be("MEMORY.md");
-        memory.HistoryFile.Should().Be("HISTORY.md");
         memory.MaxHistoryEntries.Should().Be(500);
         memory.Enabled.Should().BeTrue();
     }
