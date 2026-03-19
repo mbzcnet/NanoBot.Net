@@ -19,7 +19,7 @@ public static class BrowserTools
         ToolExecutionContext.SetCurrentSessionKey(sessionKey);
     }
 
-    public static AITool CreateBrowserTool(IBrowserService? browserService)
+    public static AITool CreateBrowserTool(IBrowserService? browserService, Func<string?>? sessionKeyProvider = null)
     {
         return AIFunctionFactory.Create(
             (string action,
@@ -39,7 +39,7 @@ public static class BrowserTools
              int? maxChars = null,
              string? loadState = null,
              string? sessionKey = null) =>
-                ExecuteAsync(action, profile, targetId, targetUrl, url, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService),
+                ExecuteAsync(action, profile, targetId, targetUrl, url, snapshotFormat, kind, reference, text, textGone, key, timeoutMs, scrollBy, selector, maxChars, loadState, sessionKey, browserService, sessionKeyProvider),
             new AIFunctionFactoryOptions
             {
                 Name = "browser",
@@ -65,7 +65,8 @@ public static class BrowserTools
         int? maxChars,
         string? loadState,
         string? sessionKey,
-        IBrowserService? browserService)
+        IBrowserService? browserService,
+        Func<string?>? sessionKeyProvider = null)
     {
         if (browserService == null)
         {
@@ -76,9 +77,10 @@ public static class BrowserTools
         var resolvedProfile = string.IsNullOrWhiteSpace(profile) ? "nanobot" : profile.Trim();
         var resolvedUrl = !string.IsNullOrWhiteSpace(url) ? url.Trim() : targetUrl?.Trim();
 
-        var resolvedSessionKey = string.IsNullOrWhiteSpace(sessionKey)
-            ? ToolExecutionContext.CurrentSessionKey
-            : sessionKey.Trim();
+        // 优先使用传入的 sessionKey，其次使用 sessionKeyProvider，最后使用 ToolExecutionContext
+        var resolvedSessionKey = !string.IsNullOrWhiteSpace(sessionKey)
+            ? sessionKey.Trim()
+            : (sessionKeyProvider?.Invoke() ?? ToolExecutionContext.CurrentSessionKey);
 
         try
         {

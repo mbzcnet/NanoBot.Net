@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.Runtime.InteropServices;
 using NanoBot.Core.Configuration;
 using NanoBot.Cli.Services;
 using NanoBot.Infrastructure.Browser;
@@ -8,7 +9,7 @@ namespace NanoBot.Cli.Commands;
 public class OnboardCommand : ICliCommand
 {
     public string Name => "onboard";
-    public string Description => "Initialize nbot configuration and workspace (and optionally configure LLM)";
+    public string Description => "Initialize nbot configuration and workspace with interactive setup";
 
     public Command CreateCommand()
     {
@@ -110,7 +111,124 @@ public class OnboardCommand : ICliCommand
 
         Console.WriteLine("🐈 nbot onboard\n");
 
+        // Step 1: Environment check
+        var envInfo = CheckEnvironment();
+        PrintEnvironmentInfo(envInfo);
+
+        // Step 2: Handle config file
+        AgentConfig config = await InitializeConfigAsync(configPath, name, workspacePath, envInfo, nonInteractive, cancellationToken);
+
+        // Ensure workspace exists
+        var resolvedWorkspacePath = ResolvePath(config.Workspace.Path);
+        if (!Directory.Exists(resolvedWorkspacePath))
+        {
+            Directory.CreateDirectory(resolvedWorkspacePath);
+            Console.WriteLine($"✓ Created workspace at {resolvedWorkspacePath}");
+        }
+
+        await CreateWorkspaceTemplatesAsync(resolvedWorkspacePath, cancellationToken);
+
+        // Step 3: Non-interactive mode - apply options and exit
+        if (nonInteractive)
+        {
+            ApplyNonInteractiveOptions(config, provider, model, apiKey, apiBase, workspace);
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+
+            if (!skipBrowserInstall)
+            {
+                await InstallPlaywrightBrowsersAsync(config, configPath, true, cancellationToken);
+            }
+
+            PrintNextSteps(config, configPath);
+            return;
+        }
+
+        // Step 4: Interactive configuration menu
+        await RunConfigurationMenuAsync(config, configPath, envInfo, skipBrowserInstall, cancellationToken);
+    }
+
+    /// <summary>
+    /// Check environment information
+    /// </summary>
+    private EnvironmentInfo CheckEnvironment()
+    {
+        var info = new EnvironmentInfo
+        {
+            OsPlatform = RuntimeInformation.OSDescription,
+            OsVersion = Environment.OSVersion.VersionString,
+            HasGui = DetectGuiEnvironment(),
+            ConfigExists = File.Exists(GetConfigPath())
+        };
+
+        return info;
+    }
+
+    /// <summary>
+    /// Detect if GUI environment is available
+    /// </summary>
+    private bool DetectGuiEnvironment()
+    {
+        // Check for common GUI environment variables
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return true; // Windows usually has GUI
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            // Check for DISPLAY or WAYLAND_DISPLAY
+            var display = Environment.GetEnvironmentVariable("DISPLAY");
+            var wayland = Environment.GetEnvironmentVariable("WAYLAND_DISPLAY");
+
+            if (!string.IsNullOrEmpty(display) || !string.IsNullOrEmpty(wayland))
+            {
+                return true;
+            }
+
+            // Check if running in WSL with GUI support
+            var wslDistro = Environment.GetEnvironmentVariable("WSL_DISTRO_NAME");
+            if (!string.IsNullOrEmpty(wslDistro))
+            {
+                // WSL might have GUI support via WSLg
+                return true;
+            }
+
+            return false;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return true; // macOS usually has GUI
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Print environment information
+    /// </summary>
+    private void PrintEnvironmentInfo(EnvironmentInfo info)
+    {
+        Console.WriteLine("=== Environment Check ===");
+        Console.WriteLine($"  OS: {info.OsPlatform}");
+        Console.WriteLine($"  GUI: {(info.HasGui ? "Available" : "Not detected (headless)")}");
+        Console.WriteLine($"  Config: {(info.ConfigExists ? "Exists" : "Not found")}");
+        Console.WriteLine();
+    }
+
+    /// <summary>
+    /// Initialize configuration file
+    /// </summary>
+    private async Task<AgentConfig> InitializeConfigAsync(
+        string configPath,
+        string name,
+        string workspacePath,
+        EnvironmentInfo envInfo,
+        bool nonInteractive,
+        CancellationToken cancellationToken)
+    {
         AgentConfig config;
+
         if (File.Exists(configPath))
         {
             Console.WriteLine($"Config already exists at {configPath}");
@@ -121,77 +239,1212 @@ public class OnboardCommand : ICliCommand
 
             if (response == "y")
             {
-                config = CreateDefaultAgentConfig(name ?? "NanoBot", workspacePath);
+                config = CreateDefaultAgentConfig(name, workspacePath, envInfo);
                 await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
                 Console.WriteLine($"✓ Config reset to defaults at {configPath}");
             }
             else
             {
                 config = await ConfigurationLoader.LoadAsync(configPath, cancellationToken);
-                config.Name = name ?? "NanoBot";
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    config.Workspace.Path = dir;
-                }
-                else if (!string.IsNullOrEmpty(workspace))
-                {
-                    config.Workspace.Path = workspace;
-                }
+                config.Name = name;
+                // Update environment-specific settings
+                ApplyEnvironmentSettings(config, envInfo);
                 await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
                 Console.WriteLine($"✓ Config refreshed at {configPath} (existing values preserved)");
             }
         }
         else
         {
-            config = CreateDefaultAgentConfig(name ?? "NanoBot", workspacePath);
+            config = CreateDefaultAgentConfig(name, workspacePath, envInfo);
             await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
             Console.WriteLine($"✓ Created config at {configPath}");
         }
 
-        var resolvedWorkspacePath = ResolvePath(config.Workspace.Path);
-        if (!Directory.Exists(resolvedWorkspacePath))
+        return config;
+    }
+
+    /// <summary>
+    /// Apply environment-specific settings to config
+    /// </summary>
+    private void ApplyEnvironmentSettings(AgentConfig config, EnvironmentInfo envInfo)
+    {
+        // Disable rap tool if no GUI
+        if (!envInfo.HasGui)
         {
-            Directory.CreateDirectory(resolvedWorkspacePath);
-            Console.WriteLine($"✓ Created workspace at {resolvedWorkspacePath}");
-        }
-
-        await CreateWorkspaceTemplatesAsync(resolvedWorkspacePath, cancellationToken);
-
-        // Configure LLM and workspace first, then offer browser tools at the end
-        if (nonInteractive)
-        {
-            ApplyNonInteractiveOptions(config, provider, model, apiKey, apiBase, workspace);
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-            PrintNextSteps(config, configPath);
-
-            // Offer browser tools installation at the end (optional)
-            if (!skipBrowserInstall)
+            // Note: rap tool would be disabled here if it existed in config
+            // For now, we just note this in the browser config
+            if (config.Browser != null)
             {
-                Console.WriteLine();
-                await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive, cancellationToken);
+                // Browser can work in headless mode, so we keep it enabled
+                // But we note that GUI is not available
             }
-            return;
-        }
-
-        Console.Write("\nConfigure LLM and workspace now? [Y/n]: ");
-        var configureResponse = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (configureResponse == "n" || configureResponse == "no")
-        {
-            Console.WriteLine("\n🐈 nbot is ready!");
-            PrintNextSteps(config, configPath);
-            return;
-        }
-
-        await RunInteractiveAsync(config, configPath, cancellationToken);
-
-        // Browser tools setup is offered after LLM configuration is complete
-        if (!skipBrowserInstall)
-        {
-            Console.WriteLine();
-            await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive, cancellationToken);
         }
     }
 
+    /// <summary>
+    /// Run the main configuration menu
+    /// </summary>
+    private async Task RunConfigurationMenuAsync(
+        AgentConfig config,
+        string configPath,
+        EnvironmentInfo envInfo,
+        bool skipBrowserInstall,
+        CancellationToken cancellationToken)
+    {
+        var menuItems = new List<MenuItem>
+        {
+            new("LLM Configuration", async () => await ConfigureLlmAsync(config, configPath, cancellationToken)),
+            new("Channels Configuration", async () => await ConfigureChannelsAsync(config, configPath, cancellationToken)),
+            new("Tools Configuration", async () => await ConfigureToolsAsync(config, configPath, envInfo, skipBrowserInstall, cancellationToken)),
+            new("Workspace Configuration", async () => ConfigureWorkspace(config)),
+            new("Start Agent Mode", null), // Special item
+            new("Start Web UI Mode", null), // Special item
+            new("Save & Exit", null) // Special item
+        };
+
+        var currentIndex = 0;
+
+        while (true)
+        {
+            Console.WriteLine("\n=== Configuration Menu ===\n");
+            Console.WriteLine("Select an option:\n");
+
+            for (var i = 0; i < menuItems.Count; i++)
+            {
+                var marker = i == currentIndex ? ">" : " ";
+                var number = i + 1;
+                Console.WriteLine($"  {marker} [{number}] {menuItems[i].Name}");
+            }
+
+            Console.WriteLine("\nNavigation: [↑/↓] or [1-7], [Enter] to select, [Q] to quit");
+
+            var key = Console.ReadKey(true);
+
+            if (key.Key == ConsoleKey.Q)
+            {
+                Console.WriteLine("\nSave changes before exiting? [Y/n]: ");
+                var save = Console.ReadLine()?.Trim().ToLowerInvariant();
+                if (save != "n" && save != "no")
+                {
+                    await SaveConfigAsync(config, configPath, cancellationToken);
+                }
+                Console.WriteLine("\n🐈 nbot is ready!");
+                PrintNextSteps(config, configPath);
+                return;
+            }
+
+            if (key.Key == ConsoleKey.UpArrow && currentIndex > 0)
+            {
+                currentIndex--;
+            }
+            else if (key.Key == ConsoleKey.DownArrow && currentIndex < menuItems.Count - 1)
+            {
+                currentIndex++;
+            }
+            else if (key.Key == ConsoleKey.Enter)
+            {
+                // Handle special menu items
+                if (currentIndex == menuItems.Count - 1) // Save & Exit
+                {
+                    await SaveConfigAsync(config, configPath, cancellationToken);
+                    Console.WriteLine("\n🐈 nbot is ready!");
+                    PrintNextSteps(config, configPath);
+                    return;
+                }
+                else if (currentIndex == menuItems.Count - 2) // Start Web UI Mode
+                {
+                    await SaveConfigAsync(config, configPath, cancellationToken);
+                    await StartWebUIModeAsync(config, configPath, cancellationToken);
+                    return;
+                }
+                else if (currentIndex == menuItems.Count - 3) // Start Agent Mode
+                {
+                    await SaveConfigAsync(config, configPath, cancellationToken);
+                    await StartAgentModeAsync(config, configPath, cancellationToken);
+                    return;
+                }
+
+                Console.WriteLine($"\n--- {menuItems[currentIndex].Name} ---\n");
+                await menuItems[currentIndex].Action!();
+            }
+            else if (char.IsDigit(key.KeyChar) || (key.KeyChar >= '\uFF10' && key.KeyChar <= '\uFF19'))
+            {
+                var normalizedChar = NormalizeInputChar(key.KeyChar);
+                var index = normalizedChar - '1';
+                if (index >= 0 && index < menuItems.Count)
+                {
+                    currentIndex = index;
+
+                    // Handle special menu items
+                    if (currentIndex == menuItems.Count - 1) // Save & Exit
+                    {
+                        await SaveConfigAsync(config, configPath, cancellationToken);
+                        Console.WriteLine("\n🐈 nbot is ready!");
+                        PrintNextSteps(config, configPath);
+                        return;
+                    }
+                    else if (currentIndex == menuItems.Count - 2) // Start Web UI Mode
+                    {
+                        await SaveConfigAsync(config, configPath, cancellationToken);
+                        await StartWebUIModeAsync(config, configPath, cancellationToken);
+                        return;
+                    }
+                    else if (currentIndex == menuItems.Count - 3) // Start Agent Mode
+                    {
+                        await SaveConfigAsync(config, configPath, cancellationToken);
+                        await StartAgentModeAsync(config, configPath, cancellationToken);
+                        return;
+                    }
+
+                    Console.WriteLine($"\n--- {menuItems[currentIndex].Name} ---\n");
+                    await menuItems[currentIndex].Action!();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Configure LLM profiles
+    /// </summary>
+    private async Task ConfigureLlmAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        var service = new LlmProfileConfigService();
+
+        // Show current status
+        if (config.Llm.Profiles.Count == 0)
+        {
+            Console.WriteLine("No LLM profiles configured.\n");
+        }
+        else
+        {
+            Console.WriteLine("Current LLM Profiles:");
+            foreach (var profileName in config.Llm.Profiles.Keys)
+            {
+                var profile = config.Llm.Profiles[profileName];
+                var isDefault = profileName == (config.Llm.DefaultProfile ?? "default");
+                var marker = isDefault ? "*" : " ";
+                Console.WriteLine($"  {marker} {profileName}: {profile.Provider}/{profile.Model}");
+            }
+            Console.WriteLine();
+        }
+
+        // Sub-menu for LLM configuration
+        while (true)
+        {
+            Console.WriteLine("LLM Configuration Options:");
+            Console.WriteLine("  [1] Add/Edit Profile");
+            Console.WriteLine("  [2] Set Default Profile");
+            Console.WriteLine("  [3] Delete Profile");
+            Console.WriteLine("  [4] Back to Main Menu");
+            Console.Write("\nSelect option: ");
+
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            switch (option)
+            {
+                case '1':
+                    await ConfigureLlmProfilesInteractiveAsync(config, service, cancellationToken);
+                    break;
+                case '2':
+                    SetDefaultProfile(config);
+                    break;
+                case '3':
+                    DeleteLlmProfile(config);
+                    break;
+                case '4':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+
+            // Save after each operation
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Interactive LLM profile configuration
+    /// </summary>
+    private async Task ConfigureLlmProfilesInteractiveAsync(
+        AgentConfig config,
+        LlmProfileConfigService service,
+        CancellationToken cancellationToken)
+    {
+        var hasDefaultProfile = config.Llm.Profiles.Count > 0;
+        if (!hasDefaultProfile)
+        {
+            Console.WriteLine("No profiles configured yet. Let's create the default profile.\n");
+            var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
+            await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
+            config.Llm.DefaultProfile = profileName;
+        }
+        else
+        {
+            Console.Write("\nEnter profile name (or press Enter for 'default'): ");
+            var profileName = Console.ReadLine()?.Trim();
+            if (string.IsNullOrWhiteSpace(profileName))
+            {
+                profileName = "default";
+            }
+
+            if (config.Llm.Profiles.ContainsKey(profileName))
+            {
+                Console.WriteLine($"Profile '{profileName}' already exists. Editing...");
+            }
+
+            await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Set default LLM profile
+    /// </summary>
+    private void SetDefaultProfile(AgentConfig config)
+    {
+        if (config.Llm.Profiles.Count == 0)
+        {
+            Console.WriteLine("\nNo profiles available.");
+            return;
+        }
+
+        var profiles = config.Llm.Profiles.Keys.ToList();
+        Console.WriteLine("\nSelect default profile:");
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            var isDefault = profiles[i] == (config.Llm.DefaultProfile ?? "default");
+            var marker = isDefault ? "*" : " ";
+            Console.WriteLine($"  {marker} [{i + 1}] {profiles[i]}");
+        }
+        Console.Write("\nEnter number or name: ");
+        var input = Console.ReadLine()?.Trim();
+
+        string? selectedProfile = null;
+        if (int.TryParse(input, out var index) && index > 0 && index <= profiles.Count)
+        {
+            selectedProfile = profiles[index - 1];
+        }
+        else if (!string.IsNullOrWhiteSpace(input) && config.Llm.Profiles.ContainsKey(input))
+        {
+            selectedProfile = input;
+        }
+
+        if (selectedProfile == null)
+        {
+            Console.WriteLine("Invalid selection.");
+            return;
+        }
+
+        config.Llm.DefaultProfile = selectedProfile;
+        Console.WriteLine($"✓ Default profile set to '{selectedProfile}'.");
+    }
+
+    /// <summary>
+    /// Delete an LLM profile
+    /// </summary>
+    private void DeleteLlmProfile(AgentConfig config)
+    {
+        if (config.Llm.Profiles.Count == 0)
+        {
+            Console.WriteLine("\nNo profiles to delete.");
+            return;
+        }
+
+        var profiles = config.Llm.Profiles.Keys.ToList();
+        Console.WriteLine("\nSelect profile to delete:");
+        for (var i = 0; i < profiles.Count; i++)
+        {
+            Console.WriteLine($"  [{i + 1}] {profiles[i]}");
+        }
+        Console.Write("\nEnter number or name: ");
+        var input = Console.ReadLine()?.Trim();
+
+        string? selectedProfile = null;
+        if (int.TryParse(input, out var index) && index > 0 && index <= profiles.Count)
+        {
+            selectedProfile = profiles[index - 1];
+        }
+        else if (!string.IsNullOrWhiteSpace(input) && config.Llm.Profiles.ContainsKey(input))
+        {
+            selectedProfile = input;
+        }
+
+        if (selectedProfile == null)
+        {
+            Console.WriteLine("Invalid selection.");
+            return;
+        }
+
+        if (selectedProfile == (config.Llm.DefaultProfile ?? "default"))
+        {
+            Console.WriteLine($"Cannot delete the default profile '{selectedProfile}'.");
+            Console.WriteLine("Please set a different default profile first.");
+            return;
+        }
+
+        Console.Write($"Are you sure you want to delete profile '{selectedProfile}'? [y/N]: ");
+        var confirm = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (confirm == "y" || confirm == "yes")
+        {
+            config.Llm.Profiles.Remove(selectedProfile);
+            Console.WriteLine($"✓ Profile '{selectedProfile}' deleted.");
+        }
+        else
+        {
+            Console.WriteLine("Cancelled.");
+        }
+    }
+
+    /// <summary>
+    /// Configure Channels
+    /// </summary>
+    private async Task ConfigureChannelsAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== Channels Configuration ===\n");
+            Console.WriteLine("Available Channels:");
+            Console.WriteLine($"  [1] Telegram    {(config.Channels.Telegram?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [2] Discord     {(config.Channels.Discord?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [3] Feishu      {(config.Channels.Feishu?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [4] DingTalk    {(config.Channels.DingTalk?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [5] Slack       {(config.Channels.Slack?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [6] Email       {(config.Channels.Email?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine($"  [7] Matrix      {(config.Channels.Matrix?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine("  [8] Back to Main Menu");
+
+            Console.Write("\nSelect channel to configure: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            switch (option)
+            {
+                case '1':
+                    ConfigureTelegram(config);
+                    break;
+                case '2':
+                    ConfigureDiscord(config);
+                    break;
+                case '3':
+                    ConfigureFeishu(config);
+                    break;
+                case '4':
+                    ConfigureDingTalk(config);
+                    break;
+                case '5':
+                    ConfigureSlack(config);
+                    break;
+                case '6':
+                    ConfigureEmail(config);
+                    break;
+                case '7':
+                    ConfigureMatrix(config);
+                    break;
+                case '8':
+                    await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Configure Telegram channel
+    /// </summary>
+    private void ConfigureTelegram(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Telegram Configuration ===\n");
+
+        if (config.Channels.Telegram == null)
+        {
+            config.Channels.Telegram = new TelegramConfig();
+        }
+
+        var telegram = config.Channels.Telegram;
+
+        Console.Write($"Enable Telegram? [{(telegram.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        telegram.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && telegram.Enabled);
+
+        if (!telegram.Enabled)
+        {
+            Console.WriteLine("Telegram disabled.");
+            return;
+        }
+
+        Console.Write($"Bot Token [{MaskString(telegram.Token)}]: ");
+        var token = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            telegram.Token = token;
+        }
+
+        Console.Write($"Allowed Users (comma-separated) [{string.Join(",", telegram.AllowFrom)}]: ");
+        var users = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(users))
+        {
+            telegram.AllowFrom = users.Split(',').Select(u => u.Trim()).ToArray();
+        }
+
+        Console.WriteLine("✓ Telegram configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Discord channel
+    /// </summary>
+    private void ConfigureDiscord(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Discord Configuration ===\n");
+
+        if (config.Channels.Discord == null)
+        {
+            config.Channels.Discord = new DiscordConfig();
+        }
+
+        var discord = config.Channels.Discord;
+
+        Console.Write($"Enable Discord? [{(discord.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        discord.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && discord.Enabled);
+
+        if (!discord.Enabled)
+        {
+            Console.WriteLine("Discord disabled.");
+            return;
+        }
+
+        Console.Write($"Bot Token [{MaskString(discord.Token)}]: ");
+        var token = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            discord.Token = token;
+        }
+
+        Console.WriteLine("✓ Discord configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Feishu channel
+    /// </summary>
+    private void ConfigureFeishu(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Feishu Configuration ===\n");
+
+        if (config.Channels.Feishu == null)
+        {
+            config.Channels.Feishu = new FeishuConfig();
+        }
+
+        var feishu = config.Channels.Feishu;
+
+        Console.Write($"Enable Feishu? [{(feishu.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        feishu.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && feishu.Enabled);
+
+        if (!feishu.Enabled)
+        {
+            Console.WriteLine("Feishu disabled.");
+            return;
+        }
+
+        Console.Write($"App ID [{feishu.AppId}]: ");
+        var appId = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(appId))
+        {
+            feishu.AppId = appId;
+        }
+
+        Console.Write($"App Secret [{MaskString(feishu.AppSecret)}]: ");
+        var secret = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            feishu.AppSecret = secret;
+        }
+
+        Console.Write($"Encrypt Key [{MaskString(feishu.EncryptKey)}]: ");
+        var encryptKey = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(encryptKey))
+        {
+            feishu.EncryptKey = encryptKey;
+        }
+
+        Console.Write($"Verification Token [{MaskString(feishu.VerificationToken)}]: ");
+        var verificationToken = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(verificationToken))
+        {
+            feishu.VerificationToken = verificationToken;
+        }
+
+        Console.WriteLine("✓ Feishu configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure DingTalk channel
+    /// </summary>
+    private void ConfigureDingTalk(AgentConfig config)
+    {
+        Console.WriteLine("\n=== DingTalk Configuration ===\n");
+
+        if (config.Channels.DingTalk == null)
+        {
+            config.Channels.DingTalk = new DingTalkConfig();
+        }
+
+        var dingTalk = config.Channels.DingTalk;
+
+        Console.Write($"Enable DingTalk? [{(dingTalk.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        dingTalk.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && dingTalk.Enabled);
+
+        if (!dingTalk.Enabled)
+        {
+            Console.WriteLine("DingTalk disabled.");
+            return;
+        }
+
+        Console.Write($"Client ID [{dingTalk.ClientId}]: ");
+        var clientId = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(clientId))
+        {
+            dingTalk.ClientId = clientId;
+        }
+
+        Console.Write($"Client Secret [{MaskString(dingTalk.ClientSecret)}]: ");
+        var secret = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(secret))
+        {
+            dingTalk.ClientSecret = secret;
+        }
+
+        Console.WriteLine("✓ DingTalk configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Slack channel
+    /// </summary>
+    private void ConfigureSlack(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Slack Configuration ===\n");
+
+        if (config.Channels.Slack == null)
+        {
+            config.Channels.Slack = new SlackConfig();
+        }
+
+        var slack = config.Channels.Slack;
+
+        Console.Write($"Enable Slack? [{(slack.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        slack.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && slack.Enabled);
+
+        if (!slack.Enabled)
+        {
+            Console.WriteLine("Slack disabled.");
+            return;
+        }
+
+        Console.Write($"Mode (socket/http) [{slack.Mode}]: ");
+        var mode = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(mode))
+        {
+            slack.Mode = mode;
+        }
+
+        Console.Write($"Bot Token [{MaskString(slack.BotToken)}]: ");
+        var botToken = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(botToken))
+        {
+            slack.BotToken = botToken;
+        }
+
+        Console.Write($"App Token [{MaskString(slack.AppToken)}]: ");
+        var appToken = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(appToken))
+        {
+            slack.AppToken = appToken;
+        }
+
+        Console.WriteLine("✓ Slack configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Email channel
+    /// </summary>
+    private void ConfigureEmail(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Email Configuration ===\n");
+
+        if (config.Channels.Email == null)
+        {
+            config.Channels.Email = new EmailConfig();
+        }
+
+        var email = config.Channels.Email;
+
+        Console.Write($"Enable Email? [{(email.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        email.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && email.Enabled);
+
+        if (!email.Enabled)
+        {
+            Console.WriteLine("Email disabled.");
+            return;
+        }
+
+        Console.WriteLine("\n--- IMAP Settings (Incoming) ---");
+
+        Console.Write($"IMAP Host [{email.ImapHost}]: ");
+        var imapHost = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(imapHost))
+        {
+            email.ImapHost = imapHost;
+        }
+
+        Console.Write($"IMAP Port [{email.ImapPort}]: ");
+        var imapPort = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(imapPort) && int.TryParse(imapPort, out var imapPortNum))
+        {
+            email.ImapPort = imapPortNum;
+        }
+
+        Console.Write($"IMAP Username [{email.ImapUsername}]: ");
+        var imapUsername = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(imapUsername))
+        {
+            email.ImapUsername = imapUsername;
+        }
+
+        Console.Write($"IMAP Password [{MaskString(email.ImapPassword)}]: ");
+        var imapPassword = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(imapPassword))
+        {
+            email.ImapPassword = imapPassword;
+        }
+
+        Console.WriteLine("\n--- SMTP Settings (Outgoing) ---");
+
+        Console.Write($"SMTP Host [{email.SmtpHost}]: ");
+        var smtpHost = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(smtpHost))
+        {
+            email.SmtpHost = smtpHost;
+        }
+
+        Console.Write($"SMTP Port [{email.SmtpPort}]: ");
+        var smtpPort = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(smtpPort) && int.TryParse(smtpPort, out var smtpPortNum))
+        {
+            email.SmtpPort = smtpPortNum;
+        }
+
+        Console.Write($"SMTP Username [{email.SmtpUsername}]: ");
+        var smtpUsername = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(smtpUsername))
+        {
+            email.SmtpUsername = smtpUsername;
+        }
+
+        Console.Write($"SMTP Password [{MaskString(email.SmtpPassword)}]: ");
+        var smtpPassword = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(smtpPassword))
+        {
+            email.SmtpPassword = smtpPassword;
+        }
+
+        Console.Write($"From Address [{email.FromAddress}]: ");
+        var fromAddress = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(fromAddress))
+        {
+            email.FromAddress = fromAddress;
+        }
+
+        Console.WriteLine("✓ Email configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Matrix channel
+    /// </summary>
+    private void ConfigureMatrix(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Matrix Configuration ===\n");
+
+        if (config.Channels.Matrix == null)
+        {
+            config.Channels.Matrix = new MatrixConfig();
+        }
+
+        var matrix = config.Channels.Matrix;
+
+        Console.Write($"Enable Matrix? [{(matrix.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        matrix.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && matrix.Enabled);
+
+        if (!matrix.Enabled)
+        {
+            Console.WriteLine("Matrix disabled.");
+            return;
+        }
+
+        Console.Write($"Homeserver [{matrix.Homeserver}]: ");
+        var homeserver = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(homeserver))
+        {
+            matrix.Homeserver = homeserver;
+        }
+
+        Console.Write($"Access Token [{MaskString(matrix.AccessToken)}]: ");
+        var token = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            matrix.AccessToken = token;
+        }
+
+        Console.Write($"Room ID [{matrix.RoomId}]: ");
+        var roomId = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(roomId))
+        {
+            matrix.RoomId = roomId;
+        }
+
+        Console.WriteLine("✓ Matrix configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure Tools (Playwright, PowerShell, rap)
+    /// </summary>
+    private async Task ConfigureToolsAsync(
+        AgentConfig config,
+        string configPath,
+        EnvironmentInfo envInfo,
+        bool skipBrowserInstall,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== Tools Configuration ===\n");
+
+            // Check current status
+            var playwrightInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+            var powerShellInstalled = await IsPowerShellInstalledAsync(cancellationToken);
+
+            Console.WriteLine("Available Tools:");
+            Console.WriteLine($"  [1] Playwright (Browser Automation)  [{GetToolStatus(config.Browser?.Enabled == true, playwrightInstalled)}]");
+            Console.WriteLine($"  [2] PowerShell Core                  [{GetToolStatus(null, powerShellInstalled)}]");
+
+            if (!envInfo.HasGui)
+            {
+                Console.WriteLine($"  [3] Rap (GUI Tool)                   [unavailable - no GUI detected]");
+            }
+            else
+            {
+                Console.WriteLine($"  [3] Rap (GUI Tool)                   [available]");
+            }
+
+            Console.WriteLine("  [4] Back to Main Menu");
+
+            Console.Write("\nSelect tool to configure: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            switch (option)
+            {
+                case '1':
+                    await ConfigurePlaywrightAsync(config, configPath, skipBrowserInstall, cancellationToken);
+                    break;
+                case '2':
+                    await ConfigurePowerShellAsync(cancellationToken);
+                    break;
+                case '3':
+                    if (!envInfo.HasGui)
+                    {
+                        Console.WriteLine("\n⚠ Rap tool requires GUI environment. Not available in headless mode.");
+                    }
+                    else
+                    {
+                        ConfigureRap(config);
+                    }
+                    break;
+                case '4':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Get tool status string
+    /// </summary>
+    private string GetToolStatus(bool? enabled, bool installed)
+    {
+        if (!installed)
+            return "not installed";
+        if (enabled == null)
+            return "installed";
+        return enabled == true ? "enabled" : "disabled";
+    }
+
+    /// <summary>
+    /// Configure Playwright
+    /// </summary>
+    private async Task ConfigurePlaywrightAsync(
+        AgentConfig config,
+        string configPath,
+        bool skipBrowserInstall,
+        CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Playwright Configuration ===\n");
+
+        var isInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+
+        if (isInstalled)
+        {
+            Console.WriteLine("✓ Playwright browsers are already installed.");
+
+            if (config.Browser == null)
+            {
+                config.Browser = new BrowserToolsConfig { Enabled = true };
+            }
+
+            Console.Write($"Enable browser tools? [{(config.Browser.Enabled ? "Y/n" : "y/N")}]: ");
+            var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+            config.Browser.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Browser.Enabled);
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        }
+        else if (!skipBrowserInstall)
+        {
+            Console.WriteLine("Playwright browsers are not installed.");
+            Console.WriteLine("Starting installation...\n");
+            await InstallPlaywrightBrowsersAsync(config, configPath, false, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Check if Playwright is installed
+    /// </summary>
+    private async Task<bool> IsPlaywrightInstalledAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var installer = new PlaywrightInstaller();
+            return await installer.IsInstalledAsync(cancellationToken);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Configure PowerShell
+    /// </summary>
+    private async Task ConfigurePowerShellAsync(CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== PowerShell Configuration ===\n");
+
+        var isInstalled = await IsPowerShellInstalledAsync(cancellationToken);
+
+        if (isInstalled)
+        {
+            Console.WriteLine("✓ PowerShell Core is already installed.");
+            var path = await GetPowerShellPathAsync(cancellationToken);
+            Console.WriteLine($"  Location: {path}");
+        }
+        else
+        {
+            Console.WriteLine("PowerShell Core is not installed.");
+            Console.WriteLine("Starting installation (this may take a few minutes)...\n");
+
+            var installer = new PowerShellInstaller();
+            var installed = await installer.InstallAsync(cancellationToken);
+
+            if (installed)
+            {
+                Console.WriteLine("✓ PowerShell Core installed successfully");
+            }
+            else
+            {
+                Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
+                Console.WriteLine("  Please install manually from: https://aka.ms/powershell");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Check if PowerShell is installed
+    /// </summary>
+    private async Task<bool> IsPowerShellInstalledAsync(CancellationToken cancellationToken)
+    {
+        var path = await GetPowerShellPathAsync(cancellationToken);
+        return !string.IsNullOrEmpty(path);
+    }
+
+    /// <summary>
+    /// Get PowerShell path
+    /// </summary>
+    private async Task<string?> GetPowerShellPathAsync(CancellationToken cancellationToken)
+    {
+        var installer = new PowerShellInstaller();
+        return await installer.GetPowerShellPathAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Configure Rap tool
+    /// </summary>
+    private void ConfigureRap(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Rap Configuration ===\n");
+        Console.WriteLine("Rap is a GUI tool for enhanced interaction.");
+        Console.WriteLine("Note: Rap requires a GUI environment to run.");
+
+        // Rap configuration would go here if it exists in the config
+        Console.WriteLine("✓ Rap configuration placeholder (to be implemented based on actual Rap tool requirements)");
+    }
+
+    /// <summary>
+    /// Configure Workspace
+    /// </summary>
+    private void ConfigureWorkspace(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Workspace Configuration ===\n");
+
+        var currentPath = config.Workspace.Path;
+        Console.WriteLine($"Current workspace: {currentPath}");
+
+        Console.Write("Workspace path [press Enter to keep current]: ");
+        var input = Console.ReadLine()?.Trim();
+
+        if (!string.IsNullOrWhiteSpace(input))
+        {
+            config.Workspace.Path = input;
+        }
+
+        var resolvedPath = ResolvePath(config.Workspace.Path);
+        Console.WriteLine($"\n✓ Workspace: {resolvedPath}");
+    }
+
+    /// <summary>
+    /// Save configuration
+    /// </summary>
+    private async Task SaveConfigAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        var configDir = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
+        {
+            Directory.CreateDirectory(configDir);
+        }
+
+        await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        Console.WriteLine($"\n✓ Configuration saved to {configPath}");
+    }
+
+    /// <summary>
+    /// Start Agent Mode
+    /// </summary>
+    private async Task StartAgentModeAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n🐈 Starting Agent Mode...\n");
+
+        // Get the path to the current executable
+        var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            exePath = "nbot";
+        }
+
+        try
+        {
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = "agent",
+                    UseShellExecute = false,
+                    CreateNoWindow = false
+                }
+            };
+
+            process.Start();
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to start Agent Mode: {ex.Message}");
+            Console.WriteLine("You can start it manually by running: nbot agent");
+        }
+    }
+
+    /// <summary>
+    /// Start Web UI Mode
+    /// </summary>
+    private async Task StartWebUIModeAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n🐈 Starting Web UI Mode...\n");
+
+        // Get the path to the current executable
+        var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+        if (string.IsNullOrEmpty(exePath))
+        {
+            exePath = "nbot";
+        }
+
+        try
+        {
+            var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    Arguments = "webui",
+                    UseShellExecute = false,
+                    CreateNoWindow = false
+                }
+            };
+
+            process.Start();
+            Console.WriteLine($"Web UI started. Access it at: http://{config.WebUI.Server.Host}:{config.WebUI.Server.Port}");
+            Console.WriteLine("Press any key to stop the Web UI...");
+            Console.ReadKey(true);
+
+            try
+            {
+                process.Kill();
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch { /* Ignore */ }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to start Web UI Mode: {ex.Message}");
+            Console.WriteLine("You can start it manually by running: nbot webui");
+        }
+    }
+
+    /// <summary>
+    /// Install Playwright browsers
+    /// </summary>
+    private static async Task<bool> InstallPlaywrightBrowsersAsync(
+        AgentConfig config,
+        string configPath,
+        bool nonInteractive,
+        CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Browser Tools Setup ===\n");
+
+        var powerShellInstaller = new PowerShellInstaller();
+        var installer = new PlaywrightInstaller(powerShellInstaller: powerShellInstaller);
+
+        // First check if Playwright browsers are already installed
+        Console.WriteLine("Checking Playwright browser installation...");
+        if (await installer.IsInstalledAsync(cancellationToken))
+        {
+            Console.WriteLine("✓ Playwright browsers already installed");
+            config.Browser = new BrowserToolsConfig { Enabled = true };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return true;
+        }
+
+        // In non-interactive mode, skip installation silently
+        if (nonInteractive)
+        {
+            config.Browser = new BrowserToolsConfig { Enabled = false };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return false;
+        }
+
+        // Check PowerShell availability and install if needed
+        Console.WriteLine("Checking PowerShell availability...");
+        var pwshPath = await powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
+
+        if (string.IsNullOrEmpty(pwshPath))
+        {
+            Console.WriteLine("PowerShell Core (pwsh) is required for Playwright installation.");
+            Console.WriteLine("Installing PowerShell Core (this may take a few minutes)...");
+
+            var psInstalled = await powerShellInstaller.InstallAsync(cancellationToken);
+
+            if (!psInstalled)
+            {
+                Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
+                Console.WriteLine("  Please install manually from: https://aka.ms/powershell");
+                config.Browser = new BrowserToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return false;
+            }
+
+            Console.WriteLine("✓ PowerShell Core installed successfully");
+        }
+        else
+        {
+            Console.WriteLine("✓ PowerShell Core found");
+        }
+
+        // Now install Playwright browsers
+        Console.WriteLine("\nInstalling Playwright browsers (this may take a few minutes)...");
+        Console.WriteLine("  Installing Chromium...");
+
+        try
+        {
+            var success = await installer.InstallAsync(new[] { "chromium" }, cancellationToken);
+            if (success)
+            {
+                Console.WriteLine("✓ Playwright browsers installed successfully");
+                config.Browser = new BrowserToolsConfig { Enabled = true };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return true;
+            }
+            else
+            {
+                var errorMessage = installer.GetStatusMessage();
+                Console.WriteLine("✗ Failed to install Playwright browsers automatically.");
+
+                // Check for platform not supported errors
+                if (errorMessage.Contains("does not support") || errorMessage.Contains("unsupported") || errorMessage.Contains("operating system may not be supported"))
+                {
+                    Console.WriteLine("\n  Note: Your operating system may not be officially supported by Playwright.");
+                    Console.WriteLine("  You can try one of the following:");
+                    Console.WriteLine("    1. Use Docker with a supported Linux distribution (Ubuntu 20.04/22.04/24.04)");
+                    Console.WriteLine("    2. Use WSL2 if on Windows");
+                }
+                else
+                {
+                    Console.WriteLine("  Please install manually:");
+                    Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
+                    Console.WriteLine("    playwright install chromium");
+                }
+                config.Browser = new BrowserToolsConfig { Enabled = false };
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"✗ Error during Playwright browser installation: {ex.Message}");
+            Console.WriteLine("  Please install manually:");
+            Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
+            Console.WriteLine("    playwright install chromium");
+            config.Browser = new BrowserToolsConfig { Enabled = false };
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Apply non-interactive options
+    /// </summary>
     private static void ApplyNonInteractiveOptions(
         AgentConfig config,
         string? provider,
@@ -262,182 +1515,9 @@ public class OnboardCommand : ICliCommand
         }
     }
 
-    private async Task RunInteractiveAsync(
-        AgentConfig config,
-        string configPath,
-        CancellationToken cancellationToken)
-    {
-        var sections = new List<string> { "LLM Profiles", "Workspace", "Done" };
-        var currentIndex = 0;
-
-        while (currentIndex < sections.Count - 1)
-        {
-            Console.WriteLine("\nSelect section to configure:");
-            for (var i = 0; i < sections.Count; i++)
-            {
-                var marker = i == currentIndex ? ">" : " ";
-                Console.WriteLine($"  {marker} [{i + 1}] {sections[i]}");
-            }
-            Console.WriteLine();
-
-            var key = Console.ReadKey(true);
-            var keyChar = char.ToLowerInvariant(key.KeyChar);
-
-            if (key.Key == ConsoleKey.UpArrow && currentIndex > 0)
-            {
-                currentIndex--;
-            }
-            else if (key.Key == ConsoleKey.DownArrow && currentIndex < sections.Count - 1)
-            {
-                currentIndex++;
-            }
-            else if (key.Key == ConsoleKey.Enter || keyChar == '\r')
-            {
-                var selectedSection = sections[currentIndex];
-                Console.WriteLine($"Selected: {selectedSection}\n");
-
-                switch (selectedSection)
-                {
-                    case "LLM Profiles":
-                        await ConfigureLlmProfilesAsync(config, cancellationToken);
-                        break;
-                    case "Workspace":
-                        ConfigureWorkspaceSection(config);
-                        break;
-                    case "Done":
-                        await SaveAndFinishAsync(config, configPath, cancellationToken);
-                        return;
-                }
-
-                Console.WriteLine();
-            }
-            else if (char.IsDigit(keyChar))
-            {
-                var index = keyChar - '1';
-                if (index >= 0 && index < sections.Count)
-                {
-                    currentIndex = index;
-                }
-            }
-        }
-
-        await SaveAndFinishAsync(config, configPath, cancellationToken);
-    }
-
-    private async Task ConfigureLlmProfilesAsync(AgentConfig config, CancellationToken cancellationToken)
-    {
-        Console.WriteLine("=== LLM Profile Configuration ===\n");
-        Console.WriteLine("You can configure multiple LLM profiles for different use cases.\n");
-
-        var service = new LlmProfileConfigService();
-
-        var hasDefaultProfile = config.Llm.Profiles.Count > 0;
-        if (!hasDefaultProfile)
-        {
-            Console.WriteLine("No profiles configured yet. Let's create the default profile.\n");
-            var profileName = string.IsNullOrEmpty(config.Llm.DefaultProfile) ? "default" : config.Llm.DefaultProfile;
-            await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
-            config.Llm.DefaultProfile = profileName;
-        }
-
-        Console.Write("\nConfigure additional profiles? [y/N]: ");
-        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (response == "y" || response == "yes")
-        {
-            while (true)
-            {
-                Console.Write("\nEnter profile name (or press Enter to finish): ");
-                var profileName = Console.ReadLine()?.Trim();
-                if (string.IsNullOrWhiteSpace(profileName))
-                {
-                    break;
-                }
-
-                if (config.Llm.Profiles.ContainsKey(profileName))
-                {
-                    Console.WriteLine($"Profile '{profileName}' already exists. Editing...");
-                }
-
-                await service.ConfigureProfileInteractiveAsync(config, profileName, cancellationToken);
-
-                Console.Write("\nAdd another profile? [y/N]: ");
-                var addMore = Console.ReadLine()?.Trim().ToLowerInvariant();
-                if (addMore != "y" && addMore != "yes")
-                {
-                    break;
-                }
-            }
-        }
-
-        if (config.Llm.Profiles.Count > 1)
-        {
-            Console.WriteLine("\nAvailable profiles:");
-            foreach (var profileName in config.Llm.Profiles.Keys)
-            {
-                var profile = config.Llm.Profiles[profileName];
-                var isDefault = profileName == (config.Llm.DefaultProfile ?? "default");
-                var marker = isDefault ? "*" : " ";
-                Console.WriteLine($"  {marker} {profileName} ({profile.Provider}/{profile.Model})");
-            }
-
-            Console.Write($"\nSet default profile [{config.Llm.DefaultProfile ?? "default"}]: ");
-            var defaultInput = Console.ReadLine()?.Trim();
-            if (!string.IsNullOrWhiteSpace(defaultInput) && config.Llm.Profiles.ContainsKey(defaultInput))
-            {
-                config.Llm.DefaultProfile = defaultInput;
-                Console.WriteLine($"✓ Default profile set to '{defaultInput}'");
-            }
-        }
-    }
-
-
-    private void ConfigureWorkspaceSection(AgentConfig config)
-    {
-        Console.WriteLine("=== Workspace Configuration ===\n");
-
-        var currentPath = config.Workspace.Path;
-        Console.WriteLine($"Current workspace: {currentPath}");
-
-        Console.Write("Workspace path [press Enter to keep current]: ");
-        var input = Console.ReadLine()?.Trim();
-
-        if (!string.IsNullOrWhiteSpace(input))
-        {
-            config.Workspace.Path = input;
-        }
-
-        var resolvedPath = ResolvePath(config.Workspace.Path);
-        Console.WriteLine($"\n✓ Workspace: {resolvedPath}");
-    }
-
-    private async Task SaveAndFinishAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
-    {
-        var configDir = Path.GetDirectoryName(configPath);
-        if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
-        {
-            Directory.CreateDirectory(configDir);
-        }
-
-        await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-
-        Console.WriteLine($"\n✓ Configuration saved to {configPath}");
-
-        var workspacePath = ResolvePath(config.Workspace.Path);
-        if (!Directory.Exists(workspacePath))
-        {
-            Directory.CreateDirectory(workspacePath);
-            Console.WriteLine($"✓ Created workspace at {workspacePath}");
-        }
-
-        await CreateWorkspaceTemplatesAsync(workspacePath, cancellationToken);
-
-        // Install Playwright browsers (if not already installed)
-        await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive: true, cancellationToken);
-
-        Console.WriteLine("\n🐈 nbot is ready!");
-        PrintNextSteps(config, configPath);
-    }
-
+    /// <summary>
+    /// Print next steps
+    /// </summary>
     private static void PrintNextSteps(AgentConfig config, string configPath)
     {
         Console.WriteLine("\nNext steps:");
@@ -464,169 +1544,47 @@ public class OnboardCommand : ICliCommand
         }
     }
 
-    private static string GetConfigPath()
+    /// <summary>
+    /// Create default agent config
+    /// </summary>
+    private static AgentConfig CreateDefaultAgentConfig(string name, string workspacePath, EnvironmentInfo envInfo)
     {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
-
-    private static string GetDefaultWorkspacePath() => "~/.nbot/workspace";
-
-    private static string ResolvePath(string path)
-    {
-        if (path.StartsWith("~/"))
+        var config = new AgentConfig
         {
-            var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(homeDir, path[2..]);
-        }
-        return Path.GetFullPath(path);
-    }
+            Name = name,
+            Workspace = { Path = workspacePath }
+        };
 
-    private static async Task<bool> InstallPlaywrightBrowsersAsync(
-        AgentConfig config,
-        string configPath,
-        bool nonInteractive,
-        CancellationToken cancellationToken)
-    {
-        Console.WriteLine("\n=== Browser Tools Setup ===\n");
+        // 配置WebUI默认设置
+        config.WebUI.Enabled = true;
+        config.WebUI.Server.Host = "127.0.0.1";
+        config.WebUI.Server.Port = 18888;
+        config.WebUI.Auth.Mode = "token";
+        config.WebUI.Auth.Token = GenerateRandomToken() ?? string.Empty;
+        config.WebUI.Auth.AllowLocalhost = true;
+        config.WebUI.Cors.AllowedOrigins.Add("http://localhost:18888");
+        config.WebUI.Security.EnableHttps = false;
+        config.WebUI.Features.FileUpload = true;
+        config.WebUI.Features.MaxFileSize = "10MB";
 
-        var powerShellInstaller = new PowerShellInstaller();
-        var installer = new PlaywrightInstaller(powerShellInstaller: powerShellInstaller);
+        // 不创建空的 default LLM profile，让用户在 onboard 交互中配置
+        config.Llm.Profiles.Clear();
+        config.Llm.DefaultProfile = null;
 
-        // First check if Playwright browsers are already installed
-        Console.WriteLine("Checking Playwright browser installation...");
-        if (await installer.IsInstalledAsync(cancellationToken))
+        // 根据环境设置工具
+        if (!envInfo.HasGui)
         {
-            Console.WriteLine("✓ Playwright browsers already installed");
-            config.Browser = new BrowserToolsConfig { Enabled = true };
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-            return true;
-        }
-
-        // Playwright not installed, ask user whether to install
-        if (!nonInteractive)
-        {
-            Console.WriteLine("Browser automation tools require Playwright browsers to be installed.");
-            Console.Write("Install Playwright browsers now? [Y/n]: ");
-            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-            if (response == "n" || response == "no")
-            {
-                Console.WriteLine("⚠ Skipped Playwright browser installation.");
-                Console.WriteLine("  You can install manually later by running:");
-                Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
-                Console.WriteLine("    playwright install chromium");
-                config.Browser = new BrowserToolsConfig { Enabled = false };
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                return false;
-            }
-        }
-        else
-        {
-            // In non-interactive mode, skip installation silently
+            // 在无 GUI 环境下，禁用需要 GUI 的工具
             config.Browser = new BrowserToolsConfig { Enabled = false };
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-            return false;
+            // Note: Rap tool would be disabled here if it existed
         }
 
-        // User agreed to install, check PowerShell availability
-        Console.WriteLine("Checking PowerShell availability...");
-        var pwshPath = await powerShellInstaller.GetPowerShellPathAsync(cancellationToken);
-
-        if (string.IsNullOrEmpty(pwshPath))
-        {
-            // PowerShell not found, ask user whether to install
-            Console.WriteLine("PowerShell Core (pwsh) is required for Playwright installation.");
-            Console.WriteLine("  You can install manually from: https://aka.ms/powershell");
-
-            if (!nonInteractive)
-            {
-                Console.Write("\nInstall PowerShell Core now? [Y/n]: ");
-                var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-                if (response == "n" || response == "no")
-                {
-                    Console.WriteLine("⚠ Skipped PowerShell installation. Playwright installation aborted.");
-                    config.Browser = new BrowserToolsConfig { Enabled = false };
-                    await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                    return false;
-                }
-
-                Console.WriteLine("Installing PowerShell Core (this may take a few minutes)...");
-                var psInstalled = await powerShellInstaller.InstallAsync(cancellationToken);
-
-                if (!psInstalled)
-                {
-                    Console.WriteLine("✗ Failed to install PowerShell Core automatically.");
-                    Console.WriteLine("  Please install manually from: https://aka.ms/powershell");
-                    config.Browser = new BrowserToolsConfig { Enabled = false };
-                    await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                    return false;
-                }
-
-                Console.WriteLine("✓ PowerShell Core installed successfully");
-            }
-            else
-            {
-                // In non-interactive mode, skip silently
-                config.Browser = new BrowserToolsConfig { Enabled = false };
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                return false;
-            }
-        }
-        else
-        {
-            Console.WriteLine("✓ PowerShell Core found");
-        }
-
-        // Now install Playwright browsers
-        Console.WriteLine("\nInstalling Playwright browsers (this may take a few minutes)...");
-        Console.WriteLine("  Installing Chromium...");
-
-        try
-        {
-            var success = await installer.InstallAsync(new[] { "chromium" }, cancellationToken);
-            if (success)
-            {
-                Console.WriteLine("✓ Playwright browsers installed successfully");
-                config.Browser = new BrowserToolsConfig { Enabled = true };
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                return true;
-            }
-            else
-            {
-                var errorMessage = installer.GetStatusMessage();
-                Console.WriteLine("✗ Failed to install Playwright browsers automatically.");
-
-                // Check for platform not supported errors
-                if (errorMessage.Contains("does not support") || errorMessage.Contains("unsupported") || errorMessage.Contains("operating system may not be supported"))
-                {
-                    Console.WriteLine("\n  Note: Your operating system may not be officially supported by Playwright.");
-                    Console.WriteLine("  You can try one of the following:");
-                    Console.WriteLine("    1. Use Docker with a supported Linux distribution (Ubuntu 20.04/22.04/24.04)");
-                    Console.WriteLine("    2. Use WSL2 if on Windows");
-                }
-                else
-                {
-                    Console.WriteLine("  Please install manually:");
-                    Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
-                    Console.WriteLine("    playwright install chromium");
-                }
-                config.Browser = new BrowserToolsConfig { Enabled = false };
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                return false;
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"✗ Error during Playwright browser installation: {ex.Message}");
-            Console.WriteLine("  Please install manually:");
-            Console.WriteLine("    dotnet tool install --global Microsoft.Playwright.CLI");
-            Console.WriteLine("    playwright install chromium");
-            config.Browser = new BrowserToolsConfig { Enabled = false };
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-            return false;
-        }
+        return config;
     }
 
+    /// <summary>
+    /// Create workspace templates
+    /// </summary>
     private static async Task CreateWorkspaceTemplatesAsync(string workspacePath, CancellationToken cancellationToken)
     {
         var templates = new Dictionary<string, string>
@@ -673,6 +1631,9 @@ public class OnboardCommand : ICliCommand
         }
     }
 
+    /// <summary>
+    /// Get default AGENTS.md content
+    /// </summary>
     private static string GetDefaultAgentsContent() => @"# Agent Instructions
 
 You are a helpful AI assistant. Be concise, accurate, and friendly.
@@ -685,6 +1646,9 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 - Remember important information in memory/MEMORY.md; past conversations are stored in sessions/
 ";
 
+    /// <summary>
+    /// Get default SOUL.md content
+    /// </summary>
     private static string GetDefaultSoulContent() => @"# Soul
 
 I am nbot, a lightweight AI assistant.
@@ -702,6 +1666,9 @@ I am nbot, a lightweight AI assistant.
 - Transparency in actions
 ";
 
+    /// <summary>
+    /// Get default USER.md content
+    /// </summary>
     private static string GetDefaultUserContent() => @"# User
 
 Information about the user goes here.
@@ -713,6 +1680,9 @@ Information about the user goes here.
 - Language: (your preferred language)
 ";
 
+    /// <summary>
+    /// Get default MEMORY.md content
+    /// </summary>
     private static string GetDefaultMemoryContent() => @"# Long-term Memory
 
 This file stores important information that should persist across sessions.
@@ -730,38 +1700,102 @@ This file stores important information that should persist across sessions.
 (Things to remember)
 ";
 
-    private static AgentConfig CreateDefaultAgentConfig(string name, string workspacePath)
-    {
-        var config = new AgentConfig 
-        { 
-            Name = name,
-            Workspace = { Path = workspacePath }
-        };
-
-        // 配置WebUI默认设置
-        config.WebUI.Enabled = true;
-        config.WebUI.Server.Host = "127.0.0.1";
-        config.WebUI.Server.Port = 18888;
-        config.WebUI.Auth.Mode = "token";
-        config.WebUI.Auth.Token = GenerateRandomToken() ?? string.Empty;
-        config.WebUI.Auth.AllowLocalhost = true;
-        config.WebUI.Cors.AllowedOrigins.Add("http://localhost:18888");
-        config.WebUI.Security.EnableHttps = false;
-        config.WebUI.Features.FileUpload = true;
-        config.WebUI.Features.MaxFileSize = "10MB";
-
-        // 不创建空的 default LLM profile，让用户在 onboard 交互中配置
-        config.Llm.Profiles.Clear();
-        config.Llm.DefaultProfile = null;
-
-        return config;
-    }
-
+    /// <summary>
+    /// Generate random token
+    /// </summary>
     private static string GenerateRandomToken()
     {
         var bytes = new byte[32];
         using var rng = System.Security.Cryptography.RandomNumberGenerator.Create();
         rng.GetBytes(bytes);
         return Convert.ToBase64String(bytes).Replace("+", "").Replace("/", "").Replace("=", "").Substring(0, 32);
+    }
+
+    /// <summary>
+    /// Get config path
+    /// </summary>
+    private static string GetConfigPath()
+    {
+        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(homeDir, ".nbot", "config.json");
+    }
+
+    /// <summary>
+    /// Get default workspace path
+    /// </summary>
+    private static string GetDefaultWorkspacePath() => "~/.nbot/workspace";
+
+    /// <summary>
+    /// Resolve path
+    /// </summary>
+    private static string ResolvePath(string path)
+    {
+        if (path.StartsWith("~/"))
+        {
+            var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return Path.Combine(homeDir, path[2..]);
+        }
+        return Path.GetFullPath(path);
+    }
+
+    /// <summary>
+    /// Mask string for display
+    /// </summary>
+    private static string MaskString(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length < 8)
+        {
+            return "***";
+        }
+        return $"{value[..4]}...{value[^4..]}";
+    }
+
+    /// <summary>
+    /// Normalize input character (convert full-width to half-width)
+    /// </summary>
+    private static char NormalizeInputChar(char c)
+    {
+        // Convert full-width digits (U+FF10-U+FF19) to half-width (U+0030-U+0039)
+        if (c >= '\uFF10' && c <= '\uFF19')
+        {
+            return (char)(c - '\uFF10' + '0');
+        }
+        // Convert full-width uppercase letters (U+FF21-U+FF3A) to half-width (U+0041-U+005A)
+        if (c >= '\uFF21' && c <= '\uFF3A')
+        {
+            return (char)(c - '\uFF21' + 'A');
+        }
+        // Convert full-width lowercase letters (U+FF41-U+FF5A) to half-width (U+0061-U+007A)
+        if (c >= '\uFF41' && c <= '\uFF5A')
+        {
+            return (char)(c - '\uFF41' + 'a');
+        }
+        return c;
+    }
+
+    /// <summary>
+    /// Environment information
+    /// </summary>
+    private class EnvironmentInfo
+    {
+        public string OsPlatform { get; set; } = "";
+        public string OsVersion { get; set; } = "";
+        public bool HasGui { get; set; } = false;
+        public bool ConfigExists { get; set; } = false;
+    }
+
+    /// <summary>
+    /// Menu item
+    /// </summary>
+    private class MenuItem
+    {
+        public string Name { get; }
+        public Func<Task>? Action { get; }
+
+        public MenuItem(string name, Func<Task>? action)
+        {
+            Name = name;
+            Action = action;
+        }
     }
 }

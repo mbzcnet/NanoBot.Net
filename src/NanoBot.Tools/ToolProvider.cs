@@ -4,6 +4,7 @@ using NanoBot.Core.Bus;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools;
 using NanoBot.Core.Tools.Browser;
 using NanoBot.Tools.BuiltIn;
 using NanoBot.Tools.Mcp;
@@ -55,7 +56,8 @@ public static class ToolProvider
         var browserEnabled = config?.Browser?.Enabled != false;
         if (browserEnabled)
         {
-            tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService));
+            // 使用委托获取当前 sessionKey，避免 AsyncLocal 在异步链中丢失
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService, () => ToolExecutionContext.CurrentSessionKey));
         }
 
         tools.Add(BuiltIn.MessageTools.CreateMessageTool(messageBus, defaultChannel, defaultChatId));

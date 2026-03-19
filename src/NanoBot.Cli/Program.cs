@@ -47,9 +47,10 @@ public static class Program
             rootCommand.AddCommand(cmd.CreateCommand());
         }
 
-        rootCommand.SetHandler(() =>
+        rootCommand.SetHandler(async () =>
         {
-            rootCommand.Invoke("--help");
+            // Default to agent mode when no command is specified
+            await rootCommand.InvokeAsync("agent");
         });
 
         return await rootCommand.InvokeAsync(args);

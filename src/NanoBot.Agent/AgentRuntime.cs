@@ -324,6 +324,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
         // Debug logging: Start a new request log and collect LLM request info
         var requestId = -1;
+        var debugLogCompleted = false;
         if (_debugState?.IsDebugEnabled(sessionKey) == true)
         {
             requestId = await _debugState.StartRequestLogAsync(sessionKey, cancellationToken);
@@ -478,6 +479,10 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     timingInfo.AppendLine(responseContent);
                     
                     await _debugState!.AppendToLogAsync(sessionKey, requestId, timingInfo.ToString(), cancellationToken);
+
+                    // Mark request as completed with [END] marker
+                    await _debugState.FinishRequestLogAsync(sessionKey, requestId, "Stream completed normally", cancellationToken);
+                    debugLogCompleted = true;
                 }
                 catch (Exception ex)
                 {
@@ -488,6 +493,19 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         finally
         {
             ToolExecutionContext.SetCurrentSessionKey(null);
+
+            // Ensure debug log is marked as ended even if an exception occurred
+            if (requestId > 0 && _debugState?.IsDebugEnabled(sessionKey) == true && !debugLogCompleted)
+            {
+                try
+                {
+                    await _debugState.FinishRequestLogAsync(sessionKey, requestId, "Stream ended (abnormal/completed in finally)", cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to write debug log end marker");
+                }
+            }
         }
 
         swInner.Stop();

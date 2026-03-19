@@ -16,6 +16,7 @@ public interface IDebugState
     Task LogAsync(string sessionKey, string phase, object? data, CancellationToken cancellationToken = default);
     Task<int> StartRequestLogAsync(string sessionKey, CancellationToken cancellationToken = default);
     Task AppendToLogAsync(string sessionKey, int requestId, string content, CancellationToken cancellationToken = default);
+    Task FinishRequestLogAsync(string sessionKey, int requestId, string? reason = null, CancellationToken cancellationToken = default);
 }
 
 public sealed class DebugState : IDebugState
@@ -106,6 +107,36 @@ public sealed class DebugState : IDebugState
             var logDir = GetLogDirectory(sessionKey);
             var logFile = Path.Combine(logDir, $"debug_{requestId:D3}.md");
             await File.AppendAllTextAsync(logFile, content, cancellationToken);
+        }
+        catch
+        {
+            // Silently ignore
+        }
+    }
+
+    public async Task FinishRequestLogAsync(string sessionKey, int requestId, string? reason = null, CancellationToken cancellationToken = default)
+    {
+        if (!IsDebugEnabled(sessionKey) || requestId < 0)
+            return;
+
+        try
+        {
+            var logDir = GetLogDirectory(sessionKey);
+            var logFile = Path.Combine(logDir, $"debug_{requestId:D3}.md");
+            var sb = new StringBuilder();
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+            sb.AppendLine("## [END] Request Completed");
+            sb.AppendLine();
+            sb.AppendLine($"- **Timestamp**: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            if (!string.IsNullOrEmpty(reason))
+            {
+                sb.AppendLine($"- **Reason**: {reason}");
+            }
+            sb.AppendLine("- **Status**: LLM response stream finished normally");
+            sb.AppendLine();
+            await File.AppendAllTextAsync(logFile, sb.ToString(), cancellationToken);
         }
         catch
         {
