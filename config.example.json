@@ -73,7 +73,6 @@
   "Memory": {
     "Enabled": true,
     "MemoryFile": "MEMORY.md",
-    "HistoryFile": "HISTORY.md",
     "MaxHistoryEntries": 500
   },
   "Heartbeat": {

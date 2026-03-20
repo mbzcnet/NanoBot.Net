@@ -1568,20 +1568,53 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         sb.AppendLine();
 
         // Get tools from FunctionInvokingChatClient.AdditionalTools
+        var toolsLogged = false;
         var chatClient = agent.GetChatClient();
         if (chatClient != null)
         {
-            var functionInvoker = chatClient.GetService<FunctionInvokingChatClient>();
-            if (functionInvoker?.AdditionalTools != null && functionInvoker.AdditionalTools.Count > 0)
+            try
             {
-                sb.AppendLine("### Tools");
-                foreach (var tool in functionInvoker.AdditionalTools)
+                var functionInvoker = chatClient.GetService<FunctionInvokingChatClient>();
+                if (functionInvoker?.AdditionalTools != null && functionInvoker.AdditionalTools.Count > 0)
                 {
-                    var toolName = tool.Name ?? "unknown";
-                    var toolDesc = tool.Description ?? "";
-                    sb.AppendLine($"- **{toolName}**: {toolDesc}");
+                    sb.AppendLine("### Tools (from FunctionInvokingChatClient.AdditionalTools)");
+                    foreach (var tool in functionInvoker.AdditionalTools)
+                    {
+                        var toolName = tool.Name ?? "unknown";
+                        var toolDesc = (tool.Description ?? "").Split('\n')[0];
+                        sb.AppendLine($"- **{toolName}**: {toolDesc}");
+                    }
+                    sb.AppendLine();
+                    toolsLogged = true;
                 }
-                sb.AppendLine();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Failed to get FunctionInvokingChatClient from ChatClient");
+            }
+        }
+
+        // Fallback: get tools directly from DI IReadOnlyList<AITool>
+        if (!toolsLogged && _serviceProvider != null)
+        {
+            try
+            {
+                var aiTools = _serviceProvider.GetService<IReadOnlyList<AITool>>();
+                if (aiTools != null && aiTools.Count > 0)
+                {
+                    sb.AppendLine("### Tools (from IReadOnlyList<AITool> DI)");
+                    foreach (var tool in aiTools)
+                    {
+                        var toolName = tool.Name ?? "unknown";
+                        var toolDesc = (tool.Description ?? "").Split('\n')[0];
+                        sb.AppendLine($"- **{toolName}**: {toolDesc}");
+                    }
+                    sb.AppendLine();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Failed to get IReadOnlyList<AITool> from service provider");
             }
         }
 

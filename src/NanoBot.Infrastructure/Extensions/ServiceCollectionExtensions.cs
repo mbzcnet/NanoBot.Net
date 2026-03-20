@@ -9,6 +9,7 @@ using NanoBot.Core.Skills;
 using NanoBot.Core.Storage;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Tools.Rpa;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Bus;
 using NanoBot.Infrastructure.Browser;
@@ -19,6 +20,7 @@ using NanoBot.Infrastructure.Skills;
 using NanoBot.Infrastructure.Storage;
 using NanoBot.Infrastructure.Subagents;
 using NanoBot.Infrastructure.Workspace;
+using NanoBot.Infrastructure.Tools.Rpa;
 
 namespace NanoBot.Infrastructure.Extensions;
 
@@ -129,10 +131,69 @@ public static class ServiceCollectionExtensions
         return services;
     }
 
+    public static IServiceCollection AddRpaServices(
+        this IServiceCollection services,
+        RpaToolsConfig? config = null)
+    {
+        config ??= new RpaToolsConfig();
+
+        // 添加 ImageOptimizer
+        services.AddSingleton<ImageOptimizer>();
+
+        // 添加平台特定的截图服务
+        services.AddSingleton<IScreenCapture>(sp =>
+        {
+            var logger = sp.GetService<ILogger<ScreenCaptureService>>();
+            var platformCapture = ScreenCaptureFactory.Create();
+            return new ScreenCaptureService(platformCapture, logger);
+        });
+
+        // 添加 SharpHook 输入模拟器
+        services.AddSingleton<IInputSimulator, SharpHookInputSimulator>();
+
+        // 条件添加 OmniParser Client
+        if (config.Enabled && !string.IsNullOrEmpty(config.InstallPath))
+        {
+            services.AddSingleton<IOmniParserClient>(sp =>
+            {
+                var logger = sp.GetService<ILogger<OmniParserServiceManager>>();
+                return new OmniParserServiceManager(
+                    config.InstallPath,
+                    config.ServicePort,
+                    logger);
+            });
+        }
+        else
+        {
+            // 添加一个 no-op OmniParser Client，当未配置时使用
+            services.AddSingleton<IOmniParserClient, OmniParserClient>();
+        }
+
+        // 添加 RPA 服务
+        services.AddSingleton<IRpaService>(sp =>
+        {
+            var inputSimulator = sp.GetRequiredService<IInputSimulator>();
+            var screenCapture = sp.GetRequiredService<IScreenCapture>();
+            var omniParserClient = sp.GetService<IOmniParserClient>();
+            var imageOptimizer = sp.GetRequiredService<ImageOptimizer>();
+            var logger = sp.GetService<ILogger<RpaService>>();
+            return new RpaService(
+                inputSimulator,
+                screenCapture,
+                omniParserClient,
+                imageOptimizer,
+                logger,
+                config);
+        });
+
+        return services;
+    }
+
     public static IServiceCollection AddInfrastructureServices(
         this IServiceCollection services,
         WorkspaceConfig? workspaceConfig = null,
-        HeartbeatConfig? heartbeatConfig = null)
+        HeartbeatConfig? heartbeatConfig = null,
+        RpaToolsConfig? rpaConfig = null)
     {
         services.AddWorkspaceServices(workspaceConfig);
         services.AddMessageBusServices();
@@ -141,6 +202,7 @@ public static class ServiceCollectionExtensions
         services.AddSkillsServices();
         services.AddSubagentServices();
         services.AddBrowserServices();
+        services.AddRpaServices(rpaConfig);
         services.AddSingleton<IFileStorageService, FileStorageService>();
 
         return services;

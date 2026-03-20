@@ -25,6 +25,11 @@ public class AgentConfig
     public FileToolsConfig? FileTools { get; set; }
 
     public BrowserToolsConfig? Browser { get; set; }
+
+    /// <summary>
+    /// RPA 工具配置
+    /// </summary>
+    public RpaToolsConfig? Rpa { get; set; }
 }
 
 public class WebToolsConfig

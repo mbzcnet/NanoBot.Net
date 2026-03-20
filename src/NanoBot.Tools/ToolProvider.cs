@@ -6,6 +6,7 @@ using NanoBot.Core.Cron;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools;
 using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Tools.Rpa;
 using NanoBot.Tools.BuiltIn;
 using NanoBot.Tools.Mcp;
 
@@ -26,6 +27,7 @@ public static class ToolProvider
         var cronService = services.GetService<ICronService>();
         var subagentManager = services.GetService<ISubagentManager>();
         var browserService = services.GetService<IBrowserService>();
+        var rpaService = services.GetService<IRpaService>();
         var httpClientFactory = services.GetService<IHttpClientFactory>();
         var mcpClient = services.GetService<IMcpClient>();
         var config = services.GetService<AgentConfig>();
@@ -58,6 +60,12 @@ public static class ToolProvider
         {
             // 使用委托获取当前 sessionKey，避免 AsyncLocal 在异步链中丢失
             tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService, () => ToolExecutionContext.CurrentSessionKey));
+        }
+
+        // Only add RPA tools if explicitly enabled in config
+        if (config?.Rpa?.Enabled == true && rpaService != null)
+        {
+            tools.Add(BuiltIn.Rpa.RpaTools.CreateRpaTool(rpaService));
         }
 
         tools.Add(BuiltIn.MessageTools.CreateMessageTool(messageBus, defaultChannel, defaultChatId));
