@@ -495,11 +495,12 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             ToolExecutionContext.SetCurrentSessionKey(null);
 
             // Ensure debug log is marked as ended even if an exception occurred
+            // Use sync version to avoid async operation being cancelled during process exit
             if (requestId > 0 && _debugState?.IsDebugEnabled(sessionKey) == true && !debugLogCompleted)
             {
                 try
                 {
-                    await _debugState.FinishRequestLogAsync(sessionKey, requestId, "Stream ended (abnormal/completed in finally)", cancellationToken);
+                    _debugState.FinishRequestLogSync(sessionKey, requestId, "Stream ended (abnormal/completed in finally)");
                 }
                 catch (Exception ex)
                 {

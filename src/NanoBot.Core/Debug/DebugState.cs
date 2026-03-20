@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using NanoBot.Core.Workspace;
@@ -17,6 +18,7 @@ public interface IDebugState
     Task<int> StartRequestLogAsync(string sessionKey, CancellationToken cancellationToken = default);
     Task AppendToLogAsync(string sessionKey, int requestId, string content, CancellationToken cancellationToken = default);
     Task FinishRequestLogAsync(string sessionKey, int requestId, string? reason = null, CancellationToken cancellationToken = default);
+    void FinishRequestLogSync(string sessionKey, int requestId, string? reason = null);
 }
 
 public sealed class DebugState : IDebugState
@@ -25,10 +27,57 @@ public sealed class DebugState : IDebugState
     private readonly IWorkspaceManager _workspace;
     private readonly string _logsDirectoryName = "logs";
     private readonly ConcurrentDictionary<string, int> _requestCounters = new();
+    private readonly ConcurrentDictionary<string, HashSet<int>> _activeRequests = new();
 
     public DebugState(IWorkspaceManager workspace)
     {
         _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
+        // Register process exit handler to ensure logs are flushed
+        AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+
+        // Register POSIX signal handlers for Unix/Linux
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            try
+            {
+                PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnPosixSignal);
+                PosixSignalRegistration.Create(PosixSignal.SIGINT, OnPosixSignal);
+            }
+            catch
+            {
+                // Ignore if POSIX signals are not supported
+            }
+        }
+    }
+
+    private void OnProcessExit(object? sender, EventArgs e)
+    {
+        FlushAllActiveLogs("Process exited");
+    }
+
+    private void OnPosixSignal(PosixSignalContext context)
+    {
+        FlushAllActiveLogs($"Signal received: {context.Signal}");
+    }
+
+    private void FlushAllActiveLogs(string reason)
+    {
+        // Flush all active request logs on process exit
+        foreach (var kvp in _activeRequests)
+        {
+            var sessionKey = kvp.Key;
+            foreach (var requestId in kvp.Value.ToArray())
+            {
+                try
+                {
+                    FinishRequestLogSync(sessionKey, requestId, reason);
+                }
+                catch
+                {
+                    // Ignore errors during process exit
+                }
+            }
+        }
     }
 
     public bool IsDebugEnabled(string sessionKey)
@@ -89,6 +138,14 @@ public sealed class DebugState : IDebugState
                         "## IN - LLM Request\n\n";
 
             await File.WriteAllTextAsync(logFile, header, cancellationToken);
+
+            // Track this request as active
+            _activeRequests.AddOrUpdate(sessionKey, [requestId], (_, set) =>
+            {
+                set.Add(requestId);
+                return set;
+            });
+
             return requestId;
         }
         catch
@@ -137,10 +194,70 @@ public sealed class DebugState : IDebugState
             sb.AppendLine("- **Status**: LLM response stream finished normally");
             sb.AppendLine();
             await File.AppendAllTextAsync(logFile, sb.ToString(), cancellationToken);
+
+            // Remove from active requests
+            RemoveActiveRequest(sessionKey, requestId);
         }
         catch
         {
             // Silently ignore
+        }
+    }
+
+    public void FinishRequestLogSync(string sessionKey, int requestId, string? reason = null)
+    {
+        if (requestId < 0)
+            return;
+
+        try
+        {
+            var logDir = GetLogDirectory(sessionKey);
+            var logFile = Path.Combine(logDir, $"debug_{requestId:D3}.md");
+
+            // Check if [END] already exists to avoid duplicates
+            if (File.Exists(logFile))
+            {
+                var content = File.ReadAllText(logFile);
+                if (content.Contains("## [END] Request Completed"))
+                {
+                    RemoveActiveRequest(sessionKey, requestId);
+                    return;
+                }
+            }
+
+            var sb = new StringBuilder();
+            sb.AppendLine();
+            sb.AppendLine("---");
+            sb.AppendLine();
+            sb.AppendLine("## [END] Request Completed");
+            sb.AppendLine();
+            sb.AppendLine($"- **Timestamp**: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            if (!string.IsNullOrEmpty(reason))
+            {
+                sb.AppendLine($"- **Reason**: {reason}");
+            }
+            sb.AppendLine("- **Status**: LLM response stream finished normally");
+            sb.AppendLine();
+            File.AppendAllText(logFile, sb.ToString());
+
+            // Remove from active requests
+            RemoveActiveRequest(sessionKey, requestId);
+        }
+        catch
+        {
+            // Silently ignore
+        }
+    }
+
+    private void RemoveActiveRequest(string sessionKey, int requestId)
+    {
+        if (_activeRequests.TryGetValue(sessionKey, out var requests))
+        {
+            requests.Remove(requestId);
+            if (requests.Count == 0)
+            {
+                _activeRequests.TryRemove(sessionKey, out _);
+            }
         }
     }
 
