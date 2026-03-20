@@ -60,6 +60,7 @@ public abstract class ChannelBase : IChannel
             ChatId = chatId,
             Content = content,
             Media = media ?? Array.Empty<string>(),
+            ImagePaths = media ?? Array.Empty<string>(), // Preserve media paths for session history
             Metadata = metadata,
             Timestamp = DateTimeOffset.UtcNow
         };

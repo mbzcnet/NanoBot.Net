@@ -174,7 +174,7 @@ public class OllamaQwenIntegrationTests : IDisposable
     {
         // Arrange
         using var chatClient = CreateChatClient();
-        var imagePath = GetImagePath("vison_ocr_v1.jpg");
+        var imagePath = GetImagePath("vision_ocr_v1.jpg");
         
         // Expected text content from vison_ocr_v1.txt
         var expectedTexts = new[] { "AI Image Recognition Test", "bar chart", "line graph" };
@@ -247,7 +247,7 @@ public class OllamaQwenIntegrationTests : IDisposable
     {
         // Arrange
         using var chatClient = CreateChatClient();
-        var imagePath = GetImagePath("vison_ocr_v1.jpg");
+        var imagePath = GetImagePath("vision_ocr_v1.jpg");
 
         // Act
         var response = await SendImageToModelAsync(chatClient, imagePath,
@@ -273,7 +273,7 @@ public class OllamaQwenIntegrationTests : IDisposable
         var imagePaths = new[]
         {
             GetImagePath("vision_things_v1.jpg"),
-            GetImagePath("vison_ocr_v1.jpg")
+            GetImagePath("vision_ocr_v1.jpg")
         };
 
         // Act & Assert

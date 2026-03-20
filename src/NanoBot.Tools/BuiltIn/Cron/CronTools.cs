@@ -144,8 +144,56 @@ public static class CronTools
             return Task.FromResult("No scheduled jobs.");
         }
 
-        var lines = jobs.Select(j => $"- {j.Name} (id: {j.Id}, {j.Schedule.Kind})");
+        var lines = jobs.Select(FormatJobDetails);
         return Task.FromResult("Scheduled jobs:\n" + string.Join("\n", lines));
+    }
+
+    private static string FormatJobDetails(CronJob job)
+    {
+        var timing = FormatTiming(job);
+        var state = FormatState(job);
+        return $"- {job.Name} (id: {job.Id})\n  {timing}\n  {state}";
+    }
+
+    private static string FormatTiming(CronJob job)
+    {
+        var schedule = job.Schedule;
+        return schedule.Kind switch
+        {
+            CronScheduleKind.Cron => $"cron: {schedule.Expression}" + (string.IsNullOrEmpty(schedule.TimeZone) ? "" : $" ({schedule.TimeZone})"),
+            CronScheduleKind.Every => $"every: {(schedule.EveryMs ?? 0) / 1000}s",
+            CronScheduleKind.At => $"at: {FormatAtTimestamp(schedule.AtMs)}",
+            _ => $"unknown: {schedule.Kind}"
+        };
+    }
+
+    private static string FormatState(CronJob job)
+    {
+        var parts = new List<string> { $"enabled={job.Enabled}" };
+
+        if (job.LastRunAt.HasValue)
+        {
+            parts.Add($"last_run={job.LastRunAt.Value:yyyy-MM-dd HH:mm:ss}");
+            parts.Add($"last_status={job.State.LastStatus ?? "unknown"}");
+            if (!string.IsNullOrEmpty(job.State.LastError))
+            {
+                parts.Add($"error={job.State.LastError}");
+            }
+        }
+
+        if (job.NextRunAt.HasValue)
+        {
+            parts.Add($"next_run={job.NextRunAt.Value:yyyy-MM-dd HH:mm:ss}");
+        }
+
+        return string.Join(", ", parts);
+    }
+
+    private static string FormatAtTimestamp(long? atMs)
+    {
+        if (!atMs.HasValue)
+            return "N/A";
+        return DateTimeOffset.FromUnixTimeMilliseconds(atMs.Value).ToString("yyyy-MM-ddTHH:mm:ssZ");
     }
 
     private static Task<string> RemoveJob(string? jobId, ICronService cronService)

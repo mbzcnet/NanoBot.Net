@@ -256,4 +256,77 @@ public class SubagentManagerTests
         Assert.Equal(result.Id, info.Id);
         Assert.Equal("Test task", info.Task);
     }
+
+    [Fact]
+    public async Task SpawnAsync_CompletedResult_HasCorrectRole()
+    {
+        _workspaceManagerMock.Setup(x => x.GetWorkspacePath()).Returns("/tmp/workspace");
+        _workspaceManagerMock.Setup(x => x.GetSkillsPath()).Returns("/tmp/workspace/skills");
+
+        var manager = new SubagentManager(
+            _messageBusMock.Object,
+            _workspaceManagerMock.Object,
+            _logger,
+            executeSubagent: (systemPrompt, task) => Task.FromResult("Task completed"));
+
+        var result = await manager.SpawnAsync("Test task", null, "telegram", "chat123");
+
+        Assert.Equal("assistant", result.Role);
+        Assert.True(result.IsRoleValid);
+    }
+
+    [Fact]
+    public async Task SpawnAsync_FailedResult_HasCorrectRole()
+    {
+        _workspaceManagerMock.Setup(x => x.GetWorkspacePath()).Returns("/tmp/workspace");
+        _workspaceManagerMock.Setup(x => x.GetSkillsPath()).Returns("/tmp/workspace/skills");
+
+        var manager = new SubagentManager(
+            _messageBusMock.Object,
+            _workspaceManagerMock.Object,
+            _logger,
+            executeSubagent: (systemPrompt, task) => throw new InvalidOperationException("Test error"));
+
+        var result = await manager.SpawnAsync("Test task", null, "telegram", "chat123");
+
+        Assert.Equal("assistant", result.Role);
+        Assert.True(result.IsRoleValid);
+    }
+
+    [Fact]
+    public async Task SpawnAsync_CancelledResult_HasCorrectRole()
+    {
+        _workspaceManagerMock.Setup(x => x.GetWorkspacePath()).Returns("/tmp/workspace");
+        _workspaceManagerMock.Setup(x => x.GetSkillsPath()).Returns("/tmp/workspace/skills");
+
+        var tcs = new TaskCompletionSource<string>();
+        var manager = new SubagentManager(
+            _messageBusMock.Object,
+            _workspaceManagerMock.Object,
+            _logger,
+            executeSubagent: async (systemPrompt, task) =>
+            {
+                // Block until cancelled
+                await tcs.Task;
+                return "Should not reach here";
+            });
+
+        var spawnTask = manager.SpawnAsync("Long task", null, "telegram", "chat123");
+        await Task.Delay(20); // Let it start
+
+        var activeBefore = manager.GetActiveSubagents();
+        if (activeBefore.Count > 0)
+        {
+            manager.Cancel(activeBefore[0].Id);
+        }
+
+        // Release the task so it can handle cancellation
+        tcs.TrySetCanceled();
+
+        var result = await spawnTask;
+
+        Assert.Equal(SubagentStatus.Cancelled, result.Status);
+        Assert.Equal("assistant", result.Role);
+        Assert.True(result.IsRoleValid);
+    }
 }

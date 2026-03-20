@@ -93,7 +93,8 @@ public class SubagentManager : ISubagentManager
                 Id = id,
                 Status = SubagentStatus.Completed,
                 Output = output,
-                Duration = DateTimeOffset.UtcNow - info.StartedAt
+                Duration = DateTimeOffset.UtcNow - info.StartedAt,
+                Role = "assistant"
             };
 
             await AnnounceResultAsync(result, originChannel, originChatId);
@@ -120,7 +121,8 @@ public class SubagentManager : ISubagentManager
             {
                 Id = id,
                 Status = SubagentStatus.Cancelled,
-                Duration = DateTimeOffset.UtcNow - info.StartedAt
+                Duration = DateTimeOffset.UtcNow - info.StartedAt,
+                Role = "assistant"
             };
 
             _logger.LogInformation("Subagent [{Id}] cancelled", id);
@@ -139,7 +141,8 @@ public class SubagentManager : ISubagentManager
                 Id = id,
                 Status = SubagentStatus.Failed,
                 Error = ex.Message,
-                Duration = DateTimeOffset.UtcNow - info.StartedAt
+                Duration = DateTimeOffset.UtcNow - info.StartedAt,
+                Role = "assistant"
             };
 
             await AnnounceResultAsync(result, originChannel, originChatId);

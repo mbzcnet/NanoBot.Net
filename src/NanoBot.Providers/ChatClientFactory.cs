@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Configuration;
+using NanoBot.Providers.Decorators;
 using OpenAI.Chat;
 
 namespace NanoBot.Providers;
@@ -142,7 +143,8 @@ public class ChatClientFactory : IChatClientFactory
         var sanitizingClient = new SanitizingChatClient(chatClient, _logger);
         _logger.LogInformation("[TIMING] Created sanitizing client");
 
-        return new InterimTextRetryChatClient(sanitizingClient, _logger);
+        var interimClient = new InterimTextRetryChatClient(sanitizingClient, _logger);
+        return new EmptyChoicesProtectionChatClient(interimClient);
     }
 
     private static string ResolveModel(string model, string? liteLLMPrefix)

@@ -1,3 +1,21 @@
+# 2026-03-20
+
+- **创建原 nanobot 项目周报 (2026-03-13 ~ 2026-03-20)**：
+  - 分析报告：`doc.ai/reports/update/20260320-nanobot-weekly-update.md`
+  - 对比原项目最近 1 周（约 30+ commits）的更新内容
+  - 主要更新领域：
+    1. **稳定性修复**: Telegram 连接池分离和超时重试机制
+    2. **功能增强**: Feishu 代码块支持、Slack 完成反应
+    3. **Bug 修复**: 远程媒体 URL 验证、Cron 任务列表展示
+    4. **代码质量**: Cron 工具重构和测试覆盖
+  - 对齐状态汇总：
+    - ✅ **已对齐**: Feishu 代码块支持、Slack 完成反应、Onboard 配置对齐、Feishu 媒体类型修复
+    - ⚠️ **未对齐/需实现**: Telegram 连接池分离、Telegram 超时重试、Telegram 远程媒体 URL、Cron 列表展示增强、Provider 空 choices 处理、图片路径保留、Subagent 角色修复
+  - 待办事项（高优先级）：
+    1. Telegram 连接池分离 - 防止并发负载下的连接池耗尽
+    2. Telegram 超时重试 - 提高消息发送可靠性
+    3. Cron 列表展示增强 - 支持 schedule details 和 run state
+
 # 2026-03-19
 
 - **完成 RPA 工具设计实现**：

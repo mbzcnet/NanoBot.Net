@@ -608,6 +608,121 @@ public class CronToolsTests
         Assert.NotNull(capturedDefinition);
         Assert.True(capturedDefinition.Deliver);
     }
+
+    [Fact]
+    public async Task CronTools_ListJobs_ShowsEmptyMessage()
+    {
+        var mockCronService = new Mock<ICronService>();
+        mockCronService.Setup(x => x.ListJobs()).Returns(new List<CronJob>());
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        var result = await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "list",
+                ["message"] = null,
+                ["everySeconds"] = null,
+                ["cronExpr"] = null,
+                ["tz"] = null,
+                ["at"] = null,
+                ["jobId"] = null
+            },
+            CancellationToken.None);
+
+        Assert.Contains("No scheduled jobs", result?.ToString() ?? "");
+    }
+
+    [Fact]
+    public async Task CronTools_ListJobs_ShowsCronJobDetails()
+    {
+        var mockCronService = new Mock<ICronService>();
+        var job = new CronJob
+        {
+            Id = "test-job-123",
+            Name = "Daily Reminder",
+            Message = "Remember to check emails",
+            Schedule = new CronSchedule
+            {
+                Kind = CronScheduleKind.Cron,
+                Expression = "0 9 * * *",
+                TimeZone = "America/New_York"
+            },
+            Enabled = true,
+            State = new CronJobState
+            {
+                LastRunAtMs = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds(),
+                NextRunAtMs = DateTimeOffset.UtcNow.AddHours(8).ToUnixTimeMilliseconds(),
+                LastStatus = "completed"
+            }
+        };
+        mockCronService.Setup(x => x.ListJobs()).Returns(new List<CronJob> { job });
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        var result = await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "list",
+                ["message"] = null,
+                ["everySeconds"] = null,
+                ["cronExpr"] = null,
+                ["tz"] = null,
+                ["at"] = null,
+                ["jobId"] = null
+            },
+            CancellationToken.None);
+
+        var output = result?.ToString() ?? "";
+        Assert.Contains("Daily Reminder", output);
+        Assert.Contains("test-job-123", output);
+        Assert.Contains("cron: 0 9 * * * (America/New_York)", output);
+        Assert.Contains("enabled=True", output);
+        Assert.Contains("last_run=", output);
+        Assert.Contains("last_status=completed", output);
+        Assert.Contains("next_run=", output);
+    }
+
+    [Fact]
+    public async Task CronTools_ListJobs_ShowsEveryJobDetails()
+    {
+        var mockCronService = new Mock<ICronService>();
+        var job = new CronJob
+        {
+            Id = "interval-job",
+            Name = "Check Status",
+            Message = "Check system status",
+            Schedule = new CronSchedule
+            {
+                Kind = CronScheduleKind.Every,
+                EveryMs = 60000 // 60 seconds
+            },
+            Enabled = true,
+            State = new CronJobState()
+        };
+        mockCronService.Setup(x => x.ListJobs()).Returns(new List<CronJob> { job });
+
+        var tool = CronTools.CreateCronTool(mockCronService.Object, "whatsapp", "123456");
+        var func = (AIFunction)tool;
+
+        var result = await func.InvokeAsync(
+            new AIFunctionArguments
+            {
+                ["action"] = "list",
+                ["message"] = null,
+                ["everySeconds"] = null,
+                ["cronExpr"] = null,
+                ["tz"] = null,
+                ["at"] = null,
+                ["jobId"] = null
+            },
+            CancellationToken.None);
+
+        var output = result?.ToString() ?? "";
+        Assert.Contains("every: 60s", output);
+    }
 }
 
 public class SpawnToolsTests

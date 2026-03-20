@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -10,6 +11,7 @@ using Telegram.Bot.Exceptions;
 using Telegram.Bot.Polling;
 using Telegram.Bot.Types;
 using Telegram.Bot.Types.Enums;
+using ApiException = Telegram.Bot.Exceptions.ApiRequestException;
 
 namespace NanoBot.Channels.Implementations.Telegram;
 
@@ -149,22 +151,23 @@ public partial class TelegramChannel : ChannelBase
             try
             {
                 var html = MarkdownToTelegramHtml(chunk);
-                await _botClient.SendTextMessageAsync(
-                    chatId, 
-                    html, 
-                    parseMode: ParseMode.Html, 
-                    replyToMessageId: replyToMessageId,
+                await SendTextMessageWithRetryAsync(
+                    chatId,
+                    html,
+                    replyToMessageId,
+                    parseMode: ParseMode.Html,
                     cancellationToken: cancellationToken);
             }
-            catch (ApiRequestException ex)
+            catch (ApiRequestException ex) when (ex.Message.Contains("can't parse entities"))
             {
                 _logger.LogWarning(ex, "HTML parse failed, falling back to plain text");
                 try
                 {
-                    await _botClient.SendTextMessageAsync(
-                        chatId, 
-                        chunk, 
-                        replyToMessageId: replyToMessageId,
+                    await SendTextMessageWithRetryAsync(
+                        chatId,
+                        chunk,
+                        replyToMessageId,
+                        parseMode: null,
                         cancellationToken: cancellationToken);
                 }
                 catch (Exception ex2)
@@ -566,4 +569,100 @@ public partial class TelegramChannel : ChannelBase
 
     [GeneratedRegex(@"^[-*]\s+", RegexOptions.Multiline)]
     private static partial Regex BulletRegex();
+
+    /// <summary>
+    /// Executes an async Telegram API call with exponential backoff retry
+    /// </summary>
+    private async Task CallWithRetryAsync(
+        Func<Task> func,
+        int maxRetries = 3,
+        CancellationToken cancellationToken = default)
+    {
+        var delay = TimeSpan.FromSeconds(1);
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                await func();
+                return;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (attempt < maxRetries - 1)
+                {
+                    _logger.LogWarning("Telegram API call timed out, retrying in {Delay}s (attempt {Attempt}/{MaxRetries})",
+                        delay.TotalSeconds, attempt + 1, maxRetries);
+                    await Task.Delay(delay, cancellationToken);
+                    delay *= 2;
+                }
+            }
+            catch (HttpRequestException ex) when (attempt < maxRetries - 1)
+            {
+                _logger.LogWarning(ex, "Telegram API call failed, retrying in {Delay}s (attempt {Attempt}/{MaxRetries})",
+                    delay.TotalSeconds, attempt + 1, maxRetries);
+                await Task.Delay(delay, cancellationToken);
+                delay *= 2;
+            }
+            catch (ApiException ex) when (ex.ErrorCode == 429 && attempt < maxRetries - 1)
+            {
+                var retryAfter = ex.Parameters?.RetryAfter;
+                delay = retryAfter.HasValue
+                    ? TimeSpan.FromSeconds(Math.Max(retryAfter.Value, delay.TotalSeconds))
+                    : delay * 2;
+                _logger.LogWarning("Telegram rate limited, retrying in {Delay}s", delay.TotalSeconds);
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        // Final attempt
+        await func();
+    }
+
+    /// <summary>
+    /// Sends a message with retry support
+    /// </summary>
+    private async Task SendTextMessageWithRetryAsync(
+        long chatId,
+        string text,
+        int? replyToMessageId = null,
+        ParseMode? parseMode = null,
+        CancellationToken cancellationToken = default)
+    {
+        await CallWithRetryAsync(async () =>
+        {
+            await _botClient!.SendTextMessageAsync(
+                chatId,
+                text,
+                parseMode: parseMode ?? ParseMode.Html,
+                replyToMessageId: replyToMessageId,
+                cancellationToken: cancellationToken);
+        }, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Detects if media path is a remote URL
+    /// </summary>
+    private bool IsRemoteUrl(string path)
+    {
+        return path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetExtensionFromContentType(string contentType)
+    {
+        return contentType.ToLowerInvariant() switch
+        {
+            "image/jpeg" or "image/jpg" => ".jpg",
+            "image/png" => ".png",
+            "image/gif" => ".gif",
+            "image/webp" => ".webp",
+            "video/mp4" => ".mp4",
+            "video/quicktime" => ".mov",
+            "audio/mpeg" or "audio/mp3" => ".mp3",
+            "audio/ogg" => ".ogg",
+            "audio/wav" => ".wav",
+            "application/pdf" => ".pdf",
+            _ => ""
+        };
+    }
 }

@@ -14,6 +14,11 @@ public record InboundMessage
 
     public IReadOnlyList<string> Media { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Original image paths for session history preservation
+    /// </summary>
+    public IReadOnlyList<string> ImagePaths { get; init; } = Array.Empty<string>();
+
     public IDictionary<string, object>? Metadata { get; init; }
 
     public string SessionKey => $"{Channel}:{ChatId}";

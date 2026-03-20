@@ -11,4 +11,10 @@ public record SubagentResult
     public string? Error { get; init; }
 
     public TimeSpan Duration { get; init; }
+
+    /// <summary>Result message role (should always be "assistant" for subagent results)</summary>
+    public string Role { get; init; } = "assistant";
+
+    /// <summary>Validates that the role is correctly set to assistant</summary>
+    public bool IsRoleValid => Role == "assistant";
 }
