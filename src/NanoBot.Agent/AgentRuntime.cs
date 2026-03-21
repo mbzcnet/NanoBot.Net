@@ -353,6 +353,80 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 }
             }
 
+            // [REQUEST_LOG] 记录完整的LLM请求内容
+            try
+            {
+                var requestLog = new StringBuilder();
+                requestLog.AppendLine("\n=== LLM REQUEST DUMP ===");
+                
+                // 1. 获取Agent的ChatOptions
+                var chatClient = agent.GetChatClient();
+                requestLog.AppendLine($"[ChatClient Type]: {chatClient?.GetType().FullName ?? "null"}");
+                
+                // 2. 检查FunctionInvokingChatClient
+                var funcInvoker = chatClient?.GetService<FunctionInvokingChatClient>();
+                requestLog.AppendLine($"[FunctionInvokingChatClient]: {funcInvoker != null}");
+                requestLog.AppendLine($"[AdditionalTools Count]: {funcInvoker?.AdditionalTools?.Count ?? -1}");
+                
+                // 3. 获取AIContextProviders
+                requestLog.AppendLine("\n[AIContextProviders]:");
+                var aiContextProvidersField = typeof(ChatClientAgent).GetField("_aiContextProviders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (aiContextProvidersField != null)
+                {
+                    var providers = aiContextProvidersField.GetValue(agent) as IEnumerable<AIContextProvider>;
+                    if (providers != null)
+                    {
+                        requestLog.AppendLine($"  Count: {providers.Count()}");
+                        foreach (var provider in providers)
+                        {
+                            requestLog.AppendLine($"  - {provider.GetType().Name}");
+                        }
+                    }
+                }
+                
+                // 4. 获取ChatHistoryProvider
+                var historyProviderField = typeof(ChatClientAgent).GetField("_chatHistoryProvider", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (historyProviderField != null)
+                {
+                    var historyProvider = historyProviderField.GetValue(agent) as ChatHistoryProvider;
+                    requestLog.AppendLine($"\n[ChatHistoryProvider]: {historyProvider?.GetType().Name ?? "null"}");
+                }
+                
+                // 5. 获取Options中的Tools
+                var optionsField = typeof(ChatClientAgent).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (optionsField != null)
+                {
+                    var options = optionsField.GetValue(agent) as ChatClientAgentOptions;
+                    if (options?.ChatOptions != null)
+                    {
+                        requestLog.AppendLine($"\n[ChatOptions.Tools Count]: {options.ChatOptions.Tools?.Count ?? 0}");
+                        if (options.ChatOptions.Tools != null)
+                        {
+                            foreach (var tool in options.ChatOptions.Tools.Take(5)) // 只显示前5个
+                            {
+                                requestLog.AppendLine($"  - {tool.Name}");
+                            }
+                            if (options.ChatOptions.Tools.Count > 5)
+                            {
+                                requestLog.AppendLine($"  ... and {options.ChatOptions.Tools.Count - 5} more");
+                            }
+                        }
+                        requestLog.AppendLine($"\n[ChatOptions.Instructions Length]: {options.ChatOptions.Instructions?.Length ?? 0}");
+                    }
+                }
+                
+                // 6. 获取实际发送的消息
+                requestLog.AppendLine($"\n[User Message]: {userMessage.Text}");
+                
+                requestLog.AppendLine("\n=== END LLM REQUEST DUMP ===");
+                
+                _logger?.LogInformation(requestLog.ToString());
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "[REQUEST_LOG] Failed to dump LLM request");
+            }
+
             await foreach (var update in agent.RunStreamingAsync([userMessage], session, cancellationToken: cancellationToken))
             {
                 swInner.Stop();
@@ -420,17 +494,18 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                     }
                 }
 
-                var imageMarkdown = BuildSnapshotImageMarkdown(update.Contents);
-                if (!string.IsNullOrWhiteSpace(imageMarkdown))
+                // 提取快照图片上下文，通过 AdditionalProperties 传递，不注入到文本中
+                var imageContexts = ExtractSnapshotImageContext(update.Contents);
+                if (imageContexts != null && imageContexts.Length > 0)
                 {
-                    _logger?.LogInformation("Snapshot markdown injected into streaming response for session {SessionKey}", sessionKey);
+                    _logger?.LogInformation("Snapshot images extracted for session {SessionKey}: {Count} images", sessionKey, imageContexts.Length);
                     var imageUpdate = new AgentResponseUpdate
                     {
                         Role = ChatRole.Assistant,
-                        Contents = { new TextContent(imageMarkdown) },
+                        Contents = { new TextContent(string.Empty) },
                         AdditionalProperties = new()
                     };
-                    imageUpdate.AdditionalProperties["_snapshot_image"] = true;
+                    imageUpdate.AdditionalProperties["_snapshot_images"] = imageContexts;
                     yield return imageUpdate;
                 }
 
@@ -584,13 +659,21 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         {
             responseText = "I've completed processing but have no response to give.";
         }
-        var snapshotImageMarkdown = BuildSnapshotImageMarkdown(response.Messages.SelectMany(m => m.Contents));
-        if (!string.IsNullOrWhiteSpace(snapshotImageMarkdown))
+
+        // 提取快照图片上下文，通过 Metadata 传递，不注入到文本中
+        var snapshotImageContexts = ExtractSnapshotImageContext(response.Messages.SelectMany(m => m.Contents));
+        Dictionary<string, object> messageMetadata = new();
+        if (msg.Metadata != null)
         {
-            _logger?.LogInformation("Snapshot markdown injected into non-streaming response for session {SessionKey}", sessionKey);
-            responseText = string.IsNullOrWhiteSpace(responseText)
-                ? snapshotImageMarkdown
-                : $"{responseText}\n\n{snapshotImageMarkdown}";
+            foreach (var kvp in msg.Metadata)
+            {
+                messageMetadata[kvp.Key] = kvp.Value;
+            }
+        }
+        if (snapshotImageContexts != null && snapshotImageContexts.Length > 0)
+        {
+            _logger?.LogInformation("Snapshot images extracted for non-streaming response session {SessionKey}: {Count} images", sessionKey, snapshotImageContexts.Length);
+            messageMetadata["_snapshot_images"] = snapshotImageContexts;
         }
 
         preview = responseText.Length > 120 ? responseText[..120] + "..." : responseText;
@@ -605,14 +688,20 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             Channel = msg.Channel,
             ChatId = msg.ChatId,
             Content = responseText,
-            Metadata = msg.Metadata
+            Metadata = messageMetadata
         };
     }
 
-    private string? BuildSnapshotImageMarkdown(IEnumerable<AIContent> contents)
+    /// <summary>
+    /// 从内容中提取快照图片上下文，不注入 Markdown 文本
+    /// </summary>
+    public record MarkdownImageContext(string Url, string AltText, int Index);
+
+    private MarkdownImageContext[]? ExtractSnapshotImageContext(IEnumerable<AIContent> contents)
     {
-        var images = new List<string>();
+        var images = new List<(string Url, int Index)>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var index = 0;
 
         foreach (var content in contents)
         {
@@ -624,67 +713,47 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             var payload = GetFunctionResultPayload(functionResult);
             if (string.IsNullOrWhiteSpace(payload))
             {
-                _logger?.LogWarning("BuildSnapshotImageMarkdown: Payload is empty");
                 continue;
             }
 
-            // _logger?.LogInformation("BuildSnapshotImageMarkdown Payload: {Payload}", payload);
+            try
+            {
+                using var document = JsonDocument.Parse(payload);
+                var rootElement = document.RootElement;
 
-                try
+                if (rootElement.ValueKind == JsonValueKind.String)
                 {
-                    using var document = JsonDocument.Parse(payload);
-                    var rootElement = document.RootElement;
-
-                    // Handle double-serialized JSON (e.g. payload is "{\"action\":...}")
-                    // This can happen when the tool result is a JSON string that gets serialized again by the agent framework
-                    if (rootElement.ValueKind == JsonValueKind.String)
+                    var innerJson = rootElement.GetString();
+                    if (!string.IsNullOrWhiteSpace(innerJson))
                     {
-                        var innerJson = rootElement.GetString();
-                        if (!string.IsNullOrWhiteSpace(innerJson))
+                        try
                         {
-                            try
-                            {
-                                using var innerDoc = JsonDocument.Parse(innerJson);
-                                ProcessSnapshotJsonElement(innerDoc.RootElement, seen, images);
-                            }
-                            catch (JsonException) { }
+                            using var innerDoc = JsonDocument.Parse(innerJson);
+                            ExtractSnapshotUrls(innerDoc.RootElement, seen, images, ref index);
                         }
-                    }
-                    else
-                    {
-                        ProcessSnapshotJsonElement(rootElement, seen, images);
+                        catch (JsonException) { }
                     }
                 }
-                catch (JsonException)
+                else
                 {
+                    ExtractSnapshotUrls(rootElement, seen, images, ref index);
                 }
             }
-
-            if (images.Count == 0)
+            catch (JsonException)
             {
-                return null;
             }
-
-            var lines = new List<string>();
-            for (var i = 0; i < images.Count; i++)
-            {
-                var url = images[i];
-                lines.Add($"![snapshot-{i + 1}]({url})");
-            }
-
-            return $"\n\n{string.Join("\n\n", lines)}\n\n";
         }
 
-    private static string WrapToolHintAsMarkdown(string toolHint)
-    {
-        // 直接返回 Markdown 格式
-        // 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
-        return $"\n{toolHint}\n";
+        if (images.Count == 0)
+        {
+            return null;
+        }
+
+        return images.Select((img, i) => new MarkdownImageContext(img.Url, $"snapshot-{i + 1}", i)).ToArray();
     }
 
-    private void ProcessSnapshotJsonElement(JsonElement rootElement, HashSet<string> seen, List<string> images)
+    private void ExtractSnapshotUrls(JsonElement rootElement, HashSet<string> seen, List<(string Url, int Index)> images, ref int index)
     {
-        // Skip if the payload is not a JSON object
         if (rootElement.ValueKind != JsonValueKind.Object)
         {
             return;
@@ -705,17 +774,23 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         if (!TryGetJsonString(rootElement, "imagePath", out var imagePath) ||
             string.IsNullOrWhiteSpace(imagePath))
         {
-            _logger?.LogWarning("BuildSnapshotImageMarkdown: ImagePath not found");
             return;
         }
 
         var imageUrl = ToSessionFileUrl(imagePath);
-        if (string.IsNullOrWhiteSpace(imageUrl) || !seen.Add(imageUrl))
+        if (string.IsNullOrWhiteSpace(imageUrl) || !seen.Add(imageUrl!))
         {
             return;
         }
 
-        images.Add(imageUrl);
+        images.Add((imageUrl, index++));
+    }
+
+    private static string WrapToolHintAsMarkdown(string toolHint)
+    {
+        // 直接返回 Markdown 格式
+        // 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
+        return $"\n{toolHint}\n";
     }
 
     private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)

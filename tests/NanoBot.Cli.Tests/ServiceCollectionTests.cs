@@ -143,6 +143,7 @@ public class ServiceCollectionTests
         var configuration = CreateTestConfiguration();
 
         services.AddLogging();
+        services.AddSingleton(configuration); // Register IConfiguration explicitly
         services.AddNanoBot(configuration);
 
         var serviceProvider = services.BuildServiceProvider();
@@ -181,6 +182,7 @@ public class ServiceCollectionTests
         var configuration = CreateTestConfiguration();
 
         services.AddLogging();
+        services.AddSingleton(configuration); // Register IConfiguration explicitly
         services.AddNanoBot(configuration);
 
         var serviceProvider = services.BuildServiceProvider();

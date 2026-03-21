@@ -78,12 +78,17 @@ public class AgentIntegrationTests : IDisposable
             Tools = _tools
         };
 
-        var response = await _chatClient.GetResponseAsync(
+        // Use streaming response
+        var responseBuilder = new System.Text.StringBuilder();
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(
             "Search the web for Apple's current market cap",
-            options);
+            options))
+        {
+            if (update.Text != null)
+                responseBuilder.Append(update.Text);
+        }
 
-        Assert.NotNull(response);
-        var text = response.Text ?? string.Empty;
+        var text = responseBuilder.ToString();
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
         // Check if tool was actually invoked by looking for actual search results
@@ -105,12 +110,17 @@ public class AgentIntegrationTests : IDisposable
             Temperature = 0.1f
         };
 
-        var response = await _chatClient.GetResponseAsync(
+        // Use streaming response
+        var responseBuilder = new System.Text.StringBuilder();
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(
             "Search the web for Tesla's stock price",
-            options);
+            options))
+        {
+            if (update.Text != null)
+                responseBuilder.Append(update.Text);
+        }
 
-        Assert.NotNull(response);
-        var text = response.Text ?? string.Empty;
+        var text = responseBuilder.ToString();
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
         Console.WriteLine($"Low temp test response (first 500 chars):\n{text[..Math.Min(500, text.Length)]}");
@@ -129,12 +139,17 @@ public class AgentIntegrationTests : IDisposable
             Tools = _tools
         };
 
-        var response = await _chatClient.GetResponseAsync(
+        // Use streaming response
+        var responseBuilder = new System.Text.StringBuilder();
+        await foreach (var update in _chatClient.GetStreamingResponseAsync(
             "First search for the latest version of .NET, then fetch the official website",
-            options);
+            options))
+        {
+            if (update.Text != null)
+                responseBuilder.Append(update.Text);
+        }
 
-        Assert.NotNull(response);
-        var text = response.Text ?? string.Empty;
+        var text = responseBuilder.ToString();
         Console.WriteLine($"Multi-tool test response (first 800 chars):\n{text[..Math.Min(800, text.Length)]}");
     }
 }

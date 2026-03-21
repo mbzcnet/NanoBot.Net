@@ -61,8 +61,15 @@ public class EndToEndTests : IAsyncLifetime
             _agent,
             _messageBus,
             _sessionManager,
-            _sessionsDirectory,
-            loggerFactory.CreateLogger<AgentRuntime>());
+            _workspaceMock.Object,
+            memoryStore: null,
+            subagentManager: null,
+            memoryWindow: 50,
+            chatClientFactory: null,
+            llmConfig: null,
+            serviceProvider: null,
+            logger: loggerFactory.CreateLogger<AgentRuntime>(),
+            debugState: null);
     }
 
     public async Task DisposeAsync()

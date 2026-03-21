@@ -486,6 +486,9 @@ public sealed class SessionManager : ISessionManager
         var role = message.Role.ToString().ToLowerInvariant();
         var content = message.Text ?? string.Empty;
 
+        // Remove [TOOL_CALL] markers from content before saving
+        content = RemoveToolCallMarkers(content);
+
         JsonArray? toolCalls = null;
         string? toolCallId = null;
         string? name = null;
@@ -551,10 +554,13 @@ public sealed class SessionManager : ISessionManager
         // content 字段用于纯文本展示，但不应影响工具调用的实际功能
         
         content ??= string.Empty;
+
+        // 分离文本内容和图片元数据存储
+        // content 保持原始文本不变，图片信息存储到独立的 sessionImages 列表
         List<SessionImageMetadata>? sessionImages = null;
-        if (role == "user" && !string.IsNullOrWhiteSpace(content))
+        if (!string.IsNullOrWhiteSpace(content))
         {
-            content = BuildHistoryImageContent(content, out sessionImages);
+            sessionImages = ExtractImageMetadata(content);
         }
 
         var obj = new JsonObject
@@ -637,6 +643,37 @@ public sealed class SessionManager : ISessionManager
 
         metadataList = images.Count == 0 ? null : images;
         return updatedContent;
+    }
+
+    /// <summary>
+    /// 从内容中提取图片元数据，不修改原始文本内容
+    /// </summary>
+    private List<SessionImageMetadata>? ExtractImageMetadata(string content)
+    {
+        var matches = MarkdownImageRegex.Matches(content);
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var images = new List<SessionImageMetadata>();
+        foreach (Match match in matches)
+        {
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var alt = match.Groups["alt"].Value;
+            var title = match.Groups["title"].Value;
+            var url = match.Groups["url"].Value.Trim();
+            if (TryCreateThumbnail(url, alt, title, out var metadata))
+            {
+                images.Add(metadata);
+            }
+        }
+
+        return images.Count == 0 ? null : images;
     }
 
     private bool TryCreateThumbnail(string imageUrl, string alt, string title, out SessionImageMetadata metadata)

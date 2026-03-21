@@ -1,9 +1,12 @@
 using FluentAssertions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using Moq;
 using NanoBot.Agent;
 using NanoBot.Core.Bus;
+using NanoBot.Core.Memory;
+using NanoBot.Core.Subagents;
 using NanoBot.Core.Workspace;
 using Xunit;
 
@@ -21,7 +24,15 @@ public class AgentIntegrationTests : IAsyncLifetime
             _fixture.Agent,
             _fixture.MessageBus,
             _fixture.SessionManager,
-            _fixture.SessionsDirectory);
+            _fixture.WorkspaceManager,
+            memoryStore: null,
+            subagentManager: null,
+            memoryWindow: 50,
+            chatClientFactory: null,
+            llmConfig: null,
+            serviceProvider: null,
+            logger: null,
+            debugState: null);
     }
 
     public async Task DisposeAsync()
@@ -184,7 +195,15 @@ public class AgentIntegrationTests : IAsyncLifetime
             fixture.Agent,
             fixture.MessageBus,
             fixture.SessionManager,
-            fixture.SessionsDirectory);
+            fixture.WorkspaceManager,
+            memoryStore: null,
+            subagentManager: null,
+            memoryWindow: 50,
+            chatClientFactory: null,
+            llmConfig: null,
+            serviceProvider: null,
+            logger: null,
+            debugState: null);
 
         var response = await runtime.ProcessDirectAsync("Please read file test.txt");
 

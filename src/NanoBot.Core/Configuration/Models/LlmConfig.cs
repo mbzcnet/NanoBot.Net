@@ -37,7 +37,10 @@ public class LlmProfile
 
 public class LlmConfig
 {
-    public Dictionary<string, LlmProfile> Profiles { get; set; } = new();
+    public Dictionary<string, LlmProfile> Profiles { get; set; } = new()
+    {
+        ["default"] = new LlmProfile()
+    };
 
     public string? DefaultProfile { get; set; } = "default";
 }

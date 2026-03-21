@@ -5,11 +5,15 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
 using NanoBot.Cli.Extensions;
+using NanoBot.Cli.Formatting;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Debug;
+using NanoBot.Core.Output;
 using NanoBot.Core.Workspace;
 using NLog.Config;
 using NLog.Extensions.Logging;
+using Spectre.Console;
+using Spectre.Console.Rendering;
 
 namespace NanoBot.Cli.Commands;
 
@@ -65,12 +69,6 @@ public class AgentCommand : ICliCommand
             getDefaultValue: () => true
         );
 
-        var logsOption = new Option<bool>(
-            name: "--logs",
-            description: "Show runtime logs during chat",
-            getDefaultValue: () => false
-        );
-
         var skipCheckOption = new Option<bool>(
             name: "--skip-check",
             description: "Skip configuration check",
@@ -85,7 +83,7 @@ public class AgentCommand : ICliCommand
 
         var debugOption = new Option<bool>(
             name: "--debug",
-            description: "Enable debug mode to log LLM requests/responses",
+            description: "Enable debug mode (log LLM requests/responses and runtime logs)",
             getDefaultValue: () => false
         );
 
@@ -95,7 +93,6 @@ public class AgentCommand : ICliCommand
             sessionOption,
             configOption,
             markdownOption,
-            logsOption,
             skipCheckOption,
             streamingOption,
             debugOption,
@@ -108,13 +105,12 @@ public class AgentCommand : ICliCommand
             var session = context.ParseResult.GetValueForOption(sessionOption);
             var configPath = context.ParseResult.GetValueForOption(configOption);
             var markdown = context.ParseResult.GetValueForOption(markdownOption);
-            var logs = context.ParseResult.GetValueForOption(logsOption);
             var skipCheck = context.ParseResult.GetValueForOption(skipCheckOption);
             var streaming = context.ParseResult.GetValueForOption(streamingOption);
             var debug = context.ParseResult.GetValueForOption(debugOption);
             var listSessions = context.ParseResult.GetValueForOption(listSessionsOption);
             var cancellationToken = context.GetCancellationToken();
-            await ExecuteAgentAsync(message, session, configPath, markdown, logs, skipCheck, streaming, debug, listSessions, cancellationToken);
+            await ExecuteAgentAsync(message, session, configPath, markdown, skipCheck, streaming, debug, listSessions, cancellationToken);
         });
 
         return command;
@@ -125,7 +121,6 @@ public class AgentCommand : ICliCommand
         string? sessionId,
         string? configPath,
         bool renderMarkdown,
-        bool showLogs,
         bool skipCheck,
         bool streaming,
         bool debug,
@@ -163,7 +158,8 @@ public class AgentCommand : ICliCommand
 
         services.AddNanoBot(config);
 
-        if (!showLogs)
+        // Show all logs when debug mode is enabled
+        if (!debug)
         {
             services.Configure<LoggerFilterOptions>(options =>
             {
@@ -223,7 +219,8 @@ public class AgentCommand : ICliCommand
 
                 servicesLoop.AddNanoBot(config);
 
-                if (!showLogs)
+                // Show all logs when debug mode is enabled
+                if (!debug)
                 {
                     servicesLoop.Configure<LoggerFilterOptions>(options =>
                     {
@@ -759,6 +756,7 @@ public class AgentCommand : ICliCommand
         if (renderMarkdown)
         {
             Console.WriteLine("🐈 NBot：");
+            RenderMarkdownWithSpectre(response);
         }
         else
         {
@@ -767,13 +765,43 @@ public class AgentCommand : ICliCommand
             return;
         }
 
-        PrintMarkdown(response);
-
         Console.WriteLine();
     }
 
-    private static void PrintMarkdown(string content)
+    private static void RenderMarkdownWithSpectre(string content)
     {
+        if (string.IsNullOrEmpty(content))
+        {
+            return;
+        }
+
+        // 使用 Spectre.Console Markup 进行渲染
+        // 简单处理：直接使用 Markup 渲染，Spectre 会自动处理粗体、斜体等
+        var lines = content.Split('\n');
+        foreach (var line in lines)
+        {
+            var processedLine = ProcessMarkdownLine(line);
+            try
+            {
+                // 尝试使用 Markup 渲染，如果失败则直接输出
+                AnsiConsole.WriteLine(processedLine);
+            }
+            catch
+            {
+                Console.WriteLine(processedLine);
+            }
+        }
+    }
+
+    private static void PrintMarkdown(string content, IOutputFormatter? formatter = null)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return;
+        }
+
+        // 使用 Spectre.Console 的 Markup 进行渲染
+        // Spectre.Console 支持部分 Markdown 语法（粗体、斜体、代码等）
         var lines = content.Split('\n');
         foreach (var line in lines)
         {

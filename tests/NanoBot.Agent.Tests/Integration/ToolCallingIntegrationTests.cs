@@ -124,11 +124,25 @@ public class ToolCallingIntegrationTests : IDisposable
 
         _output.WriteLine($"Sending request with {tools.Count} tools: {prompt}");
 
-        var response = await chatClient.GetResponseAsync(messages, options);
+        // Use streaming response
+        var responseBuilder = new System.Text.StringBuilder();
+        var hasToolCall = false;
 
-        var responseText = response.Text ?? "";
-        // Check if any message in the response contains FunctionCallContent
-        var hasToolCall = response.Messages?.Any(m => m.Contents.Any(c => c is FunctionCallContent)) == true;
+        await foreach (var update in chatClient.GetStreamingResponseAsync(messages, options))
+        {
+            if (update.Text != null)
+            {
+                responseBuilder.Append(update.Text);
+            }
+
+            // Check for function calls in streaming updates
+            if (update.Contents.Any(c => c is FunctionCallContent))
+            {
+                hasToolCall = true;
+            }
+        }
+
+        var responseText = responseBuilder.ToString();
 
         _output.WriteLine($"Response: {responseText}");
         _output.WriteLine($"Has tool call: {hasToolCall}");
@@ -436,20 +450,32 @@ public class ToolCallingIntegrationTests : IDisposable
             new(ChatRole.System, "You are a helpful assistant with web search capabilities.")
         };
 
-        // Act - First call
+        // Act - First call using streaming
         sessionMessages.Add(new ChatMessage(ChatRole.User, "Search for information about quantum computing"));
-        var response1 = await chatClient.GetResponseAsync(sessionMessages, new ChatOptions { Tools = tools });
-        sessionMessages.Add(new ChatMessage(ChatRole.Assistant, response1.Text ?? ""));
+        var responseBuilder1 = new System.Text.StringBuilder();
+        await foreach (var update in chatClient.GetStreamingResponseAsync(sessionMessages, new ChatOptions { Tools = tools }))
+        {
+            if (update.Text != null)
+                responseBuilder1.Append(update.Text);
+        }
+        var response1 = responseBuilder1.ToString();
+        sessionMessages.Add(new ChatMessage(ChatRole.Assistant, response1));
 
-        // Act - Second call (should preserve context)
+        // Act - Second call (should preserve context) using streaming
         sessionMessages.Add(new ChatMessage(ChatRole.User, "Now search for classical computing and compare"));
-        var response2 = await chatClient.GetResponseAsync(sessionMessages, new ChatOptions { Tools = tools });
+        var responseBuilder2 = new System.Text.StringBuilder();
+        await foreach (var update in chatClient.GetStreamingResponseAsync(sessionMessages, new ChatOptions { Tools = tools }))
+        {
+            if (update.Text != null)
+                responseBuilder2.Append(update.Text);
+        }
+        var response2 = responseBuilder2.ToString();
 
         // Assert
-        Assert.NotNull(response1.Text);
-        Assert.NotNull(response2.Text);
-        _output.WriteLine($"First response: {response1.Text}");
-        _output.WriteLine($"Second response: {response2.Text}");
+        Assert.NotNull(response1);
+        Assert.NotNull(response2);
+        _output.WriteLine($"First response: {response1}");
+        _output.WriteLine($"Second response: {response2}");
     }
 
     private List<AITool> CreateToolsForCase(BenchmarkCase testCase)

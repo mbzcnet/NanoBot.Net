@@ -119,10 +119,13 @@ public class ChatClientFactory : IChatClientFactory
                 $"Missing API key for provider '{provider}'. Set it in config (llm.profiles.default.api_key/apiKey/ApiKey) or via environment variable '{spec.EnvKey}'.");
         }
 
+        // Use longer timeout for local models (Ollama) as they may need more time for large images/vision tasks
+        var networkTimeout = spec.IsLocal ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(60);
+
         var clientOptions = new OpenAI.OpenAIClientOptions 
         { 
             Endpoint = new Uri(resolvedApiBase),
-            NetworkTimeout = TimeSpan.FromSeconds(60)
+            NetworkTimeout = networkTimeout
         };
 
         var client = new OpenAI.OpenAIClient(

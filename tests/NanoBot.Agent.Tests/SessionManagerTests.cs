@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
@@ -215,17 +216,17 @@ public class SessionManagerTests : IDisposable
         var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
         var sessionKey = "test:tool_call_markers";
         var session = await manager.GetOrCreateSessionAsync(sessionKey);
-        
+
         if (!session.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var list) || list == null)
         {
             list = new List<ChatMessage>();
             session.StateBag.SetValue("ChatHistoryProvider", list);
         }
-        
+
         // Add a message with tool call and content containing [TOOL_CALL] markers
         var args = new Dictionary<string, object?> { { "query", "test" } };
         var toolCall = new FunctionCallContent("call_1", "search", args);
-        
+
         // Create content with [TOOL_CALL] markers (as they would appear in the display)
         var contentWithMarkers = "\n[TOOL_CALL]search(\"test\")[/TOOL_CALL]\n\nHere are the results:";
         var callMessage = new ChatMessage(ChatRole.Assistant, contentWithMarkers)
@@ -233,21 +234,21 @@ public class SessionManagerTests : IDisposable
             Contents = { toolCall }
         };
         list.Add(callMessage);
-        
+
         await manager.SaveSessionAsync(session, sessionKey);
-        
+
         // Read file content
         var sessionFile = Path.Combine(_testDirectory, "sessions", "test_tool_call_markers.jsonl");
         Assert.True(File.Exists(sessionFile));
-        
+
         var lines = await File.ReadAllLinesAsync(sessionFile);
         var json = JsonSerializer.Deserialize<JsonElement>(lines.Last());
-        
+
         // Verify content has markers removed
         var content = json.GetProperty("content").GetString();
         Assert.DoesNotContain("[TOOL_CALL]", content);
         Assert.DoesNotContain("[/TOOL_CALL]", content);
-        
+
         // Verify tool_calls are still preserved
         Assert.True(json.TryGetProperty("tool_calls", out var savedToolCalls));
         Assert.Equal(1, savedToolCalls.GetArrayLength());
@@ -259,17 +260,17 @@ public class SessionManagerTests : IDisposable
         var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
         var sessionKey = "test:blank_lines";
         var session = await manager.GetOrCreateSessionAsync(sessionKey);
-        
+
         if (!session.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var list) || list == null)
         {
             list = new List<ChatMessage>();
             session.StateBag.SetValue("ChatHistoryProvider", list);
         }
-        
+
         // Add a message with tool call and multiple blank lines
         var args = new Dictionary<string, object?> { { "query", "test" } };
         var toolCall = new FunctionCallContent("call_1", "search", args);
-        
+
         // Create content with multiple blank lines after markers
         var contentWithMultipleBlanks = "\n[TOOL_CALL]search(\"test\")[/TOOL_CALL]\n\n\n\nSome content";
         var callMessage = new ChatMessage(ChatRole.Assistant, contentWithMultipleBlanks)
@@ -277,15 +278,15 @@ public class SessionManagerTests : IDisposable
             Contents = { toolCall }
         };
         list.Add(callMessage);
-        
+
         await manager.SaveSessionAsync(session, sessionKey);
-        
+
         var sessionFile = Path.Combine(_testDirectory, "sessions", "test_blank_lines.jsonl");
         var lines = await File.ReadAllLinesAsync(sessionFile);
         var json = JsonSerializer.Deserialize<JsonElement>(lines.Last());
-        
+
         var content = json.GetProperty("content").GetString();
-        // Should have at most 2 newlines, not 4+
+        // Should have at most 2 consecutive newlines, not 4+
         Assert.DoesNotContain("\n\n\n", content);
     }
 
@@ -310,12 +311,20 @@ public class SessionManagerTests : IDisposable
         chatClientMock.Setup(c => c.GetService(typeof(ChatClientMetadata), null))
             .Returns(metadata);
 
+        // Use streaming response mock
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Test response"));
         chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+
+        // Setup streaming with word-by-word chunks
+        chatClientMock.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamingResponse("Test response"));
 
         var options = new ChatClientAgentOptions
         {
@@ -324,6 +333,16 @@ public class SessionManagerTests : IDisposable
         };
 
         return new ChatClientAgent(chatClientMock.Object, options);
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> StreamingResponse(string text)
+    {
+        var chunks = text.Split(' ');
+        foreach (var chunk in chunks)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, chunk + " ");
+            await Task.Yield();
+        }
     }
 
     private static Mock<IWorkspaceManager> CreateWorkspaceMock(string testDir)

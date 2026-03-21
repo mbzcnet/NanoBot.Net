@@ -102,11 +102,63 @@ public static class MessageSanitizer
             return new List<ChatMessage>();
 
         var sanitized = new List<ChatMessage>(messages.Count);
+        var seenFunctionCallIds = new HashSet<string>();
 
         foreach (var msg in messages)
         {
+            // Track function call IDs for orphan filtering
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionCallContent fcc && !string.IsNullOrEmpty(fcc.CallId))
+                {
+                    seenFunctionCallIds.Add(fcc.CallId);
+                }
+            }
+
             var cleanMessage = SanitizeMessage(msg);
             sanitized.Add(cleanMessage);
+        }
+
+        // Filter out orphaned tool messages (tool results without matching tool calls)
+        if (sanitized.Count > 0)
+        {
+            var filtered = new List<ChatMessage>();
+            var processedCallIds = new HashSet<string>();
+
+            foreach (var msg in sanitized)
+            {
+                if (msg.Role == ChatRole.Tool)
+                {
+                    // Check if this tool result has a matching function call ID
+                    var hasMatchingCall = msg.Contents
+                        .OfType<FunctionResultContent>()
+                        .Any(frc => processedCallIds.Contains(frc.CallId ?? string.Empty));
+
+                    if (!hasMatchingCall)
+                    {
+                        // Also check if there's any prior assistant message with tool calls
+                        // (for cases where we haven't seen the call ID yet in this batch)
+                        var hasPriorToolCall = seenFunctionCallIds.Count > 0;
+                        if (!hasPriorToolCall)
+                        {
+                            continue; // Skip orphaned tool message
+                        }
+                    }
+                }
+
+                // Track function call IDs for subsequent tool result matching
+                foreach (var content in msg.Contents)
+                {
+                    if (content is FunctionCallContent fcc && !string.IsNullOrEmpty(fcc.CallId))
+                    {
+                        processedCallIds.Add(fcc.CallId);
+                    }
+                }
+
+                filtered.Add(msg);
+            }
+
+            return filtered;
         }
 
         return sanitized;

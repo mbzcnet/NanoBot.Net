@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
@@ -178,12 +179,20 @@ public class ChatHistoryProviderTests : IDisposable
         chatClientMock.Setup(c => c.GetService(typeof(ChatClientMetadata), null))
             .Returns(metadata);
 
+        // Use streaming response mock
         var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Test response"));
         chatClientMock.Setup(c => c.GetResponseAsync(
                 It.IsAny<IEnumerable<ChatMessage>>(),
                 It.IsAny<ChatOptions>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(response);
+
+        // Setup streaming with word-by-word chunks
+        chatClientMock.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamingResponse("Test response"));
 
         var options = new ChatClientAgentOptions
         {
@@ -192,5 +201,15 @@ public class ChatHistoryProviderTests : IDisposable
         };
 
         return new ChatClientAgent(chatClientMock.Object, options);
+    }
+
+    private static async IAsyncEnumerable<ChatResponseUpdate> StreamingResponse(string text)
+    {
+        var chunks = text.Split(' ');
+        foreach (var chunk in chunks)
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, chunk + " ");
+            await Task.Yield();
+        }
     }
 }

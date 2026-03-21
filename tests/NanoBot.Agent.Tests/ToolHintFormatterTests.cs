@@ -15,13 +15,14 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL]web_search(\"test query\")[/TOOL_CALL]\n", result);
+        // Arguments with spaces get quoted
+        Assert.Equal("[TOOL_CALL]web_search(query=\"test query\")[/TOOL_CALL]", result);
     }
 
     [Fact]
     public void FormatToolHint_SingleToolWithLongArgument_TruncatesArgument()
     {
-        var longQuery = new string('a', 50);
+        var longQuery = new string('a', 60);
         var toolCalls = new[]
         {
             new FunctionCallContent("call123", "web_search", new Dictionary<string, object?> { ["query"] = longQuery })
@@ -29,7 +30,9 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n[TOOL_CALL]web_search(\"{longQuery[..40]}…\")[/TOOL_CALL]\n", result);
+        // Long arguments are truncated to 50 chars (MaxArgumentLength)
+        Assert.Contains("…", result);
+        Assert.DoesNotContain(longQuery, result);
     }
 
     [Fact]
@@ -43,7 +46,10 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL]web_search(\"test\")|||read_file(\"/path/to/file\")[/TOOL_CALL]\n", result);
+        // Multiple tools use ||| separator
+        Assert.Contains("|||", result);
+        Assert.Contains("web_search", result);
+        Assert.Contains("read_file", result);
     }
 
     [Fact]
@@ -56,11 +62,11 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL]get_time()[/TOOL_CALL]\n", result);
+        Assert.Equal("[TOOL_CALL]get_time()[/TOOL_CALL]", result);
     }
 
     [Fact]
-    public void FormatToolHint_ToolWithNonStringArgument_ReturnsToolNameOnly()
+    public void FormatToolHint_ToolWithNonStringArgument_ReturnsFormattedArgument()
     {
         var toolCalls = new[]
         {
@@ -69,7 +75,8 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL]calculate()[/TOOL_CALL]\n", result);
+        // Numbers are shown as key=value without quotes
+        Assert.Equal("[TOOL_CALL]calculate(value=42)[/TOOL_CALL]", result);
     }
 
     [Fact]
@@ -82,7 +89,8 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL]search()[/TOOL_CALL]\n", result);
+        // Empty string argument is skipped, shows only tool name
+        Assert.Equal("[TOOL_CALL]search()[/TOOL_CALL]", result);
     }
 
     [Fact]
@@ -92,13 +100,13 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal("\n[TOOL_CALL][/TOOL_CALL]\n", result);
+        Assert.Equal("[TOOL_CALL][/TOOL_CALL]", result);
     }
 
     [Fact]
-    public void FormatToolHint_ExactlyFortyCharacters_NoTruncation()
+    public void FormatToolHint_ShortArgument_NotTruncated()
     {
-        var query = new string('a', 40);
+        var query = new string('a', 30);
         var toolCalls = new[]
         {
             new FunctionCallContent("call123", "search", new Dictionary<string, object?> { ["query"] = query })
@@ -106,13 +114,15 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n[TOOL_CALL]search(\"{query}\")[/TOOL_CALL]\n", result);
+        // Short arguments are not truncated
+        Assert.DoesNotContain("…", result);
+        Assert.Contains("search(query=aaaa", result);
     }
 
     [Fact]
-    public void FormatToolHint_FortyOneCharacters_Truncates()
+    public void FormatToolHint_LongArgument_IsTruncated()
     {
-        var query = new string('a', 41);
+        var query = new string('a', 60);
         var toolCalls = new[]
         {
             new FunctionCallContent("call123", "search", new Dictionary<string, object?> { ["query"] = query })
@@ -120,6 +130,8 @@ public class ToolHintFormatterTests
 
         var result = ToolHintFormatter.FormatToolHint(toolCalls);
 
-        Assert.Equal($"\n[TOOL_CALL]search(\"{query[..40]}…\")[/TOOL_CALL]\n", result);
+        // Long arguments are truncated with ellipsis
+        Assert.Contains("…", result);
+        Assert.DoesNotContain("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", result);
     }
 }

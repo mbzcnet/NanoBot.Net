@@ -7,26 +7,25 @@ namespace NanoBot.Agent.Extensions;
 public static class AgentSessionExtensions
 {
     private static readonly FieldInfo? ChatClientField = typeof(Microsoft.Agents.AI.ChatClientAgent)
-        .GetField("_chatClient", BindingFlags.NonPublic | BindingFlags.Instance);
+        .GetField("<ChatClient>k__BackingField", BindingFlags.NonPublic | BindingFlags.Instance);
 
     public static IReadOnlyList<ChatMessage> GetAllMessages(this AgentSession session)
     {
         if (session == null)
             return Array.Empty<ChatMessage>();
 
-        // 从 Session.StateBag 中获取消息，这是 FileBackedChatHistoryProvider 存储消息的地方
-        // StateKey 默认是 provider 类的名称
+        // Try to get messages from the ChatHistoryProvider if available
         var provider = session.GetService<ChatHistoryProvider>();
         if (provider != null)
         {
             var stateKey = provider.GetType().Name;
-            if (session.StateBag.TryGetValue<List<ChatMessage>>(stateKey, out var messages) && messages != null)
+            if (session.StateBag.TryGetValue<List<ChatMessage>>(stateKey, out var messages) && messages != null && messages.Count > 0)
             {
                 return messages;
             }
         }
 
-        // 尝试常见的 state key
+        // Try common state keys directly (for tests or direct StateBag manipulation)
         var commonKeys = new[] { "FileBackedChatHistoryProvider", "InMemoryChatHistoryProvider", "ChatHistoryProvider" };
         foreach (var key in commonKeys)
         {

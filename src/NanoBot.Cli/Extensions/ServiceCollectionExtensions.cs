@@ -14,6 +14,7 @@ using NanoBot.Core.Heartbeat;
 using NanoBot.Core.Memory;
 using NanoBot.Core.Skills;
 using NanoBot.Core.Storage;
+using NanoBot.Core.Output;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools.Browser;
 using NanoBot.Core.Tools.Rpa;
@@ -31,6 +32,7 @@ using NanoBot.Infrastructure.Workspace;
 using NanoBot.Infrastructure.Tools.Rpa;
 using NanoBot.Providers;
 using NanoBot.Tools.Extensions;
+using NanoBot.Cli.Formatting;
 
 namespace NanoBot.Cli.Extensions;
 
@@ -388,7 +390,8 @@ public static class ServiceCollectionExtensions
             .AddNanoBotContextProviders()
             .AddNanoBotBackgroundServices(agentConfig.Heartbeat)
             .AddNanoBotChannels(agentConfig.Channels)
-            .AddNanoBotAgent(agentOptions);
+            .AddNanoBotAgent(agentOptions)
+            .AddSingleton<IOutputFormatter, SpectreOutputFormatter>();
 
         return services;
     }
