@@ -5,6 +5,7 @@ using NanoBot.Core.Channels;
 using NanoBot.Core.Channels.Accounts;
 using NanoBot.Core.Channels.Adapters;
 using NanoBot.Core.Configuration;
+using Telegram.Bot;
 
 namespace NanoBot.Channels.Implementations.Telegram;
 
@@ -28,10 +29,13 @@ public class TelegramAccount
 public class TelegramPlugin : IChannelPlugin<TelegramAccount>
 {
     private readonly TelegramChannel _channel;
+    private readonly TelegramBotClient? _botClient;
+    private IChannelStreamingAdapter? _streamingAdapter;
     
-    public TelegramPlugin(TelegramChannel channel)
+    public TelegramPlugin(TelegramChannel channel, TelegramBotClient? botClient = null)
     {
         _channel = channel;
+        _botClient = botClient;
     }
     
     public ChannelId Id => "telegram";
@@ -68,7 +72,9 @@ public class TelegramPlugin : IChannelPlugin<TelegramAccount>
     
     public IChannelThreadingAdapter? Threading => null;  // Not implemented
     
-    public IChannelStreamingAdapter? Streaming => null;  // Not implemented
+    public IChannelStreamingAdapter? Streaming => _botClient != null
+        ? (_streamingAdapter ??= new TelegramStreamingAdapter(_botClient))
+        : null;  // Not implemented
     
     public IChannelHeartbeatAdapter? Heartbeat => null;  // Not implemented
 }

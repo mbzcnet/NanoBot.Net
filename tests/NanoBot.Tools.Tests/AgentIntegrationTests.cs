@@ -45,8 +45,7 @@ public class AgentIntegrationTests : IDisposable
         // Create tools the same way as ToolProvider.CreateDefaultTools
         _tools = new List<AITool>
         {
-            WebTools.CreateWebSearchTool(),
-            WebTools.CreateWebFetchTool()
+            WebTools.CreateWebPageTool()
         };
     }
 

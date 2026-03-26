@@ -9,7 +9,7 @@ namespace NanoBot.Providers;
 public interface IChatClientFactory
 {
     IChatClient CreateChatClient(LlmConfig config);
-    IChatClient CreateChatClient(string provider, string model, string? apiKey = null, string? apiBase = null);
+    IChatClient CreateChatClient(string provider, string model, string? apiKey = null, string? apiBase = null, int? maxTokens = null);
 }
 
 public class ChatClientFactory : IChatClientFactory
@@ -72,6 +72,11 @@ public class ChatClientFactory : IChatClientFactory
             DefaultApiBase: "https://api.siliconflow.cn/v1",
             DisplayName: "SiliconFlow",
             LiteLLMPrefix: "siliconflow"
+        ),
+        ["stepfun"] = new ProviderSpec(
+            EnvKey: "STEPFUN_API_KEY",
+            DefaultApiBase: "https://api.stepfun.com/v1",
+            DisplayName: "Step Fun"
         )
     };
 
@@ -89,10 +94,10 @@ public class ChatClientFactory : IChatClientFactory
         }
         
         var provider = profile.Provider ?? "openai";
-        return CreateChatClient(provider, profile.Model, profile.ApiKey, profile.ApiBase);
+        return CreateChatClient(provider, profile.Model, profile.ApiKey, profile.ApiBase, profile.MaxTokens);
     }
 
-    public IChatClient CreateChatClient(string provider, string model, string? apiKey = null, string? apiBase = null)
+    public IChatClient CreateChatClient(string provider, string model, string? apiKey = null, string? apiBase = null, int? maxTokens = null)
     {
         if (!ProviderSpecs.TryGetValue(provider, out var spec))
         {
@@ -121,6 +126,16 @@ public class ChatClientFactory : IChatClientFactory
 
         // Use longer timeout for local models (Ollama) as they may need more time for large images/vision tasks
         var networkTimeout = spec.IsLocal ? TimeSpan.FromMinutes(5) : TimeSpan.FromSeconds(60);
+
+        // Log info about o1 models needing max_completion_tokens
+        if (maxTokens.HasValue && (
+            resolvedModel.StartsWith("o1", StringComparison.OrdinalIgnoreCase) ||
+            resolvedModel.StartsWith("o3", StringComparison.OrdinalIgnoreCase) ||
+            resolvedModel.StartsWith("o4", StringComparison.OrdinalIgnoreCase)))
+        {
+            _logger.LogInformation("Model {Model} is an o-series model. maxTokens={MaxTokens} will be passed via ChatOptions.MaxOutputTokens", 
+                resolvedModel, maxTokens.Value);
+        }
 
         var clientOptions = new OpenAI.OpenAIClientOptions 
         { 

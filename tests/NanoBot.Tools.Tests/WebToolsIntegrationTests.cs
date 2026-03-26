@@ -8,7 +8,7 @@ using Xunit;
 namespace NanoBot.Tools.Tests;
 
 /// <summary>
-/// Integration tests for web tools (web_search, web_fetch)
+/// Integration tests for web_page tool
 /// Uses Ollama qwen3.5:4b model for testing
 /// </summary>
 public class WebToolsIntegrationTests : IDisposable
@@ -59,15 +59,15 @@ public class WebToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task WebSearch_WithRealLLM_CanSearchWeb()
+    public async Task WebPage_Search_WithRealLLM_CanSearchWeb()
     {
         if (!EnsureEnabled()) return;
 
-        var webSearchTool = WebTools.CreateWebSearchTool();
+        var webPageTool = WebTools.CreateWebPageTool();
 
         var response = await _chatClient.GetResponseAsync(
             "Search the web for Apple Inc. market cap",
-            new ChatOptions { Tools = [webSearchTool] }
+            new ChatOptions { Tools = [webPageTool] }
         );
 
         Assert.NotNull(response);
@@ -75,19 +75,19 @@ public class WebToolsIntegrationTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
         // The response should contain search results or mention of search
-        Console.WriteLine($"WebSearch response: {text}");
+        Console.WriteLine($"WebPage search response: {text}");
     }
 
     [Fact]
-    public async Task WebFetch_WithRealLLM_CanFetchWebPage()
+    public async Task WebPage_Fetch_WithRealLLM_CanFetchWebPage()
     {
         if (!EnsureEnabled()) return;
 
-        var webFetchTool = WebTools.CreateWebFetchTool();
+        var webPageTool = WebTools.CreateWebPageTool();
 
         var response = await _chatClient.GetResponseAsync(
             "Fetch the content of https://example.com",
-            new ChatOptions { Tools = [webFetchTool] }
+            new ChatOptions { Tools = [webPageTool] }
         );
 
         Assert.NotNull(response);
@@ -95,26 +95,25 @@ public class WebToolsIntegrationTests : IDisposable
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
         // The response should contain some content from the page
-        Console.WriteLine($"WebFetch response (first 200 chars): {text[..Math.Min(200, text.Length)]}");
+        Console.WriteLine($"WebPage fetch response (first 200 chars): {text[..Math.Min(200, text.Length)]}");
     }
 
     [Fact]
-    public async Task WebSearchAndFetch_Combined_CanUseBothTools()
+    public async Task WebPage_Combined_WithRealLLM_CanUseBothModes()
     {
         if (!EnsureEnabled()) return;
 
-        var webSearchTool = WebTools.CreateWebSearchTool();
-        var webFetchTool = WebTools.CreateWebFetchTool();
+        var webPageTool = WebTools.CreateWebPageTool();
 
         var response = await _chatClient.GetResponseAsync(
-            "Search for the latest news about artificial intelligence, then fetch the first result",
-            new ChatOptions { Tools = [webSearchTool, webFetchTool] }
+            "Search for the latest news about artificial intelligence",
+            new ChatOptions { Tools = [webPageTool] }
         );
 
         Assert.NotNull(response);
         var text = response.Text ?? string.Empty;
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
-        Console.WriteLine($"Combined tools response (first 300 chars): {text[..Math.Min(300, text.Length)]}");
+        Console.WriteLine($"WebPage combined response (first 300 chars): {text[..Math.Min(300, text.Length)]}");
     }
 }

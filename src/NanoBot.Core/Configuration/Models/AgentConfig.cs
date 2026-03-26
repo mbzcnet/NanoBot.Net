@@ -4,6 +4,11 @@ public class AgentConfig
 {
     public string Name { get; set; } = "NanoBot";
 
+    /// <summary>
+    /// Runtime timezone (IANA format, e.g., "Asia/Shanghai", "UTC")
+    /// </summary>
+    public string? Timezone { get; set; }
+
     public WorkspaceConfig Workspace { get; set; } = new();
 
     public LlmConfig Llm { get; set; } = new();

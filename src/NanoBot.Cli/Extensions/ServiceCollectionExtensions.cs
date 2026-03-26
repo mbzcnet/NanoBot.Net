@@ -236,11 +236,15 @@ public static class ServiceCollectionExtensions
         this IServiceCollection services,
         ChannelsConfig? channelsConfig = null)
     {
+        var config = channelsConfig ?? new ChannelsConfig();
+        services.AddSingleton(config);
+        
         services.AddSingleton<IChannelManager>(sp =>
         {
             var bus = sp.GetRequiredService<IMessageBus>();
             var logger = sp.GetRequiredService<ILogger<ChannelManager>>();
-            return new ChannelManager(bus, logger);
+            var cfg = sp.GetRequiredService<ChannelsConfig>();
+            return new ChannelManager(bus, logger, cfg);
         });
 
         return services;
@@ -269,6 +273,7 @@ public static class ServiceCollectionExtensions
             var agentConfig = sp.GetService<AgentConfig>();
             var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
             var maxInstructionChars = agentConfig?.Memory?.MaxInstructionChars ?? 0;
+            var timezone = agentConfig?.Timezone;
 
             return NanoBotAgentFactory.Create(
                 chatClient,
@@ -279,7 +284,8 @@ public static class ServiceCollectionExtensions
                 options,
                 memoryStore,
                 memoryWindow,
-                maxInstructionChars);
+                maxInstructionChars,
+                timezone);
         });
 
         services.AddSingleton<IAgentRuntime>(sp =>

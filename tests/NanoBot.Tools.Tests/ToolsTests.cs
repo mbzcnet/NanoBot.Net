@@ -62,56 +62,83 @@ public class BrowserToolsTests
     }
 
     [Fact]
-    public void CreateBrowserTool_ReturnsAITool()
+    public void CreateBrowserContentTool_ReturnsAITool()
     {
-        var tool = BrowserTools.CreateBrowserTool(null);
+        var tool = BrowserTools.CreateBrowserContentTool(null);
 
         Assert.NotNull(tool);
+        Assert.Equal("browser_content", tool.Name);
         Assert.IsAssignableFrom<AIFunction>(tool);
     }
 
     [Fact]
-    public async Task BrowserTools_Status_DelegatesToService()
+    public void CreateBrowserInteractTool_ReturnsAITool()
     {
-        var mockService = new Mock<IBrowserService>();
-        mockService
-            .Setup(x => x.GetStatusAsync("nanobot", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowserToolResponse
-            {
-                Ok = true,
-                Action = "status",
-                Profile = "nanobot",
-                Message = "Browser is running"
-            });
+        var tool = BrowserTools.CreateBrowserInteractTool(null);
 
-        var tool = BrowserTools.CreateBrowserTool(mockService.Object);
-        var func = (AIFunction)tool;
+        Assert.NotNull(tool);
+        Assert.Equal("browser_interact", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
 
-        var result = await func.InvokeAsync(
-            new AIFunctionArguments
-            {
-                ["action"] = "status",
-                ["profile"] = "nanobot",
-                ["targetId"] = null,
-                ["targetUrl"] = null,
-                ["snapshotFormat"] = null,
-                ["kind"] = null,
-                ["reference"] = null,
-                ["text"] = null,
-                ["textGone"] = null,
-                ["key"] = null,
-                ["timeoutMs"] = null,
-                ["scrollBy"] = null,
-                ["selector"] = null,
-                ["maxChars"] = null,
-                ["loadState"] = null
-            },
-            CancellationToken.None);
+    [Fact]
+    public void CreateBrowserOpenTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserOpenTool(null);
 
-        var resultText = result?.ToString() ?? string.Empty;
-        Assert.Contains("status", resultText);
-        Assert.Contains("nanobot", resultText);
-        mockService.Verify(x => x.GetStatusAsync("nanobot", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.NotNull(tool);
+        Assert.Equal("browser_open", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateBrowserSnapshotTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserSnapshotTool(null);
+
+        Assert.NotNull(tool);
+        Assert.Equal("browser_snapshot", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateBrowserScreenshotTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserScreenshotTool(null);
+
+        Assert.NotNull(tool);
+        Assert.Equal("browser_screenshot", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateBrowserTabsTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserTabsTool(null);
+
+        Assert.NotNull(tool);
+        Assert.Equal("browser_tabs", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateBrowserNavigateTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserNavigateTool(null);
+
+        Assert.NotNull(tool);
+        Assert.Equal("browser_navigate", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
+    }
+
+    [Fact]
+    public void CreateBrowserCloseTool_ReturnsAITool()
+    {
+        var tool = BrowserTools.CreateBrowserCloseTool(null);
+
+        Assert.NotNull(tool);
+        Assert.Equal("browser_close", tool.Name);
+        Assert.IsAssignableFrom<AIFunction>(tool);
     }
 
     [Fact]
@@ -129,27 +156,16 @@ public class BrowserToolsTests
                 Content = "headline"
             });
 
-        var tool = BrowserTools.CreateBrowserTool(mockService.Object);
+        var tool = BrowserTools.CreateBrowserContentTool(mockService.Object);
         var func = (AIFunction)tool;
 
         var result = await func.InvokeAsync(
             new AIFunctionArguments
             {
-                ["action"] = "content",
-                ["profile"] = "nanobot",
                 ["targetId"] = "t1",
-                ["targetUrl"] = null,
-                ["snapshotFormat"] = null,
-                ["kind"] = null,
-                ["reference"] = null,
-                ["text"] = null,
-                ["textGone"] = null,
-                ["key"] = null,
-                ["timeoutMs"] = null,
-                ["scrollBy"] = null,
                 ["selector"] = "main",
                 ["maxChars"] = 2000,
-                ["loadState"] = null
+                ["profile"] = "nanobot"
             },
             CancellationToken.None);
 
@@ -160,118 +176,17 @@ public class BrowserToolsTests
     }
 
     [Fact]
-    public async Task BrowserTools_ActWait_DelegatesLoadStateAndText()
-    {
-        var mockService = new Mock<IBrowserService>();
-        mockService
-            .Setup(x => x.ExecuteActionAsync(
-                It.Is<BrowserActionRequest>(r =>
-                    r.Kind == "wait" &&
-                    r.LoadState == "domcontentloaded" &&
-                    r.Text == "latest news" &&
-                    r.TextGone == "loading..." &&
-                    r.TimeoutMs == 1500),
-                "t1",
-                "nanobot",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowserToolResponse
-            {
-                Ok = true,
-                Action = "act",
-                Profile = "nanobot",
-                TargetId = "t1",
-                Message = "Action executed: wait(condition)"
-            });
-
-        var tool = BrowserTools.CreateBrowserTool(mockService.Object);
-        var func = (AIFunction)tool;
-
-        var result = await func.InvokeAsync(
-            new AIFunctionArguments
-            {
-                ["action"] = "act",
-                ["profile"] = "nanobot",
-                ["targetId"] = "t1",
-                ["targetUrl"] = null,
-                ["snapshotFormat"] = null,
-                ["kind"] = "wait",
-                ["reference"] = null,
-                ["text"] = "latest news",
-                ["textGone"] = "loading...",
-                ["key"] = null,
-                ["timeoutMs"] = 1500,
-                ["scrollBy"] = null,
-                ["selector"] = null,
-                ["maxChars"] = null,
-                ["loadState"] = "domcontentloaded"
-            },
-            CancellationToken.None);
-
-        var resultText = result?.ToString() ?? string.Empty;
-        Assert.Contains("wait(condition)", resultText);
-        mockService.VerifyAll();
-    }
-
-    [Fact]
-    public async Task BrowserTools_ActHover_DelegatesTimeout()
-    {
-        var mockService = new Mock<IBrowserService>();
-        mockService
-            .Setup(x => x.ExecuteActionAsync(
-                It.Is<BrowserActionRequest>(r =>
-                    r.Kind == "hover" &&
-                    r.Ref == "1" &&
-                    r.TimeoutMs == 1200),
-                "t1",
-                "nanobot",
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowserToolResponse
-            {
-                Ok = true,
-                Action = "act",
-                Profile = "nanobot",
-                TargetId = "t1",
-                Message = "Action executed: hover"
-            });
-
-        var tool = BrowserTools.CreateBrowserTool(mockService.Object);
-        var func = (AIFunction)tool;
-
-        var result = await func.InvokeAsync(
-            new AIFunctionArguments
-            {
-                ["action"] = "act",
-                ["profile"] = "nanobot",
-                ["targetId"] = "t1",
-                ["targetUrl"] = null,
-                ["snapshotFormat"] = null,
-                ["kind"] = "hover",
-                ["reference"] = "1",
-                ["text"] = null,
-                ["textGone"] = null,
-                ["key"] = null,
-                ["timeoutMs"] = 1200,
-                ["scrollBy"] = null,
-                ["selector"] = null,
-                ["maxChars"] = null,
-                ["loadState"] = null
-            },
-            CancellationToken.None);
-
-        var resultText = result?.ToString() ?? string.Empty;
-        Assert.Contains("hover", resultText);
-        mockService.VerifyAll();
-    }
-
-    [Fact]
-    public async Task ToolProvider_DefaultTools_ContainsBrowserTool()
+    public async Task ToolProvider_DefaultTools_ContainsBrowserTools()
     {
         var services = new ServiceCollection();
         var serviceProvider = services.BuildServiceProvider();
 
         var tools = await ToolProvider.CreateDefaultToolsAsync(serviceProvider);
 
-        Assert.Contains(tools, t => t.Name == "browser");
+        Assert.Contains(tools, t => t.Name == "browser_open");
+        Assert.Contains(tools, t => t.Name == "browser_snapshot");
+        Assert.Contains(tools, t => t.Name == "browser_interact");
+        Assert.Contains(tools, t => t.Name == "browser_content");
     }
 
     [SkipIfPlaywrightNotInstalled]
@@ -468,21 +383,22 @@ public class ShellToolsTests
 public class WebToolsTests
 {
     [Fact]
-    public void CreateWebSearchTool_ReturnsAITool()
+    public void CreateWebPageTool_ReturnsAITool()
     {
-        var tool = WebTools.CreateWebSearchTool();
+        var tool = WebTools.CreateWebPageTool();
 
         Assert.NotNull(tool);
+        Assert.Equal("web_page", tool.Name);
         Assert.IsAssignableFrom<AIFunction>(tool);
     }
 
     [Fact]
-    public void CreateWebFetchTool_ReturnsAITool()
+    public void CreateWebPageTool_HasCorrectDescription()
     {
-        var tool = WebTools.CreateWebFetchTool();
+        var tool = WebTools.CreateWebPageTool();
 
-        Assert.NotNull(tool);
-        Assert.IsAssignableFrom<AIFunction>(tool);
+        Assert.Contains("search", tool.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("fetch", tool.Description, StringComparison.OrdinalIgnoreCase);
     }
 }
 

@@ -22,7 +22,8 @@ public static class NanoBotAgentFactory
         AgentOptions? options = null,
         IMemoryStore? memoryStore = null,
         int memoryWindow = 50,
-        int maxInstructionChars = 0)
+        int maxInstructionChars = 0,
+        string? timezone = null)
     {
         ArgumentNullException.ThrowIfNull(chatClient);
         ArgumentNullException.ThrowIfNull(workspace);
@@ -47,7 +48,8 @@ public static class NanoBotAgentFactory
                 skillsLoader,
                 memoryStore,
                 loggerFactory,
-                maxInstructionChars)
+                maxInstructionChars,
+                timezone)
         };
 
         var toolList = tools?.ToList();
@@ -58,7 +60,9 @@ public static class NanoBotAgentFactory
             ChatOptions = new ChatOptions
             {
                 Instructions = instructions,
-                Tools = toolList
+                Tools = toolList,
+                Temperature = options?.Temperature ?? 0.1f,
+                MaxOutputTokens = options?.MaxTokens ?? 4096
             },
             ChatHistoryProvider = compositeProvider,
             AIContextProviders = aiContextProviders
@@ -157,16 +161,19 @@ internal class CompositeAIContextProvider : AIContextProvider
     private readonly SkillsContextProvider _skillsProvider;
     private readonly ILogger? _logger;
     private readonly int _maxInstructionChars;
+    private readonly string? _timezone;
 
     public CompositeAIContextProvider(
         IWorkspaceManager workspace,
         ISkillsLoader skillsLoader,
         IMemoryStore? memoryStore,
         ILoggerFactory? loggerFactory,
-        int maxInstructionChars = 0)
+        int maxInstructionChars = 0,
+        string? timezone = null)
     {
         _logger = loggerFactory?.CreateLogger<CompositeAIContextProvider>();
         _maxInstructionChars = maxInstructionChars;
+        _timezone = timezone;
         _bootstrapProvider = new BootstrapContextProvider(
             workspace,
             loggerFactory?.CreateLogger<BootstrapContextProvider>());
@@ -216,7 +223,9 @@ internal class CompositeAIContextProvider : AIContextProvider
         }
 
         var now = DateTime.Now;
-        var tz = TimeZoneInfo.Local;
+        var tz = !string.IsNullOrEmpty(_timezone)
+            ? TimeZoneInfo.FindSystemTimeZoneById(_timezone)
+            : TimeZoneInfo.Local;
         instructions.AppendLine($"\n## Current Time\n{now:yyyy-MM-dd HH:mm (dddd)} ({tz.DisplayName})");
 
         sw.Stop();

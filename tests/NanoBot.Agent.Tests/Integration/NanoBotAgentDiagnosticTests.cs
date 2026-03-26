@@ -132,7 +132,7 @@ public class NanoBotAgentDiagnosticTests : IDisposable
 
         _output.WriteLine("=== Test: NanoBotAgentFactory with browser tool ===");
 
-        var browserTool = NanoBot.Tools.BuiltIn.BrowserTools.CreateBrowserTool(browserService: null);
+        var browserTool = NanoBot.Tools.BuiltIn.BrowserTools.CreateBrowserOpenTool(browserService: null);
 
         var tools = new List<AITool> { browserTool };
 

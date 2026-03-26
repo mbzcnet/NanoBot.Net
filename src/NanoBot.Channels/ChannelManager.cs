@@ -2,16 +2,26 @@ using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
+using NanoBot.Core.Channels.Adapters;
+using NanoBot.Core.Configuration;
 using NanoBot.Channels.Discovery;
 
 namespace NanoBot.Channels;
 
 public class ChannelManager : IChannelManager, IDisposable
 {
+    private static readonly TimeSpan[] SendRetryDelays = new[]
+    {
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(4),
+    };
+
     private readonly ConcurrentDictionary<string, IChannel> _channels = new();
     private readonly ConcurrentDictionary<string, object> _plugins = new();
     private readonly IMessageBus _bus;
     private readonly ILogger<ChannelManager> _logger;
+    private readonly ChannelsConfig _config;
     private readonly CancellationTokenSource _cts = new();
     private Task? _dispatchTask;
     private bool _disposed;
@@ -20,10 +30,11 @@ public class ChannelManager : IChannelManager, IDisposable
 
     public event EventHandler<InboundMessage>? MessageReceived;
 
-    public ChannelManager(IMessageBus bus, ILogger<ChannelManager> logger)
+    public ChannelManager(IMessageBus bus, ILogger<ChannelManager> logger, ChannelsConfig config)
     {
         _bus = bus;
         _logger = logger;
+        _config = config;
     }
 
     /// <summary>
@@ -162,13 +173,33 @@ public class ChannelManager : IChannelManager, IDisposable
                 var channel = GetChannel(message.Channel);
                 if (channel != null)
                 {
-                    try
+                    var maxRetries = _config.SendMaxRetries;
+                    for (int attempt = 0; attempt < maxRetries; attempt++)
                     {
-                        await channel.SendMessageAsync(message, cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error sending to channel: {Channel}", message.Channel);
+                        try
+                        {
+                            await channel.SendMessageAsync(message, cancellationToken);
+                            break;
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            if (attempt == maxRetries - 1)
+                            {
+                                _logger.LogError(ex, "Failed to send to {Channel} after {Attempts} attempts",
+                                    message.Channel, maxRetries);
+                            }
+                            else
+                            {
+                                var delay = SendRetryDelays[Math.Min(attempt, SendRetryDelays.Length - 1)];
+                                _logger.LogWarning(ex, "Send to {Channel} failed (attempt {Attempt}/{Max}), retrying in {Delay}s",
+                                    message.Channel, attempt + 1, maxRetries, delay.TotalSeconds);
+                                await Task.Delay(delay, cancellationToken);
+                            }
+                        }
                     }
                 }
                 else

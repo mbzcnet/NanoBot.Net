@@ -51,15 +51,22 @@ public static class ToolProvider
 
         tools.Add(BuiltIn.ShellTools.CreateExecTool(new ShellToolOptions()));
 
-        tools.Add(BuiltIn.WebTools.CreateWebSearchTool(httpClient));
-        tools.Add(BuiltIn.WebTools.CreateWebFetchTool(httpClient));
+        tools.Add(BuiltIn.WebTools.CreateWebPageTool(httpClient, config?.WebTools));
 
         // Only add browser tools if not explicitly disabled in config
         var browserEnabled = config?.Browser?.Enabled != false;
         if (browserEnabled)
         {
             // 使用委托获取当前 sessionKey，避免 AsyncLocal 在异步链中丢失
-            tools.Add(BuiltIn.BrowserTools.CreateBrowserTool(browserService, () => ToolExecutionContext.CurrentSessionKey));
+            var sessionKeyProvider = () => ToolExecutionContext.CurrentSessionKey;
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserTabsTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserOpenTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserNavigateTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserCloseTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserSnapshotTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserInteractTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserContentTool(browserService, sessionKeyProvider));
+            tools.Add(BuiltIn.BrowserTools.CreateBrowserScreenshotTool(browserService, sessionKeyProvider));
         }
 
         // Only add RPA tools if explicitly enabled in config

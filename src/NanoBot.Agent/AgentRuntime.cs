@@ -1571,12 +1571,14 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 profile.Provider ?? "openai",
                 profile.Model,
                 profile.ApiKey,
-                profile.ApiBase);
+                profile.ApiBase,
+                profile.MaxTokens);
 
             var workspace = _serviceProvider.GetRequiredService<IWorkspaceManager>();
             var skillsLoader = _serviceProvider.GetRequiredService<ISkillsLoader>();
             var memoryStore = _serviceProvider.GetService<IMemoryStore>();
             var loggerFactory = _serviceProvider.GetService<ILoggerFactory>();
+            var agentConfig = _serviceProvider.GetService<AgentConfig>();
 
             var agentOptions = new AgentOptions
             {
@@ -1592,7 +1594,9 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 loggerFactory,
                 agentOptions,
                 memoryStore,
-                _memoryWindow);
+                _memoryWindow,
+                0,
+                agentConfig?.Timezone);
         }
         catch (Exception ex)
         {

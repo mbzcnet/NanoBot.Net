@@ -2,6 +2,11 @@ namespace NanoBot.Core.Configuration;
 
 public class ChannelsConfig
 {
+    /// <summary>
+    /// Maximum retry attempts for failed message sends (default: 3)
+    /// </summary>
+    public int SendMaxRetries { get; set; } = 3;
+
     public bool SendProgress { get; set; } = true;
     public bool SendToolHints { get; set; } = false;
 

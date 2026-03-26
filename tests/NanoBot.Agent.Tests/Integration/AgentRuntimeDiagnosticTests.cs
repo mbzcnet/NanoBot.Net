@@ -157,7 +157,7 @@ public class AgentRuntimeDiagnosticTests : IDisposable
 
         var tools = new List<AITool>
         {
-            NanoBot.Tools.BuiltIn.BrowserTools.CreateBrowserTool(browserService: null)
+            NanoBot.Tools.BuiltIn.BrowserTools.CreateBrowserOpenTool(browserService: null)
         };
 
         var workspaceMock = CreateWorkspaceMock();

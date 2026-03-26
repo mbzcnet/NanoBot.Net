@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.AI;
 using NanoBot.Core.Configuration;
 
@@ -7,26 +8,52 @@ namespace NanoBot.Tools.BuiltIn;
 
 public static class WebTools
 {
-    public static AITool CreateWebSearchTool(HttpClient? httpClient = null, WebToolsConfig? config = null)
+    /// <summary>
+    /// Creates a unified web page tool that supports both search and fetch modes.
+    /// </summary>
+    public static AITool CreateWebPageTool(HttpClient? httpClient = null, WebToolsConfig? config = null)
     {
         return AIFunctionFactory.Create(
-            (string query, int maxResults) => WebSearchAsync(query, maxResults, httpClient, config),
+            (string url, string? mode = "fetch", string? query = null, int maxResults = 5) =>
+                WebPageAsync(url, mode, query, maxResults, httpClient, config),
             new AIFunctionFactoryOptions
             {
-                Name = "web_search",
-                Description = "Search the web for information. Returns a list of search results with titles, URLs, and snippets."
+                Name = "web_page",
+                Description = """
+                    Retrieve web information using search or fetch mode.
+
+                    Mode "search": Search DuckDuckGo for information and return results.
+                    Mode "fetch": Fetch and extract text content from a URL.
+
+                    Parameters:
+                    - url: Target URL (required)
+                    - mode: "search" or "fetch" (default: "fetch")
+                    - query: Search query (required when mode="search")
+                    - maxResults: Maximum search results (default: 5, only for search mode)
+
+                    Examples:
+                    - web_page(url="https://example.com") -> fetches page content
+                    - web_page(url="", mode="search", query="latest news", maxResults=3) -> searches the web
+                    """
             });
     }
 
-    public static AITool CreateWebFetchTool(HttpClient? httpClient = null, WebToolsConfig? config = null)
+    private static async Task<string> WebPageAsync(
+        string url,
+        string? mode,
+        string? query,
+        int maxResults,
+        HttpClient? httpClient,
+        WebToolsConfig? config)
     {
-        return AIFunctionFactory.Create(
-            (string url) => WebFetchAsync(url, httpClient, config),
-            new AIFunctionFactoryOptions
-            {
-                Name = "web_fetch",
-                Description = "Fetch the content of a web page and return it as text."
-            });
+        var resolvedMode = mode?.Trim().ToLowerInvariant() ?? "fetch";
+
+        return resolvedMode switch
+        {
+            "search" => await WebSearchAsync(query ?? url, maxResults, httpClient, config),
+            "fetch" => await WebFetchAsync(url, httpClient, config),
+            _ => $"Error: Unknown mode '{mode}'. Use 'search' or 'fetch'."
+        };
     }
 
     private static async Task<string> WebSearchAsync(string query, int maxResults, HttpClient? httpClient, WebToolsConfig? config)
@@ -38,28 +65,27 @@ public static class WebTools
 
             try
             {
-                // Use DuckDGo API (no API key required for basic usage)
                 var searchUrl = $"https://api.duckduckgo.com/?q={Uri.EscapeDataString(query)}&format=json&no_html=1";
                 var response = await client.GetStringAsync(searchUrl);
 
-            using var doc = JsonDocument.Parse(response);
-            var root = doc.RootElement;
+                using var doc = JsonDocument.Parse(response);
+                var root = doc.RootElement;
 
-            var results = new List<string>();
+                var results = new List<string>();
 
-            if (root.TryGetProperty("RelatedTopics", out var topics))
-            {
-                foreach (var topic in topics.EnumerateArray().Take(maxResults > 0 ? maxResults : 5))
+                if (root.TryGetProperty("RelatedTopics", out var topics))
                 {
-                    if (topic.TryGetProperty("Text", out var text) &&
-                        topic.TryGetProperty("FirstURL", out var url))
+                    foreach (var topic in topics.EnumerateArray().Take(maxResults > 0 ? maxResults : 5))
                     {
-                        results.Add($"- {text.GetString()}\n  URL: {url.GetString()}");
+                        if (topic.TryGetProperty("Text", out var text) &&
+                            topic.TryGetProperty("FirstURL", out var topicUrl))
+                        {
+                            results.Add($"- {text.GetString()}\n  URL: {topicUrl.GetString()}");
+                        }
                     }
                 }
-            }
 
-            if (results.Count == 0)
+                if (results.Count == 0)
                 {
                     return "No search results found.";
                 }
@@ -82,6 +108,11 @@ public static class WebTools
 
     private static async Task<string> WebFetchAsync(string url, HttpClient? httpClient, WebToolsConfig? config)
     {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "Error: URL is required for fetch mode.";
+        }
+
         try
         {
             var ownClient = httpClient is null;
@@ -119,12 +150,12 @@ public static class WebTools
 
     private static string ExtractTextFromHtml(string html)
     {
-        var text = System.Text.RegularExpressions.Regex.Replace(html, "<script[^>]*>.*?</script>", "",
-            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        text = System.Text.RegularExpressions.Regex.Replace(text, "<style[^>]*>.*?</style>", "",
-            System.Text.RegularExpressions.RegexOptions.Singleline | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        text = System.Text.RegularExpressions.Regex.Replace(text, "<[^>]+>", " ");
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+        var text = Regex.Replace(html, "<script[^>]*>.*?</script>", "",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<style[^>]*>.*?</style>", "",
+            RegexOptions.Singleline | RegexOptions.IgnoreCase);
+        text = Regex.Replace(text, "<[^>]+>", " ");
+        text = Regex.Replace(text, @"\s+", " ");
         return text.Trim();
     }
 }

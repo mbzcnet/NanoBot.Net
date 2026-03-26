@@ -102,14 +102,18 @@ public class CliAgentConfigBrowserToolTests : IDisposable
             // Shell tool
             ShellTools.CreateExecTool(new ShellToolOptions()),
 
-            // Web tools
-            WebTools.CreateWebSearchTool(null),
-            WebTools.CreateWebFetchTool(null),
+            // Web tool (unified)
+            WebTools.CreateWebPageTool(null),
 
-            // Browser tool - THIS IS THE KEY DIFFERENCE
-            // CLI uses: BuiltIn.BrowserTools.CreateBrowserTool(browserService, () => ToolExecutionContext.CurrentSessionKey)
-            // But we use a sessionKeyProvider that returns null since we're not in a real session context
-            BrowserTools.CreateBrowserTool(_browserService, () => null)
+            // Browser tools - atomic tools
+            BrowserTools.CreateBrowserOpenTool(_browserService, () => null),
+            BrowserTools.CreateBrowserSnapshotTool(_browserService, () => null),
+            BrowserTools.CreateBrowserInteractTool(_browserService, () => null),
+            BrowserTools.CreateBrowserContentTool(_browserService, () => null),
+            BrowserTools.CreateBrowserScreenshotTool(_browserService, () => null),
+            BrowserTools.CreateBrowserTabsTool(_browserService, () => null),
+            BrowserTools.CreateBrowserNavigateTool(_browserService, () => null),
+            BrowserTools.CreateBrowserCloseTool(_browserService, () => null)
         };
 
         _tools = toolList.AsReadOnly();
@@ -205,7 +209,7 @@ public class CliAgentConfigBrowserToolTests : IDisposable
                     Console.WriteLine($"[TEST] Tool call: {call.Name}");
                     Console.WriteLine($"[TEST] Arguments: {System.Text.Json.JsonSerializer.Serialize(call.Arguments)}");
 
-                    if (call.Name == "browser")
+                    if (call.Name == "browser_open")
                     {
                         openTabCalled = true;
                     }
@@ -260,7 +264,7 @@ public class CliAgentConfigBrowserToolTests : IDisposable
         Assert.NotNull(response);
 
         // Verify browser tool was called
-        var browserCalls = toolCalls.Where(c => c.Name == "browser").ToList();
+        var browserCalls = toolCalls.Where(c => c.Name == "browser_open" || c.Name == "browser_screenshot").ToList();
         Console.WriteLine($"[TEST] Browser tool calls: {browserCalls.Count}");
 
         foreach (var call in browserCalls)

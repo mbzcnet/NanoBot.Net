@@ -141,7 +141,8 @@ public class BenchmarkCommand : NanoBotCommandBase
                     profile.Provider ?? "openai",
                     profile.Model,
                     profile.ApiKey,
-                    profile.ApiBase);
+                    profile.ApiBase,
+                    profile.MaxTokens);
 
                 // Run benchmark
                 var benchmarkEngine = GetService<IBenchmarkEngine>();

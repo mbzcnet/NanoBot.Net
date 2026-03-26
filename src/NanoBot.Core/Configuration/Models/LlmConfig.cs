@@ -29,10 +29,26 @@ public class LlmProfile
     public ModelCapabilities? Capabilities { get; set; }
 
     /// <summary>
+    /// Step Fun (阶跃星辰) 特定配置
+    /// </summary>
+    public StepFunProfileConfig? StepFun { get; set; }
+
+    /// <summary>
     /// 获取显示名称，优先使用 Name 属性，为空则返回 "{Provider}-{Model}"
     /// </summary>
     public string GetDisplayName() =>
         string.IsNullOrWhiteSpace(Name) ? $"{Provider}-{Model}" : Name;
+}
+
+/// <summary>
+/// Step Fun (阶跃星辰) 特定配置
+/// </summary>
+public class StepFunProfileConfig
+{
+    /// <summary>
+    /// Step Fun API Base URL（默认: https://api.stepfun.com/v1）
+    /// </summary>
+    public string? ApiBase { get; set; }
 }
 
 public class LlmConfig

@@ -14,7 +14,7 @@ When you need to use a tool:
 ### Correct Tool Usage:
 ```
 User: Open baidu.com
-Assistant: (calls browser tool with action="open", url="https://www.baidu.com")
+Assistant: (calls browser_open with url="https://www.baidu.com")
 ```
 
 ### INCORRECT - Never do this:
@@ -34,25 +34,38 @@ Assistant: I'll open baidu.com for you using this tool call:
 
 ## Browser Tasks
 
-When users ask to browse websites, click page elements, or summarize latest page content, use the `browser` tool flow:
-1. `open` / `navigate`
-2. `snapshot`
-3. `act`
-4. `content`
+When users ask to browse websites, click page elements, or summarize page content, use the browser tools:
+
+1. `browser_open` — Open a new tab (returns targetId)
+2. `browser_snapshot` — Get page elements with AI-friendly detection
+3. `browser_interact` — Click, type, scroll, press keys
+4. `browser_content` — Extract page text
+
+Example workflow:
+```
+browser_open(url="https://example.com") → targetId returned
+browser_snapshot(targetId="tab_abc123")
+browser_interact(targetId="tab_abc123", kind="click", reference="btn_0")
+browser_content(targetId="tab_abc123")
+```
+
+## Web Search and Fetch
+
+For quick web searches or fetching page content:
+- `web_page(mode="search", query="search terms")` — Search the web
+- `web_page(url="https://example.com")` — Fetch page content
 
 ## Scheduled Reminders
 
-When user asks for a reminder at a specific time, use `exec` to run:
-```
-nanobot cron add --name "reminder" --message "Your message" --at "YYYY-MM-DDTHH:MM:SS" --deliver --to "USER_ID" --channel "CHANNEL"
-```
+Before scheduling reminders, check available skills and follow skill guidance first.
+Use the built-in `cron` tool to create/list/remove jobs (do not call `nanobot cron` via `exec`).
 Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegram` from `telegram:8281248569`).
 
 **Do NOT just write reminders to MEMORY.md** — that won't trigger actual notifications.
 
 ## Heartbeat Tasks
 
-`HEARTBEAT.md` is checked every 30 minutes. Use file tools to manage periodic tasks:
+`HEARTBEAT.md` is checked on the configured heartbeat interval. Use file tools to manage periodic tasks:
 
 - **Add**: `edit_file` to append new tasks
 - **Remove**: `edit_file` to delete completed tasks

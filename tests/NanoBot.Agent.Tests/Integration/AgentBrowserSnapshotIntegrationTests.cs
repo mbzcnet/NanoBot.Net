@@ -130,7 +130,7 @@ public class AgentBrowserSnapshotIntegrationTests : IDisposable
             .Returns(new ChatClientMetadata("test"));
 
         // Create Agent with Browser Tool
-        var browserTool = BrowserTools.CreateBrowserTool(_browserServiceMock.Object);
+        var browserTool = BrowserTools.CreateBrowserSnapshotTool(_browserServiceMock.Object);
         var agentOptions = new ChatClientAgentOptions
         {
             Name = "NanoBot",

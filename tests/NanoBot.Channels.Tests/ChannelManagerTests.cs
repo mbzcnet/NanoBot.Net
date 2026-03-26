@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
+using NanoBot.Core.Configuration;
 using NanoBot.Channels;
 using Xunit;
 
@@ -11,17 +12,19 @@ public class ChannelManagerTests
 {
     private readonly Mock<IMessageBus> _mockBus;
     private readonly Mock<ILogger<ChannelManager>> _mockLogger;
+    private readonly ChannelsConfig _config;
 
     public ChannelManagerTests()
     {
         _mockBus = new Mock<IMessageBus>();
         _mockLogger = new Mock<ILogger<ChannelManager>>();
+        _config = new ChannelsConfig();
     }
 
     [Fact]
     public void Constructor_InitializesEmpty()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
 
         Assert.Empty(manager.EnabledChannels);
         Assert.Empty(manager.GetAllChannels());
@@ -30,7 +33,7 @@ public class ChannelManagerTests
     [Fact]
     public void Register_AddsChannel()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(c => c.Id).Returns("test");
         mockChannel.Setup(c => c.Type).Returns("test");
@@ -44,7 +47,7 @@ public class ChannelManagerTests
     [Fact]
     public void GetChannel_ReturnsRegisteredChannel()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(c => c.Id).Returns("test");
         mockChannel.Setup(c => c.Type).Returns("test");
@@ -60,7 +63,7 @@ public class ChannelManagerTests
     [Fact]
     public void GetChannel_ReturnsNullForUnknown()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
 
         var result = manager.GetChannel("unknown");
 
@@ -70,7 +73,7 @@ public class ChannelManagerTests
     [Fact]
     public void GetChannelsByType_ReturnsMatchingChannels()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
         var mockChannel1 = new Mock<IChannel>();
         mockChannel1.Setup(c => c.Id).Returns("test1");
         mockChannel1.Setup(c => c.Type).Returns("telegram");
@@ -90,7 +93,7 @@ public class ChannelManagerTests
     [Fact]
     public void GetStatus_ReturnsCorrectStatus()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(c => c.Id).Returns("test");
         mockChannel.Setup(c => c.Type).Returns("test");
@@ -107,7 +110,7 @@ public class ChannelManagerTests
     [Fact]
     public async Task StopAllAsync_StopsAllChannels()
     {
-        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object);
+        var manager = new ChannelManager(_mockBus.Object, _mockLogger.Object, _config);
         var mockChannel = new Mock<IChannel>();
         mockChannel.Setup(c => c.Id).Returns("test");
         mockChannel.Setup(c => c.Type).Returns("test");

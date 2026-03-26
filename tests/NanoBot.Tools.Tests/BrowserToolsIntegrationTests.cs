@@ -110,7 +110,7 @@ public class TestBrowserService : IBrowserService
 }
 
 /// <summary>
-/// Integration tests for BrowserTools with real LLM - NO MOCKS.
+/// Integration tests for atomic browser tools with real LLM - NO MOCKS.
 /// Uses real TestBrowserService to record and verify LLM tool calls.
 /// </summary>
 public class BrowserToolsIntegrationTests : IDisposable
@@ -158,26 +158,25 @@ public class BrowserToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task BrowserTool_WithRealLLM_CanOpenTab()
+    public async Task BrowserOpenTool_WithRealLLM_CanOpenTab()
     {
         if (!EnsureEnabled()) return;
 
         var browserService = new TestBrowserService();
-        var browserTool = BrowserTools.CreateBrowserTool(browserService);
+        var browserOpenTool = BrowserTools.CreateBrowserOpenTool(browserService);
 
         var response = await _chatClient.GetResponseAsync(
             "Open a browser tab and navigate to https://baidu.com",
-            new ChatOptions { Tools = [browserTool] }
+            new ChatOptions { Tools = [browserOpenTool] }
         );
 
         Assert.NotNull(response);
         var text = response.Text ?? string.Empty;
         Assert.False(string.IsNullOrWhiteSpace(text), "Response should not be empty");
 
-        // Verify OpenTab was called (URL might be passed in targetUrl parameter)
+        // Verify OpenTab was called
         var openCalls = browserService.Calls.Where(c => c.Method == nameof(TestBrowserService.OpenTabAsync)).ToList();
         Assert.True(openCalls.Count > 0, "OpenTab should have been called");
-        // URL could be in the url parameter - just verify it's not null when called
         var urlParam = openCalls[0].Parameters.GetValueOrDefault("url")?.ToString();
         Assert.False(string.IsNullOrEmpty(urlParam), "URL should be provided");
 
@@ -186,17 +185,18 @@ public class BrowserToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task BrowserTool_WithRealLLM_CanNavigateWithTargetId()
+    public async Task BrowserTools_WithRealLLM_CanNavigateWithTargetId()
     {
         if (!EnsureEnabled()) return;
 
         var browserService = new TestBrowserService();
-        var browserTool = BrowserTools.CreateBrowserTool(browserService);
+        var browserOpenTool = BrowserTools.CreateBrowserOpenTool(browserService);
+        var browserNavigateTool = BrowserTools.CreateBrowserNavigateTool(browserService);
 
         // First open a tab, then navigate to a new URL
         var response = await _chatClient.GetResponseAsync(
             "Open a browser tab to https://baidu.com, then navigate to https://www.163.com using the tab ID",
-            new ChatOptions { Tools = [browserTool] }
+            new ChatOptions { Tools = [browserOpenTool, browserNavigateTool] }
         );
 
         Assert.NotNull(response);
@@ -221,16 +221,18 @@ public class BrowserToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task BrowserTool_WithRealLLM_CanGetSnapshotAndContent()
+    public async Task BrowserTools_WithRealLLM_CanGetSnapshotAndContent()
     {
         if (!EnsureEnabled()) return;
 
         var browserService = new TestBrowserService();
-        var browserTool = BrowserTools.CreateBrowserTool(browserService);
+        var browserOpenTool = BrowserTools.CreateBrowserOpenTool(browserService);
+        var browserSnapshotTool = BrowserTools.CreateBrowserSnapshotTool(browserService);
+        var browserContentTool = BrowserTools.CreateBrowserContentTool(browserService);
 
         var response = await _chatClient.GetResponseAsync(
             "Open https://baidu.com, then get a snapshot of the page and extract the content",
-            new ChatOptions { Tools = [browserTool] }
+            new ChatOptions { Tools = [browserOpenTool, browserSnapshotTool, browserContentTool] }
         );
 
         Assert.NotNull(response);
@@ -257,16 +259,17 @@ public class BrowserToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task BrowserTool_WithRealLLM_CanExecuteActions()
+    public async Task BrowserInteractTool_WithRealLLM_CanExecuteActions()
     {
         if (!EnsureEnabled()) return;
 
         var browserService = new TestBrowserService();
-        var browserTool = BrowserTools.CreateBrowserTool(browserService);
+        var browserOpenTool = BrowserTools.CreateBrowserOpenTool(browserService);
+        var browserInteractTool = BrowserTools.CreateBrowserInteractTool(browserService);
 
         var response = await _chatClient.GetResponseAsync(
             "Open https://baidu.com, wait for the page to load, then click on element with reference '1'",
-            new ChatOptions { Tools = [browserTool] }
+            new ChatOptions { Tools = [browserOpenTool, browserInteractTool] }
         );
 
         Assert.NotNull(response);
@@ -290,17 +293,20 @@ public class BrowserToolsIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task BrowserTool_WithRealLLM_CompleteWorkflow()
+    public async Task BrowserTools_CompleteWorkflow()
     {
         if (!EnsureEnabled()) return;
 
         var browserService = new TestBrowserService();
-        var browserTool = BrowserTools.CreateBrowserTool(browserService);
+        var browserOpenTool = BrowserTools.CreateBrowserOpenTool(browserService);
+        var browserSnapshotTool = BrowserTools.CreateBrowserSnapshotTool(browserService);
+        var browserInteractTool = BrowserTools.CreateBrowserInteractTool(browserService);
+        var browserContentTool = BrowserTools.CreateBrowserContentTool(browserService);
 
         // Complete workflow test: open, snapshot, click, content
         var response = await _chatClient.GetResponseAsync(
             "Complete this browser workflow: 1) Open https://baidu.com, 2) Get a snapshot, 3) Click element '1', 4) Extract content",
-            new ChatOptions { Tools = [browserTool] }
+            new ChatOptions { Tools = [browserOpenTool, browserSnapshotTool, browserInteractTool, browserContentTool] }
         );
 
         Assert.NotNull(response);
