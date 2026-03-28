@@ -1,3 +1,93 @@
+# 2026-03-28
+
+- **修复 WebUI Markdown 显示为源码**：
+  - 移除 `md4x`（依赖外网 CDN + WASM，初始化失败时 `catch` 分支直接返回原文，被当作 `MarkupString` 注入 DOM）
+  - 改用服务端 C# `Markdig` 直接渲染，零外部依赖
+  - `MarkdownRenderer.razor` 重写：`Markdown.ToHtml(Content, _pipeline)` 在 `OnParametersSet()` 同步执行
+  - `MarkdownPipeline` 启用 GFM 表格、自动链接、表情符号扩展
+  - `App.razor` 移除 `md4x-loader.js` 引用，删除 `wwwroot/js/md4x-loader.js`
+
+# 2026-03-28
+
+- **修复 Skills 加载机制**：
+  - `ISkillsLoader` 新增 `EnsureLoadedAsync()` 方法 - 确保 skills 被加载后再访问
+  - `SkillsLoader` 实现 `EnsureLoadedAsync()` - 如果已加载则跳过，否则调用 `LoadAsync()`
+  - `SkillsContextProvider.EnsureCacheAsync()` 调用 `EnsureLoadedAsync()` - 修复 skills 永远不会被加载到 AI context 的问题
+
+- **修复 Workspace 初始化和 Memory 机制**：
+  - **重构 OnboardCommand**：
+    - 新增 `InitializeWorkspaceAsync()` 方法，使用 `WorkspaceManager.InitializeAsync()` 从嵌入资源正确提取 workspace 文件（模板 + skills）
+    - 废弃 `CreateWorkspaceTemplatesAsync()` 方法，改为调用 `WorkspaceManager` 统一处理
+  - **添加 HISTORY.md 支持**：
+    - `IWorkspaceManager.GetHistoryFile()` — 新增方法
+    - `WorkspaceConfig.GetHistoryFile()` — 返回 `memory/HISTORY.md` 路径
+    - `IMemoryStore.AppendHistoryAsync()` — 追加 history 条目
+    - `IMemoryStore.GetHistoryContext()` — 获取 history 上下文
+    - `IMemoryStore.GetHistoryFilePath()` — 获取 history 文件路径
+    - `MemoryStore` — 实现 history 相关方法
+  - **完善 MemoryConfig**：
+    - 新增 `EnableHistory` 属性（默认 true），控制 HISTORY.md 是否启用
+  - **更新 MemoryContextProvider**：
+    - 注入 history context 到 AI context
+  - **完善 MemoryConsolidator**：
+    - 添加 `AppendHistoryEntryAsync()` — LLM 总结成功后追加 history 条目
+    - 添加 `RawArchiveAsync()` — LLM 失败时降级为 raw archive
+    - 修复 prompt 要求返回 `history_entry` 和 `memory_update` 两个字段
+
+# 2026-03-27
+
+- **代码审核清理（基于 2026-03-27 代码审核报告）**：
+  - **删除未使用的 BusMessageType.cs**：
+    - 确认无引用后删除 `src/NanoBot.Core/Bus/BusMessageType.cs`
+  - **统一配置读取到 ConfigurationLoader**：
+    - `ChannelConfigService.cs` 改用 `ConfigurationLoader.LoadAsync()` 和 `ConfigurationLoader.SaveAsync()`
+    - 保持 `ChannelsConfig` 单独保存逻辑
+  - **更新 Feature-List.md 文档**：
+    - 标记 `BusMessage`、`BusMessageType` 为 ❌ 已删除
+    - 标记新增接口为 ✅ 已完成：`IMessageStore`、`ISkillsProvider`、`ISkillsMetadataProvider`、`IRpaExecutor`、`IRpaHealthProvider`、`IScreenAnalyzer`、`ScheduledJob`
+    - 标记新增服务类为 ✅ 已完成：`MessageProcessor`、`StreamingProcessor`、`MemoryConsolidationService`、`SessionTitleManager`、`ImageContentProcessor`、`AgentExtensions`、`CliCommandContext`
+    - 标记新增 WebUI 服务为 ✅ 已完成：`ConfigPaths`、`ChannelFormattingService`、`ChannelConfigRenderer`、`ChatFormattingService`、`SessionMessageParser`、`ChatMessage`、`ChatToolExecution`、`MessagePartsRenderer`
+    - 更新功能统计：已完成 185+，已删除 2
+  - **修复异步测试警告**：
+    - `ChannelPluginTests.cs` 中两个测试方法改为 `async Task` 并使用 `await`
+  - **添加单元测试**：
+    - 新增 `tests/NanoBot.Agent.Tests/ToolHintFormatterTests.cs`，覆盖以下测试场景：
+      - `FormatToolHint`（空集合、单调用、多调用、多参数截断）
+      - `GetToolDescription`（read_file、write_file、unknown_tool、null 参数、web_search、browser）
+      - `FormatToolResult`（错误 payload、内容 payload、快照 action、null 结果、空结果）
+      - `GetFunctionResultPayload`（字符串结果、JsonElement）
+      - `TruncateValue`（短字符串、长字符串截断）
+      - `WrapToolHintAsMarkdown`
+
+- **完成 NanoBot.WebUI 代码审计与重构优化（Phase 1-6）**：
+  - **Phase 1 - 删除死模板 + 提取 ConfigPaths**：
+    - 删除 `Counter.razor`、`Weather.razor` 模板页面
+    - 新增 `Services/ConfigPaths.cs` — 统一配置路径解析，消除多文件重复代码
+  - **Phase 2 - 修复循环依赖**：
+    - 将完整 DI 链从 `NanoBot.Cli.Extensions` 迁移至 `NanoBot.Agent.Extensions`
+    - `NanoBot.WebUI` 移除对 `NanoBot.Cli` 的项目引用
+    - CLI 各调用点改用 `NanoBot.Agent.ServiceCollectionExtensions` 全限定名消除歧义
+    - `NanoBot.Agent.csproj` 新增 `NanoBot.Tools`、`NanoBot.Channels` 项目引用和必要的包引用
+  - **Phase 3 - 拆分 SessionService**：
+    - 新增 `Services/SessionMessageParser.cs` — 消息解析核心逻辑（.jsonl 读取、Parts 构建、工具输出规范化、快照图片提取）
+    - `SessionService.cs` 从 ~1230 行缩减至 ~270 行，专注于会话生命周期管理
+  - **Phase 4 - 拆分 Chat.razor**：
+    - 新增 `Components/Shared/ChatPageModels.cs` — `ChatMessage`、`ChatToolExecution`、`ProfileOption` 模型提取
+    - 新增 `Services/ChatFormattingService.cs` — 静态格式化方法（文本、工具输出、Markdown 检测、错误识别、复制内容构建）
+    - 新增 `Components/Shared/MessagePartsRenderer.razor` — Parts 交错渲染组件
+    - `Chat.razor` 从 ~1050 行缩减至 ~743 行
+  - **Phase 5 - Channels.razor 重构**：
+    - 新增 `Services/ChannelFormattingService.cs` — 通道图标映射、启用/禁用、配置对象获取、验证消息
+    - 新增 `Services/ChannelConfigRenderer.cs` — RenderFragment 工厂，动态渲染各通道配置编辑器组件
+    - `Channels.razor` 移除 10 个 `Test*Connection` 方法、3 个 `On*ConfigChanged` 方法、`GetChannelIconName` 方法
+    - `Channels.razor` 从 ~904 行缩减至 ~470 行
+  - **Phase 6 - 警告清理**：
+    - 消除 `@using NanoBot.Core.Configuration` 重复 using 指令警告（Channels、Config、ConfigProfiles、ConfigProfilesNew、ConfigProfileEdit 各页面）
+    - 修复 `ConfigProfileEdit.razor` CS8974 警告：`Validation="@(ValidateProfileName)"` → `Validation="@((Func<string?, string?>)ValidateProfileName)"`
+    - 修复 `Chat.razor` CS8601 null 赋值警告：所有 `chunk.ToolCallDetails.Name` 添加 `!` 和 `?? string.Empty`
+    - `Program.cs` 移除无用的 `NanoBot.Cli.Extensions` 引用，改用 `NanoBot.Agent`
+    - WebUI 项目：0 errors, 0 warnings
+
 # 2026-03-20
 
 - **创建原 nanobot 项目周报 (2026-03-13 ~ 2026-03-20)**：

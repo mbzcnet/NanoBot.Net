@@ -339,4 +339,11 @@ public class RpaService : IRpaService
             await _omniParserClient.StopAsync();
         }
     }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        // Cleanup if needed
+        GC.SuppressFinalize(this);
+    }
 }

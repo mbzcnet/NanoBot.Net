@@ -17,6 +17,7 @@ using NanoBot.Infrastructure.Bus;
 using NanoBot.Infrastructure.Resources;
 using NanoBot.Infrastructure.Workspace;
 using NanoBot.Providers;
+using NanoBot.Tools.Extensions;
 using Xunit;
 
 namespace NanoBot.Cli.Tests;
@@ -24,22 +25,32 @@ namespace NanoBot.Cli.Tests;
 public class ServiceCollectionTests
 {
     [Fact]
-    public void AddNanoBotConfiguration_ShouldRegisterConfigurationServices()
+    public void AddNanoBot_ShouldRegisterAllServices()
     {
         var services = new ServiceCollection();
-        var configuration = CreateTestConfiguration();
+        var agentConfig = CreateTestAgentConfig();
 
-        services.AddNanoBotConfiguration(configuration);
+        services.AddLogging();
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(services, agentConfig);
 
         var serviceProvider = services.BuildServiceProvider();
 
-        Assert.NotNull(serviceProvider.GetService<IConfiguration>());
         Assert.NotNull(serviceProvider.GetService<AgentConfig>());
         Assert.NotNull(serviceProvider.GetService<WorkspaceConfig>());
         Assert.NotNull(serviceProvider.GetService<LlmConfig>());
         Assert.NotNull(serviceProvider.GetService<ChannelsConfig>());
         Assert.NotNull(serviceProvider.GetService<MemoryConfig>());
         Assert.NotNull(serviceProvider.GetService<SecurityConfig>());
+        Assert.NotNull(serviceProvider.GetService<IWorkspaceManager>());
+        Assert.NotNull(serviceProvider.GetService<IMessageBus>());
+        Assert.NotNull(serviceProvider.GetService<ICronService>());
+        Assert.NotNull(serviceProvider.GetService<IHeartbeatService>());
+        Assert.NotNull(serviceProvider.GetService<ISkillsLoader>());
+        Assert.NotNull(serviceProvider.GetService<IChannelManager>());
+        Assert.NotNull(serviceProvider.GetService<IMemoryStore>());
+        Assert.NotNull(serviceProvider.GetService<ISessionManager>());
+        Assert.NotNull(serviceProvider.GetService<ChatClientAgent>());
+        Assert.NotNull(serviceProvider.GetService<IAgentRuntime>());
     }
 
     [Fact]
@@ -93,7 +104,7 @@ public class ServiceCollectionTests
         services.AddSingleton(new WorkspaceConfig());
         services.AddSingleton(new MemoryConfig());
         services.AddSingleton<IEmbeddedResourceLoader, EmbeddedResourceLoader>();
-        services.AddSingleton<IWorkspaceManager>(sp => new WorkspaceManager(sp.GetService<WorkspaceConfig>()!, sp.GetService<IEmbeddedResourceLoader>()));
+        services.AddSingleton<IWorkspaceManager>(sp => new WorkspaceManager(sp.GetRequiredService<WorkspaceConfig>(), sp.GetRequiredService<IEmbeddedResourceLoader>()));
 
         services.AddNanoBotContextProviders();
 
@@ -109,7 +120,7 @@ public class ServiceCollectionTests
         services.AddLogging();
         services.AddSingleton(new WorkspaceConfig());
         services.AddSingleton<IEmbeddedResourceLoader, EmbeddedResourceLoader>();
-        services.AddSingleton<IWorkspaceManager>(sp => new WorkspaceManager(sp.GetService<WorkspaceConfig>()!, sp.GetService<IEmbeddedResourceLoader>()));
+        services.AddSingleton<IWorkspaceManager>(sp => new WorkspaceManager(sp.GetRequiredService<WorkspaceConfig>(), sp.GetRequiredService<IEmbeddedResourceLoader>()));
         services.AddSingleton<IMessageBus, MessageBus>();
 
         services.AddNanoBotBackgroundServices();
@@ -137,32 +148,6 @@ public class ServiceCollectionTests
     }
 
     [Fact]
-    public void AddNanoBot_ShouldRegisterAllServices()
-    {
-        var services = new ServiceCollection();
-        var configuration = CreateTestConfiguration();
-
-        services.AddLogging();
-        services.AddSingleton(configuration); // Register IConfiguration explicitly
-        services.AddNanoBot(configuration);
-
-        var serviceProvider = services.BuildServiceProvider();
-
-        Assert.NotNull(serviceProvider.GetService<IConfiguration>());
-        Assert.NotNull(serviceProvider.GetService<AgentConfig>());
-        Assert.NotNull(serviceProvider.GetService<IWorkspaceManager>());
-        Assert.NotNull(serviceProvider.GetService<IMessageBus>());
-        Assert.NotNull(serviceProvider.GetService<ICronService>());
-        Assert.NotNull(serviceProvider.GetService<IHeartbeatService>());
-        Assert.NotNull(serviceProvider.GetService<ISkillsLoader>());
-        Assert.NotNull(serviceProvider.GetService<IChannelManager>());
-        Assert.NotNull(serviceProvider.GetService<IMemoryStore>());
-        Assert.NotNull(serviceProvider.GetService<ISessionManager>());
-        Assert.NotNull(serviceProvider.GetService<ChatClientAgent>());
-        Assert.NotNull(serviceProvider.GetService<IAgentRuntime>());
-    }
-
-    [Fact]
     public void AddNanoBotCli_ShouldBuildConfigurationAndRegisterServices()
     {
         var services = new ServiceCollection();
@@ -179,11 +164,10 @@ public class ServiceCollectionTests
     public void Services_ShouldBeRegisteredAsSingleton()
     {
         var services = new ServiceCollection();
-        var configuration = CreateTestConfiguration();
+        var agentConfig = CreateTestAgentConfig();
 
         services.AddLogging();
-        services.AddSingleton(configuration); // Register IConfiguration explicitly
-        services.AddNanoBot(configuration);
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(services, agentConfig);
 
         var serviceProvider = services.BuildServiceProvider();
 
@@ -200,19 +184,65 @@ public class ServiceCollectionTests
         Assert.Same(cron1, cron2);
     }
 
-    private static IConfiguration CreateTestConfiguration()
+    [Fact]
+    public void ModelScopedAgentRegistration_CanResolveUsingForwardedBaseSingletons()
     {
-        var configDict = new Dictionary<string, string?>
-        {
-            ["Agent:Name"] = "TestAgent",
-            ["Agent:Workspace:Path"] = "/tmp/test-workspace",
-            ["Agent:Llm:Profiles:default:Provider"] = "openai",
-            ["Agent:Llm:Profiles:default:Model"] = "gpt-4o",
-            ["Agent:Llm:Profiles:default:ApiKey"] = "test-api-key"
-        };
+        var agentConfig = CreateTestAgentConfig();
 
-        return new ConfigurationBuilder()
-            .AddInMemoryCollection(configDict)
-            .Build();
+        var baseServices = new ServiceCollection();
+        baseServices.AddLogging();
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(baseServices, agentConfig);
+        var baseProvider = baseServices.BuildServiceProvider();
+
+        var modelServices = new ServiceCollection();
+        modelServices.AddLogging();
+        modelServices.AddSingleton(baseProvider.GetRequiredService<IWorkspaceManager>());
+        modelServices.AddSingleton(baseProvider.GetRequiredService<IMessageBus>());
+        modelServices.AddSingleton(baseProvider.GetRequiredService<ISkillsLoader>());
+
+        var memoryStore = baseProvider.GetService<IMemoryStore>();
+        if (memoryStore != null)
+            modelServices.AddSingleton(memoryStore);
+
+        var subagentManager = baseProvider.GetService<ISubagentManager>();
+        if (subagentManager != null)
+            modelServices.AddSingleton(subagentManager);
+
+        foreach (var tool in baseProvider.GetServices<AITool>())
+            modelServices.AddSingleton(typeof(AITool), tool);
+
+        modelServices.AddSingleton(agentConfig);
+        modelServices.AddSingleton(agentConfig.Workspace);
+        modelServices.AddSingleton(agentConfig.Llm);
+        modelServices.AddSingleton(agentConfig.Security);
+        modelServices.AddSingleton(agentConfig.Memory);
+        modelServices.AddMicrosoftAgentsAI(agentConfig.Llm);
+        modelServices.AddNanoBotAgent();
+
+        var modelProvider = modelServices.BuildServiceProvider();
+
+        Assert.NotNull(modelProvider.GetRequiredService<IAgentRuntime>());
+    }
+
+    private static AgentConfig CreateTestAgentConfig()
+    {
+        return new AgentConfig
+        {
+            Name = "TestAgent",
+            Workspace = new WorkspaceConfig { Path = "/tmp/test-workspace" },
+            Llm = new LlmConfig
+            {
+                DefaultProfile = "default",
+                Profiles = new Dictionary<string, LlmProfile>
+                {
+                    ["default"] = new LlmProfile
+                    {
+                        Provider = "openai",
+                        Model = "gpt-4o",
+                        ApiKey = "test-api-key"
+                    }
+                }
+            }
+        };
     }
 }

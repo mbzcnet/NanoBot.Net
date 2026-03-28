@@ -1,4 +1,4 @@
-@inject IJSRuntime JSRuntime
+@using Markdig
 
 <div class="markdown-content">
     @((MarkupString)_htmlContent)
@@ -8,71 +8,18 @@
     [Parameter]
     public string Content { get; set; } = string.Empty;
 
-    /// <summary>
-    /// 是否启用流式渲染模式（边接收边渲染）
-    /// </summary>
-    [Parameter]
-    public bool EnableStreaming { get; set; } = false;
-
     private string _htmlContent = string.Empty;
 
-    protected override async Task OnParametersSetAsync()
+    protected override void OnParametersSet()
     {
-        if (string.IsNullOrEmpty(Content))
-        {
-            _htmlContent = string.Empty;
-            return;
-        }
-
-        try
-        {
-            // 使用 md4x WASM 进行渲染
-            _htmlContent = await JSRuntime.InvokeAsync<string>("md4x.renderToHtml", Content);
-        }
-        catch (Exception ex)
-        {
-            // Fallback: 如果 md4x 加载失败，使用原始内容
-            Console.Error.WriteLine($"md4x render failed: {ex.Message}");
-            _htmlContent = EscapeHtml(Content);
-        }
+        _htmlContent = string.IsNullOrEmpty(Content)
+            ? string.Empty
+            : Markdown.ToHtml(Content, _pipeline);
     }
 
-    /// <summary>
-    /// 流式更新：接收不完整的 Markdown，逐步渲染并修复
-    /// </summary>
-    public async Task UpdateStreamingAsync(string incompleteContent)
-    {
-        if (!EnableStreaming || string.IsNullOrEmpty(incompleteContent))
-        {
-            return;
-        }
-
-        try
-        {
-            // 使用 md4x heal 修复不完整的 Markdown
-            var healed = await JSRuntime.InvokeAsync<string>("md4x.heal", incompleteContent);
-            _htmlContent = await JSRuntime.InvokeAsync<string>("md4x.renderToHtml", healed);
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"md4x streaming render failed: {ex.Message}");
-            // Fallback: 直接显示原始内容
-            _htmlContent = EscapeHtml(incompleteContent);
-        }
-    }
-
-    private static string EscapeHtml(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return string.Empty;
-        }
-
-        return text
-            .Replace("&", "&amp;")
-            .Replace("<", "&lt;")
-            .Replace(">", "&gt;")
-            .Replace("\"", "&quot;")
-            .Replace("'", "&#39;");
-    }
+    private static readonly MarkdownPipeline _pipeline = new MarkdownPipelineBuilder()
+        .UseAdvancedExtensions()
+        .UseAutoLinks()
+        .UseEmojiAndSmiley()
+        .Build();
 }

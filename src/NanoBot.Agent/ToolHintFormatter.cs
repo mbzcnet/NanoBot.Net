@@ -1,16 +1,17 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace NanoBot.Agent;
 
 /// <summary>
-/// Formats tool calls for display in CLI and WebUI.
-/// Aligned with OpenCode-style tool call formatting.
+/// Formats tool calls and results for display in CLI and WebUI.
 /// </summary>
-public static class ToolHintFormatter
+public static partial class ToolHintFormatter
 {
     private const int MaxArgumentLength = 50;
     private const int MaxArgumentsToShow = 2;
+    private const int DefaultTruncateLength = 200;
 
     /// <summary>
     /// Format tool calls as a parseable marker with icon and details
@@ -177,5 +178,129 @@ public static class ToolHintFormatter
             return value ?? "";
         }
         return value[..maxLength] + "…";
+    }
+
+    /// <summary>
+    /// Formats a tool result for display in CLI
+    /// </summary>
+    public static string? FormatToolResult(FunctionResultContent functionResult)
+    {
+        var payload = GetFunctionResultPayload(functionResult);
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(payload);
+            var root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("error", out var errorElement))
+                {
+                    var errorMsg = errorElement.GetString() ?? errorElement.GetRawText();
+                    return $"[ERROR] {errorMsg}";
+                }
+
+                if (root.TryGetProperty("content", out var contentElement))
+                {
+                    var content = contentElement.GetString() ?? contentElement.GetRawText();
+                    return Truncate(content, DefaultTruncateLength);
+                }
+
+                if (root.TryGetProperty("output", out var outputElement))
+                {
+                    var output = outputElement.GetString() ?? outputElement.GetRawText();
+                    return Truncate(output, DefaultTruncateLength);
+                }
+
+                if (root.TryGetProperty("action", out var actionElement))
+                {
+                    var action = actionElement.GetString();
+                    if (root.TryGetProperty("url", out var urlElement))
+                    {
+                        var url = urlElement.GetString();
+                        return $"{action}: {url}";
+                    }
+                    if (root.TryGetProperty("imagePath", out _))
+                    {
+                        return $"{action}: snapshot captured";
+                    }
+                    return action;
+                }
+
+                if (root.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array)
+                {
+                    var count = resultsElement.GetArrayLength();
+                    return $"Found {count} results";
+                }
+
+                var json = root.GetRawText();
+                return Truncate(json, 150);
+            }
+
+            if (root.ValueKind == JsonValueKind.String)
+            {
+                var str = root.GetString() ?? payload;
+                return Truncate(str, DefaultTruncateLength);
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return Truncate(payload, DefaultTruncateLength);
+    }
+
+    /// <summary>
+    /// Extracts the payload from a function result content.
+    /// </summary>
+    public static string? GetFunctionResultPayload(FunctionResultContent functionResult)
+    {
+        if (functionResult.Result == null)
+        {
+            return null;
+        }
+
+        if (functionResult.Result is string text)
+        {
+            return text;
+        }
+
+        if (functionResult.Result is JsonElement jsonElement)
+        {
+            return jsonElement.GetRawText();
+        }
+
+        try
+        {
+            return JsonSerializer.Serialize(functionResult.Result);
+        }
+        catch
+        {
+            return functionResult.Result.ToString();
+        }
+    }
+
+    /// <summary>
+    /// Truncates a string to the specified maximum length.
+    /// </summary>
+    public static string TruncateValue(string value, int maxLength = DefaultTruncateLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value ?? "";
+        }
+        return value[..maxLength] + "…";
+    }
+
+    /// <summary>
+    /// Wraps a tool hint string in Markdown format.
+    /// </summary>
+    public static string WrapToolHintAsMarkdown(string toolHint)
+    {
+        return $"\n{toolHint}\n";
     }
 }

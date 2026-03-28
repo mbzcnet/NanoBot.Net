@@ -545,6 +545,28 @@ public class ConfigurationLoaderTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadWithDefaultsAsync_ShouldLoadConfigAndResolveEnvironmentVariables()
+    {
+        Environment.SetEnvironmentVariable("NBOT_TEST_API_KEY", "env-secret-key");
+
+        try
+        {
+            var json = "{\"name\":\"EnvBot\",\"llm\":{\"default_profile\":\"default\",\"profiles\":{\"default\":{\"provider\":\"openai\",\"model\":\"gpt-4o-mini\",\"api_key\":\"${NBOT_TEST_API_KEY}\"}}}}";
+            var configPath = CreateTempConfigFile(json);
+
+            var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath);
+
+            config.Name.Should().Be("EnvBot");
+            config.Llm.DefaultProfile.Should().Be("default");
+            config.Llm.Profiles["default"].ApiKey.Should().Be("env-secret-key");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NBOT_TEST_API_KEY", null);
+        }
+    }
+
+    [Fact]
     public async Task SaveAsync_ShouldSaveConfigCorrectly()
     {
         var config = new AgentConfig

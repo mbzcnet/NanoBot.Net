@@ -211,6 +211,85 @@ public class SessionManagerTests : IDisposable
     }
 
     [Fact]
+    public async Task SaveSessionAsync_WritesAgentSessionIntoMetadata()
+    {
+        var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
+        var sessionKey = "test:metadata_agent_session";
+        var session = await manager.GetOrCreateSessionAsync(sessionKey);
+
+        await manager.SaveSessionAsync(session, sessionKey);
+
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_metadata_agent_session.jsonl");
+        var firstLine = (await File.ReadAllLinesAsync(sessionFile)).First();
+        var metadata = JsonSerializer.Deserialize<JsonElement>(firstLine);
+
+        Assert.True(metadata.TryGetProperty("metadata", out var innerMetadata));
+        Assert.True(innerMetadata.TryGetProperty("agent_session", out _));
+    }
+
+    [Fact]
+    public async Task GetOrCreateSessionAsync_RestoresStructuredToolMessages_FromLegacyJsonlFormat()
+    {
+        var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);
+        var sessionKey = "test:legacy_tool_restore";
+        var sessionFile = Path.Combine(_testDirectory, "sessions", "test_legacy_tool_restore.jsonl");
+
+        var metadata = new
+        {
+            _type = "metadata",
+            key = sessionKey,
+            created_at = DateTimeOffset.UtcNow.ToString("o"),
+            updated_at = DateTimeOffset.UtcNow.ToString("o"),
+            title = "legacy",
+            profile_id = (string?)null,
+            last_consolidated = 0
+        };
+
+        var assistantMessage = new
+        {
+            role = "assistant",
+            content = string.Empty,
+            timestamp = DateTimeOffset.UtcNow.ToString("o"),
+            tool_calls = new[]
+            {
+                new
+                {
+                    id = "call_legacy_1",
+                    type = "function",
+                    function = new
+                    {
+                        name = "browser",
+                        arguments = "{\"action\":\"open\",\"targetUrl\":\"https://example.com\"}"
+                    }
+                }
+            }
+        };
+
+        var toolMessage = new
+        {
+            role = "tool",
+            content = "{\"ok\":true}",
+            timestamp = DateTimeOffset.UtcNow.ToString("o"),
+            tool_call_id = "call_legacy_1"
+        };
+
+        await File.WriteAllLinesAsync(sessionFile,
+        [
+            JsonSerializer.Serialize(metadata),
+            JsonSerializer.Serialize(assistantMessage),
+            JsonSerializer.Serialize(toolMessage)
+        ]);
+
+        var loadedSession = await manager.GetOrCreateSessionAsync(sessionKey);
+
+        Assert.True(loadedSession.StateBag.TryGetValue<List<ChatMessage>>("ChatHistoryProvider", out var messages));
+        Assert.NotNull(messages);
+        Assert.Equal(2, messages!.Count);
+        Assert.Contains(messages[0].Contents, c => c is FunctionCallContent call && call.CallId == "call_legacy_1" && call.Name == "browser");
+        Assert.Contains(messages[1].Contents, c => c is FunctionResultContent result && result.CallId == "call_legacy_1");
+    }
+
+    [Fact]
     public async Task SaveSessionAsync_RemovesToolCallMarkersFromContent()
     {
         var manager = new SessionManager(_agent, _workspaceMock.Object, _loggerMock.Object);

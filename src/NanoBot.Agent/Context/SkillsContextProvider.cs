@@ -78,6 +78,9 @@ public class SkillsContextProvider : AIContextProvider
             return;
         }
 
+        // Ensure skills are loaded first (lazy loading)
+        await _skillsLoader.EnsureLoadedAsync(cancellationToken);
+
         _cachedAlwaysSkills = _skillsLoader.GetAlwaysSkills();
         _cachedSkillsSummary = await _skillsLoader.BuildSkillsSummaryAsync(cancellationToken);
 

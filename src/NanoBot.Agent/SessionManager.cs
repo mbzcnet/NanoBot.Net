@@ -135,7 +135,8 @@ public sealed class SessionManager : ISessionManager
         {
             var allMessages = GetAllMessages(session);
 
-            var metadata = await BuildMetadataLineAsync(sessionKey, sessionFile, cancellationToken);
+            var sessionJson = await _agent.SerializeSessionAsync(session, cancellationToken: cancellationToken);
+            var metadata = await BuildMetadataLineAsync(sessionKey, sessionFile, sessionJson, cancellationToken);
 
             await using var fs = new FileStream(sessionFile, FileMode.Create, FileAccess.Write, FileShare.Read);
             await using var writer = new StreamWriter(fs);
@@ -344,7 +345,9 @@ public sealed class SessionManager : ISessionManager
                 return session;
             }
 
-            return null;
+            var restoredSession = await RestoreSessionFromJsonlMessagesAsync(sessionFile, cancellationToken);
+            _logger?.LogDebug("Restored session {SessionKey} from JSONL messages in {SessionFile}", sessionKey, sessionFile);
+            return restoredSession;
         }
         catch (Exception ex)
         {
@@ -361,16 +364,6 @@ public sealed class SessionManager : ISessionManager
             safeKey = safeKey.Replace(c, '_');
         }
         return Path.Combine(_sessionsDirectory, $"{safeKey}.jsonl");
-    }
-
-    private string GetLegacySessionPath(string sessionKey)
-    {
-        var safeKey = sessionKey.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
-        foreach (var c in Path.GetInvalidFileNameChars())
-        {
-            safeKey = safeKey.Replace(c, '_');
-        }
-        return Path.Combine(_legacySessionsDirectory, $"{safeKey}.jsonl");
     }
 
     private async Task TryMigrateLegacySessionAsync(string sessionKey, string sessionFile, CancellationToken cancellationToken)
@@ -421,6 +414,7 @@ public sealed class SessionManager : ISessionManager
     private async Task<string> BuildMetadataLineAsync(
         string sessionKey,
         string sessionFile,
+        JsonElement sessionJson,
         CancellationToken cancellationToken)
     {
         var createdAt = DateTimeOffset.Now;
@@ -474,10 +468,139 @@ public sealed class SessionManager : ISessionManager
             ["updated_at"] = DateTimeOffset.Now.ToString("o"),
             ["title"] = title,
             ["profile_id"] = profileId,
-            ["last_consolidated"] = lastConsolidated
+            ["last_consolidated"] = lastConsolidated,
+            ["metadata"] = new JsonObject
+            {
+                ["last_consolidated"] = lastConsolidated,
+                ["agent_session"] = JsonNode.Parse(sessionJson.GetRawText())
+            }
         };
 
         return metadataLine.ToJsonString(_jsonOptions);
+    }
+
+    private async Task<AgentSession> RestoreSessionFromJsonlMessagesAsync(string sessionFile, CancellationToken cancellationToken)
+    {
+        var session = await _agent.CreateSessionAsync(cancellationToken);
+        var messages = new List<ChatMessage>();
+
+        await using var fs = new FileStream(sessionFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var reader = new StreamReader(fs);
+
+        _ = await reader.ReadLineAsync(cancellationToken);
+
+        while (!reader.EndOfStream)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            JsonObject? node;
+            try
+            {
+                node = JsonSerializer.Deserialize<JsonObject>(line, _jsonOptions);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (node == null)
+            {
+                continue;
+            }
+
+            var message = DeserializeMessage(node);
+            if (message != null)
+            {
+                messages.Add(message);
+            }
+        }
+
+        session.StateBag.SetValue("ChatHistoryProvider", messages);
+        return session;
+    }
+
+    private ChatMessage? DeserializeMessage(JsonObject node)
+    {
+        var role = node.TryGetPropertyValue("role", out var roleNode)
+            ? roleNode?.GetValue<string>()
+            : null;
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return null;
+        }
+
+        var content = node.TryGetPropertyValue("content", out var contentNode)
+            ? contentNode?.GetValue<string>() ?? string.Empty
+            : string.Empty;
+
+        var chatRole = role.ToLowerInvariant() switch
+        {
+            "assistant" => ChatRole.Assistant,
+            "tool" => ChatRole.Tool,
+            "system" => ChatRole.System,
+            _ => ChatRole.User
+        };
+
+        var message = new ChatMessage(chatRole, content);
+
+        if (node.TryGetPropertyValue("tool_calls", out var toolCallsNode) && toolCallsNode is JsonArray toolCallsArray)
+        {
+            foreach (var toolCallNode in toolCallsArray)
+            {
+                if (toolCallNode is not JsonObject toolCallObj)
+                {
+                    continue;
+                }
+
+                var callId = toolCallObj.TryGetPropertyValue("id", out var idNode) ? idNode?.GetValue<string>() : null;
+                var functionObj = toolCallObj.TryGetPropertyValue("function", out var functionNode) ? functionNode as JsonObject : null;
+                var name = functionObj?.TryGetPropertyValue("name", out var nameNode) == true ? nameNode?.GetValue<string>() : null;
+                var argumentsJson = functionObj?.TryGetPropertyValue("arguments", out var argsNode) == true ? argsNode?.GetValue<string>() : null;
+
+                if (string.IsNullOrWhiteSpace(callId) || string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                Dictionary<string, object?>? arguments = null;
+                if (!string.IsNullOrWhiteSpace(argumentsJson))
+                {
+                    try
+                    {
+                        arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argumentsJson, _jsonOptions);
+                    }
+                    catch (JsonException)
+                    {
+                        arguments = null;
+                    }
+                }
+
+                message.Contents.Add(new FunctionCallContent(callId, name, arguments));
+            }
+        }
+
+        if (chatRole == ChatRole.Tool &&
+            node.TryGetPropertyValue("tool_call_id", out var toolCallIdNode) &&
+            !string.IsNullOrWhiteSpace(toolCallIdNode?.GetValue<string>()))
+        {
+            message.Contents.Add(new FunctionResultContent(toolCallIdNode!.GetValue<string>()!, content));
+        }
+
+        return message;
+    }
+
+    private string GetLegacySessionPath(string sessionKey)
+    {
+        var safeKey = sessionKey.Replace(":", "_").Replace("/", "_").Replace("\\", "_");
+        foreach (var c in Path.GetInvalidFileNameChars())
+        {
+            safeKey = safeKey.Replace(c, '_');
+        }
+        return Path.Combine(_legacySessionsDirectory, $"{safeKey}.jsonl");
     }
 
     private JsonObject SerializeMessage(ChatMessage message)

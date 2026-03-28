@@ -91,6 +91,12 @@ public class SkillsLoader : ISkillsLoader
         await LoadAsync(_workspaceManager.GetSkillsPath(), cancellationToken);
     }
 
+    public async Task EnsureLoadedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_loadedSkills.Count > 0) return;
+        await LoadAsync(_workspaceManager.GetSkillsPath(), cancellationToken);
+    }
+
     public IReadOnlyList<SkillSummary> ListSkills(bool filterUnavailable = true)
     {
         var summaries = new List<SkillSummary>();

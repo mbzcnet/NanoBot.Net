@@ -70,7 +70,13 @@ public class CommandTests
     [Fact]
     public void StatusCommand_ShouldHaveCorrectNameAndDescription()
     {
-        var command = new StatusCommand();
+        // StatusCommand now requires a CliCommandContext
+        var mockConfig = new NanoBot.Core.Configuration.AgentConfig
+        {
+            Name = "TestAgent"
+        };
+        var mockContext = new CliCommandContext(mockConfig, "/tmp/test.json", null!);
+        var command = new StatusCommand(mockContext);
 
         command.Name.Should().Be("status");
         command.Description.Should().Be("Show Agent status");

@@ -1,16 +1,36 @@
 namespace NanoBot.Core.Skills;
 
-public record SkillSummary
+/// <summary>
+/// Summary information for a skill, including availability status.
+/// Inherits base properties from <see cref="Skill"/>.
+/// </summary>
+public record SkillSummary : Skill
 {
-    public required string Name { get; init; }
-
-    public required string Description { get; init; }
-
-    public required string FilePath { get; init; }
-
-    public required string Source { get; init; }
-
+    /// <summary>
+    /// Whether the skill is currently available (all requirements met).
+    /// </summary>
     public bool Available { get; init; }
 
+    /// <summary>
+    /// Description of missing requirements if not available.
+    /// </summary>
     public string? MissingRequirements { get; init; }
+
+    /// <summary>
+    /// Creates a SkillSummary from a Skill with additional availability info.
+    /// </summary>
+    public static SkillSummary FromSkill(Skill skill, bool available = true, string? missingRequirements = null)
+    {
+        return new SkillSummary
+        {
+            Name = skill.Name,
+            Description = skill.Description,
+            Content = skill.Content,
+            FilePath = skill.FilePath,
+            Source = skill.Source,
+            LoadedAt = skill.LoadedAt,
+            Available = available,
+            MissingRequirements = missingRequirements
+        };
+    }
 }

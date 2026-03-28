@@ -2,6 +2,7 @@ using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
 using NanoBot.Core.Channels.Accounts;
 using NanoBot.Core.Security;
+using NanoBot.Infrastructure.Security;
 using Xunit;
 
 namespace NanoBot.Channels.Tests;

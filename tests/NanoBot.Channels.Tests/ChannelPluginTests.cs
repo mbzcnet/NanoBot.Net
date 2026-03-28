@@ -11,47 +11,47 @@ namespace NanoBot.Channels.Tests;
 public class ChannelPluginDiscovererTests
 {
     [Fact]
-    public void DiscoverChannelPlugin_ShouldFindPluginInterfaces()
+    public async Task DiscoverChannelPlugin_ShouldFindPluginInterfaces()
     {
         // Arrange
         var loggerMock = new Mock<ILogger<ChannelPluginDiscoverer>>();
         var assemblies = new[] { typeof(ChannelPluginDiscoverer).Assembly };
-        
+
         var discoverer = new ChannelPluginDiscoverer(loggerMock.Object, assemblies);
-        
+
         // Act
-        var plugins = discoverer.DiscoverAsync().GetAwaiter().GetResult();
-        
+        var plugins = await discoverer.DiscoverAsync();
+
         // Assert - should at least not throw
         Assert.NotNull(plugins);
     }
-    
+
     [Fact]
     public void IsChannelPlugin_ShouldDetectCorrectly()
     {
         // Create a mock plugin type that implements IChannelPlugin<>
         var pluginType = typeof(TestChannelPlugin);
-        
+
         // Act - check if it implements IChannelPlugin<>
         var isChannelPlugin = pluginType.GetInterfaces()
             .Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IChannelPlugin<>));
-        
+
         // Assert
         Assert.True(isChannelPlugin);
     }
-    
+
     [Fact]
-    public void DiscoverFromAssembly_ShouldFilterCorrectly()
+    public async Task DiscoverFromAssembly_ShouldFilterCorrectly()
     {
         // Arrange
         var loggerMock = new Mock<ILogger<ChannelPluginDiscoverer>>();
         var assemblies = new[] { typeof(ChannelPluginDiscoverer).Assembly };
-        
+
         var discoverer = new ChannelPluginDiscoverer(loggerMock.Object, assemblies);
-        
+
         // Act
-        var plugins = discoverer.DiscoverFromAssemblyAsync(typeof(ChannelPluginDiscoverer).Assembly).GetAwaiter().GetResult();
-        
+        var plugins = await discoverer.DiscoverFromAssemblyAsync(typeof(ChannelPluginDiscoverer).Assembly);
+
         // Assert
         Assert.NotNull(plugins);
     }

@@ -1,8 +1,13 @@
 using System.CommandLine;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using NanoBot.Core.Configuration;
+using NanoBot.Core.Workspace;
 using NanoBot.Cli.Services;
 using NanoBot.Infrastructure.Browser;
+using NanoBot.Infrastructure.Resources;
+using NanoBot.Infrastructure.Workspace;
 
 namespace NanoBot.Cli.Commands;
 
@@ -134,7 +139,7 @@ public class OnboardCommand : ICliCommand
             Console.WriteLine($"✓ Created workspace at {resolvedWorkspacePath}");
         }
 
-        await CreateWorkspaceTemplatesAsync(resolvedWorkspacePath, cancellationToken);
+        await InitializeWorkspaceAsync(configPath, resolvedWorkspacePath, cancellationToken);
 
         // Step 3: Non-interactive mode - apply options and exit
         if (nonInteractive)
@@ -1540,68 +1545,6 @@ public class OnboardCommand : ICliCommand
         }
     }
 
-    private async Task RunInteractiveAsync(
-        AgentConfig config,
-        string configPath,
-        CancellationToken cancellationToken)
-    {
-        var sections = new List<string> { "LLM Profiles", "Workspace", "Done" };
-        var currentIndex = 0;
-
-        while (currentIndex < sections.Count - 1)
-        {
-            Console.WriteLine("\nSelect section to configure:");
-            for (var i = 0; i < sections.Count; i++)
-            {
-                var marker = i == currentIndex ? ">" : " ";
-                Console.WriteLine($"  {marker} [{i + 1}] {sections[i]}");
-            }
-            Console.WriteLine();
-
-            var key = Console.ReadKey(true);
-            var keyChar = char.ToLowerInvariant(key.KeyChar);
-
-            if (key.Key == ConsoleKey.UpArrow && currentIndex > 0)
-            {
-                currentIndex--;
-            }
-            else if (key.Key == ConsoleKey.DownArrow && currentIndex < sections.Count - 1)
-            {
-                currentIndex++;
-            }
-            else if (key.Key == ConsoleKey.Enter || keyChar == '\r')
-            {
-                var selectedSection = sections[currentIndex];
-                Console.WriteLine($"Selected: {selectedSection}\n");
-
-                switch (selectedSection)
-                {
-                    case "LLM Profiles":
-                        await ConfigureLlmProfilesAsync(config, cancellationToken);
-                        break;
-                    case "Workspace":
-                        ConfigureWorkspaceSection(config);
-                        break;
-                    case "Done":
-                        await SaveAndFinishAsync(config, configPath, cancellationToken);
-                        return;
-                }
-
-                Console.WriteLine();
-            }
-            else if (char.IsDigit(keyChar))
-            {
-                var index = keyChar - '1';
-                if (index >= 0 && index < sections.Count)
-                {
-                    currentIndex = index;
-                }
-            }
-        }
-
-        await SaveAndFinishAsync(config, configPath, cancellationToken);
-    }
-
     private async Task ConfigureLlmProfilesAsync(AgentConfig config, CancellationToken cancellationToken)
     {
         Console.WriteLine("=== LLM Profile Configuration ===\n");
@@ -1669,25 +1612,6 @@ public class OnboardCommand : ICliCommand
     }
 
 
-    private void ConfigureWorkspaceSection(AgentConfig config)
-    {
-        Console.WriteLine("=== Workspace Configuration ===\n");
-
-        var currentPath = config.Workspace.Path;
-        Console.WriteLine($"Current workspace: {currentPath}");
-
-        Console.Write("Workspace path [press Enter to keep current]: ");
-        var input = Console.ReadLine()?.Trim();
-
-        if (!string.IsNullOrWhiteSpace(input))
-        {
-            config.Workspace.Path = input;
-        }
-
-        var resolvedPath = ResolvePath(config.Workspace.Path);
-        Console.WriteLine($"\n✓ Workspace: {resolvedPath}");
-    }
-
     private async Task SaveAndFinishAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
     {
         var configDir = Path.GetDirectoryName(configPath);
@@ -1707,7 +1631,7 @@ public class OnboardCommand : ICliCommand
             Console.WriteLine($"✓ Created workspace at {workspacePath}");
         }
 
-        await CreateWorkspaceTemplatesAsync(workspacePath, cancellationToken);
+        await InitializeWorkspaceAsync(configPath, workspacePath, cancellationToken);
 
         // Install Playwright browsers (if not already installed)
         await InstallPlaywrightBrowsersAsync(config, configPath, nonInteractive: true, cancellationToken);
@@ -2000,8 +1924,75 @@ if __name__ == '__main__':
     }
 
     /// <summary>
-    /// Create workspace templates
+    /// Initialize workspace using WorkspaceManager to extract embedded resources
     /// </summary>
+    private async Task InitializeWorkspaceAsync(string configPath, string workspacePath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\nInitializing workspace...");
+
+        // Create service collection for workspace initialization
+        var services = new ServiceCollection();
+        services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Warning));
+
+        services.AddSingleton(configPath);
+
+        // Register workspace infrastructure
+        services.AddSingleton<IEmbeddedResourceLoader, EmbeddedResourceLoader>();
+        services.AddSingleton(configPath);
+
+        var serviceProvider = services.BuildServiceProvider();
+
+        // Create workspace config from resolved path
+        var workspaceConfig = new WorkspaceConfig { Path = workspacePath };
+
+        // Create and initialize WorkspaceManager
+        var resourceLoader = serviceProvider.GetRequiredService<IEmbeddedResourceLoader>();
+        var workspaceManager = new WorkspaceManager(workspaceConfig, resourceLoader);
+
+        // Initialize workspace - this extracts all embedded resources (templates + skills)
+        await workspaceManager.InitializeAsync(cancellationToken);
+
+        Console.WriteLine($"✓ Workspace initialized at {workspacePath}");
+
+        // List extracted files
+        Console.WriteLine("\nExtracted workspace files:");
+        var workspaceFiles = Directory.GetFiles(workspacePath, "*.md", SearchOption.TopDirectoryOnly);
+        foreach (var file in workspaceFiles)
+        {
+            Console.WriteLine($"  • {Path.GetFileName(file)}");
+        }
+
+        var memoryFiles = Directory.GetFiles(Path.Combine(workspacePath, "memory"), "*.md", SearchOption.TopDirectoryOnly);
+        foreach (var file in memoryFiles)
+        {
+            Console.WriteLine($"  • memory/{Path.GetFileName(file)}");
+        }
+
+        var sessionsDir = Path.Combine(workspacePath, "sessions");
+        if (Directory.Exists(sessionsDir))
+        {
+            Console.WriteLine($"  • sessions/");
+        }
+
+        var skillsDir = Path.Combine(workspacePath, "skills");
+        if (Directory.Exists(skillsDir))
+        {
+            var skillDirs = Directory.GetDirectories(skillsDir);
+            if (skillDirs.Length > 0)
+            {
+                Console.WriteLine($"  • skills/ ({skillDirs.Length} skills)");
+            }
+            else
+            {
+                Console.WriteLine($"  • skills/");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Create workspace templates (legacy - use InitializeWorkspaceAsync instead)
+    /// </summary>
+    [Obsolete("Use InitializeWorkspaceAsync instead")]
     private static async Task CreateWorkspaceTemplatesAsync(string workspacePath, CancellationToken cancellationToken)
     {
         var templates = new Dictionary<string, string>

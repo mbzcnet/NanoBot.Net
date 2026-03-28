@@ -6,6 +6,8 @@ namespace NanoBot.Cli.Commands;
 
 public class StatusCommand : NanoBotCommandBase
 {
+    public StatusCommand(CliCommandContext context) : base(context) { }
+
     public override string Name => "status";
     public override string Description => "Show Agent status";
 
@@ -101,17 +103,6 @@ public class StatusCommand : NanoBotCommandBase
                     config.Channels.WhatsApp?.BridgeUrl ?? "not configured");
             }
         }
-    }
-
-    private static string GetConfigPath(string? configPath)
-    {
-        if (!string.IsNullOrEmpty(configPath))
-        {
-            return Path.GetFullPath(configPath);
-        }
-
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
     }
 
     private static void PrintChannelStatus(string name, bool enabled, string configStatus)

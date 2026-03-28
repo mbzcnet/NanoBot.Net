@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Sessions;
+using AgentSessionManager = NanoBot.Agent.ISessionManager;
 
 namespace NanoBot.WebUI.Services;
 
@@ -15,14 +16,14 @@ namespace NanoBot.WebUI.Services;
 public class AgentService : IAgentService
 {
     private readonly IAgentRuntime _agentRuntime;
-    private readonly ISessionManager _sessionManager;
+    private readonly AgentSessionManager _sessionManager;
     private readonly LlmConfig? _llmConfig;
     private readonly ILogger<AgentService> _logger;
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeSessions;
 
     public AgentService(
         IAgentRuntime agentRuntime,
-        ISessionManager sessionManager,
+        AgentSessionManager sessionManager,
         LlmConfig? llmConfig,
         ILogger<AgentService> logger)
     {

@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.CommandLine;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Cli.Commands;
@@ -31,17 +30,17 @@ public static class Program
         var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath);
 
         var services = new ServiceCollection();
-        services.AddNanoBot(config);
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(services, config);
 
         // Register benchmark services
         services.AddSingleton<IBenchmarkEngine, BenchmarkEngine>();
 
         var provider = services.BuildServiceProvider();
-        NanoBotCommandBase.Initialize(provider, config, configPath);
+        var context = new CliCommandContext(config, configPath ?? "", provider);
 
         var rootCommand = new RootCommand($"{Logo} nbot v{Version} - A lightweight personal AI assistant");
 
-        var commands = GetCommands();
+        var commands = GetCommands(context);
         foreach (var cmd in commands)
         {
             rootCommand.AddCommand(cmd.CreateCommand());
@@ -68,21 +67,7 @@ public static class Program
         return null;
     }
 
-    private static IConfiguration BuildConfiguration(string? configPath)
-    {
-        var configurationBuilder = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
-
-        if (!string.IsNullOrEmpty(configPath))
-        {
-            configurationBuilder.AddJsonFile(configPath, optional: false, reloadOnChange: false);
-        }
-
-        return configurationBuilder.Build();
-    }
-
-    private static IReadOnlyList<ICliCommand> GetCommands()
+    private static IReadOnlyList<ICliCommand> GetCommands(CliCommandContext context)
     {
         return new ICliCommand[]
         {
@@ -90,14 +75,14 @@ public static class Program
             new AgentCommand(),
             new WebUICommand(),
             new GatewayCommand(),
-            new StatusCommand(),
+            new StatusCommand(context),
             new ConfigCommand(),
             new SessionCommand(),
             new CronCommand(),
             new McpCommand(),
             new ChannelsCommand(),
             new ProviderCommand(),
-            new BenchmarkCommand()
+            new BenchmarkCommand(context)
         };
     }
 }

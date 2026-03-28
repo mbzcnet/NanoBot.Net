@@ -4,7 +4,6 @@
 @inject ILogger<ConfigProfileNew> Logger
 @inject NanoBot.Agent.IAgentRuntime AgentRuntime
 @using NanoBot.Core.Configuration
-@using NanoBot.Cli.Services
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - 新建 LLM Profile</PageTitle>
@@ -137,7 +136,7 @@
         _isLoading = true;
         try
         {
-            var configPath = GetConfigPath();
+            var configPath = ConfigPaths.GetAgentConfigPath();
             if (File.Exists(configPath))
             {
                 _config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
@@ -172,7 +171,7 @@
         {
             _config.Llm.Profiles[_profileName] = _newProfile;
 
-            var configPath = GetConfigPath();
+            var configPath = ConfigPaths.GetAgentConfigPath();
             await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
 
             // 清除 agent 缓存，使新配置可用
@@ -193,9 +192,4 @@
         NavigationManager.NavigateTo("/config/profiles");
     }
 
-    private string GetConfigPath()
-    {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
 }

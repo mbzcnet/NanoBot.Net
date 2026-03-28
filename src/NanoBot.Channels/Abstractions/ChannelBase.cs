@@ -4,6 +4,14 @@ using NanoBot.Core.Channels;
 
 namespace NanoBot.Channels.Abstractions;
 
+/// <summary>
+/// Legacy channel base class - use <see cref="IChannelPlugin{TAccount}"/> instead.
+/// </summary>
+/// <remarks>
+/// This class is deprecated and will be removed in a future version.
+/// New channel implementations should use <see cref="IChannelPlugin{TAccount}"/>.
+/// </remarks>
+[Obsolete("Use IChannelPlugin<TAccount> instead. This class will be removed in a future version.")]
 public abstract class ChannelBase : IChannel
 {
     protected readonly ILogger _logger;

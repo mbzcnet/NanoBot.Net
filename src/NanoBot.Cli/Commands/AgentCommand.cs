@@ -1,19 +1,28 @@
 using System.CommandLine;
 using System.Text;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent;
 using NanoBot.Cli.Extensions;
-using NanoBot.Cli.Formatting;
+using NanoBot.Core.Bus;
+using NanoBot.Core.Channels;
 using NanoBot.Core.Configuration;
+using NanoBot.Core.Cron;
 using NanoBot.Core.Debug;
-using NanoBot.Core.Output;
+using NanoBot.Core.Heartbeat;
+using NanoBot.Core.Memory;
+using NanoBot.Core.Skills;
+using NanoBot.Core.Storage;
+using NanoBot.Core.Subagents;
+using NanoBot.Core.Tools.Browser;
+using NanoBot.Core.Tools.Rpa;
 using NanoBot.Core.Workspace;
+using NanoBot.Infrastructure.Resources;
+using NanoBot.Providers;
 using NLog.Config;
 using NLog.Extensions.Logging;
 using Spectre.Console;
-using Spectre.Console.Rendering;
 
 namespace NanoBot.Cli.Commands;
 
@@ -116,6 +125,27 @@ public class AgentCommand : ICliCommand
         return command;
     }
 
+    private static void ConfigureNLog()
+    {
+        var nlogPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
+        if (!File.Exists(nlogPath))
+            nlogPath = "nlog.config";
+        NLog.LogManager.Configuration = new XmlLoggingConfiguration(nlogPath);
+    }
+
+    private static IServiceCollection BuildLoggingServices(bool debug)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging(builder =>
+        {
+            builder.ClearProviders();
+            builder.AddNLog();
+            if (!debug)
+                builder.SetMinimumLevel(LogLevel.Warning);
+        });
+        return services;
+    }
+
     private async Task ExecuteAgentAsync(
         string? message,
         string? sessionId,
@@ -140,40 +170,17 @@ public class AgentCommand : ICliCommand
         }
 
         var config = await LoadConfigAsync(resolvedConfigPath, cancellationToken);
+        LogResolvedConfiguration("CLI", resolvedConfigPath, config, string.IsNullOrEmpty(resolvedConfigPath) || !File.Exists(resolvedConfigPath));
 
-        var services = new ServiceCollection();
+        // Build base service provider once (shared infrastructure: bus, workspace, cron, etc.)
+        ConfigureNLog();
+        var baseServices = BuildLoggingServices(debug);
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(baseServices, config);
+        var baseServiceProvider = baseServices.BuildServiceProvider();
 
-        // Configure NLog - load from executable directory for correct path when running from any cwd
-        var nlogPath = Path.Combine(AppContext.BaseDirectory, "nlog.config");
-        if (!File.Exists(nlogPath))
-        {
-            nlogPath = "nlog.config";
-        }
-        NLog.LogManager.Configuration = new XmlLoggingConfiguration(nlogPath);
-        services.AddLogging(builder =>
-        {
-            builder.ClearProviders();
-            builder.AddNLog();
-        });
-
-        services.AddNanoBot(config);
-
-        // Show all logs when debug mode is enabled
-        if (!debug)
-        {
-            services.Configure<LoggerFilterOptions>(options =>
-            {
-                options.MinLevel = Microsoft.Extensions.Logging.LogLevel.Warning;
-            });
-        }
-
-        var serviceProvider = services.BuildServiceProvider();
-
-        var workspace = serviceProvider.GetRequiredService<IWorkspaceManager>();
+        var workspace = baseServiceProvider.GetRequiredService<IWorkspaceManager>();
         await workspace.InitializeAsync(cancellationToken);
-
-        var runtime = serviceProvider.GetRequiredService<IAgentRuntime>();
-        var sessionManager = serviceProvider.GetRequiredService<ISessionManager>();
+        var sessionManager = baseServiceProvider.GetRequiredService<ISessionManager>();
 
         // Get or create the current session
         var currentSessionId = sessionId ?? GetLastSessionId(workspace) ?? $"chat_{Guid.NewGuid():N}";
@@ -181,11 +188,8 @@ public class AgentCommand : ICliCommand
         // Enable debug mode if --debug flag is provided
         if (debug)
         {
-            var debugState = serviceProvider.GetService<IDebugState>();
-            if (debugState != null)
-            {
-                debugState.EnableDebug(currentSessionId);
-            }
+            var debugState = baseServiceProvider.GetService<IDebugState>();
+            debugState?.EnableDebug(currentSessionId);
         }
 
         // If --list-sessions is specified, show all sessions and exit
@@ -195,86 +199,78 @@ public class AgentCommand : ICliCommand
             return;
         }
 
-        // Main loop - allows restarting after model switch
+        // Main loop - rebuild only ChatClient + AgentRuntime on model switch
         var restartNeeded = false;
         do
         {
+            // Rebuild only model-specific services (IChatClient + AgentRuntime)
+            // Infrastructure singletons are forwarded from the base provider.
+            ConfigureNLog();
+            var modelServices = BuildLoggingServices(debug);
+            ForwardSharedSingletons(modelServices, baseServiceProvider);
+            modelServices.AddSingleton(config);
+            modelServices.AddSingleton(config.Workspace);
+            modelServices.AddSingleton(config.Llm);
+            modelServices.AddSingleton(config.Security);
+            modelServices.AddSingleton(config.Memory);
+            modelServices.AddMicrosoftAgentsAI(config.Llm);
+            NanoBot.Agent.ServiceCollectionExtensions.AddNanoBotAgent(modelServices);
+            var modelServiceProvider = modelServices.BuildServiceProvider();
+
+            var runtimeForThisLoop = modelServiceProvider.GetRequiredService<IAgentRuntime>();
+
+            if (debug)
+            {
+                var debugState = modelServiceProvider.GetService<IDebugState>();
+                debugState?.EnableDebug(currentSessionId);
+            }
+
             try
             {
-                // Re-create services and runtime with current config
-                var servicesLoop = new ServiceCollection();
-
-                // Configure NLog - load from executable directory for correct path when running from any cwd
-                var nlogPathLoop = Path.Combine(AppContext.BaseDirectory, "nlog.config");
-                if (!File.Exists(nlogPathLoop))
+                if (!string.IsNullOrEmpty(message))
                 {
-                    nlogPathLoop = "nlog.config";
+                    await RunSingleMessageAsync(runtimeForThisLoop, message, currentSessionId, renderMarkdown, streaming, cancellationToken);
                 }
-                NLog.LogManager.Configuration = new XmlLoggingConfiguration(nlogPathLoop);
-                servicesLoop.AddLogging(builder =>
+                else
                 {
-                    builder.ClearProviders();
-                    builder.AddNLog();
-                });
-
-                servicesLoop.AddNanoBot(config);
-
-                // Show all logs when debug mode is enabled
-                if (!debug)
-                {
-                    servicesLoop.Configure<LoggerFilterOptions>(options =>
+                    var shouldRestart = await RunInteractiveAsync(runtimeForThisLoop, sessionManager, workspace, currentSessionId, renderMarkdown, streaming, cancellationToken, config, resolvedConfigPath);
+                    if (shouldRestart)
                     {
-                        options.MinLevel = Microsoft.Extensions.Logging.LogLevel.Warning;
-                    });
-                }
-
-                var serviceProviderLoop = servicesLoop.BuildServiceProvider();
-
-                var workspaceForRuntime = serviceProviderLoop.GetRequiredService<IWorkspaceManager>();
-                await workspaceForRuntime.InitializeAsync(cancellationToken);
-
-                var runtimeForThisLoop = serviceProviderLoop.GetRequiredService<IAgentRuntime>();
-
-                if (debug)
-                {
-                    var debugState = serviceProviderLoop.GetService<IDebugState>();
-                    if (debugState != null)
-                    {
-                        debugState.EnableDebug(currentSessionId);
-                    }
-                }
-
-                try
-                {
-                    if (!string.IsNullOrEmpty(message))
-                    {
-                        await RunSingleMessageAsync(runtimeForThisLoop, message, currentSessionId, renderMarkdown, streaming, cancellationToken);
-                    }
-                    else
-                    {
-                        var shouldRestart = await RunInteractiveAsync(runtimeForThisLoop, sessionManager, workspace, currentSessionId, renderMarkdown, streaming, cancellationToken, config, resolvedConfigPath);
-                        if (shouldRestart)
-                        {
-                            restartNeeded = true;
-                            // Reload config from disk
-                            config = await LoadConfigAsync(resolvedConfigPath, cancellationToken);
-                        }
-                    }
-                }
-                finally
-                {
-                    if (runtimeForThisLoop is IDisposable disposable)
-                    {
-                        disposable.Dispose();
+                        restartNeeded = true;
+                        // Reload config from disk
+                        config = await LoadConfigAsync(resolvedConfigPath, cancellationToken);
+                        LogResolvedConfiguration("CLI-Reload", resolvedConfigPath, config, string.IsNullOrEmpty(resolvedConfigPath) || !File.Exists(resolvedConfigPath));
                     }
                 }
             }
-            catch (Exception ex)
+            finally
             {
-                Console.WriteLine($"Error: {ex.Message}");
-                restartNeeded = false; // Don't restart on error
+                if (runtimeForThisLoop is IDisposable disposable)
+                    disposable.Dispose();
             }
         } while (restartNeeded);
+    }
+
+    private static void ForwardSharedSingletons(IServiceCollection services, IServiceProvider baseServiceProvider)
+    {
+        services.AddSingleton(baseServiceProvider.GetRequiredService<IWorkspaceManager>());
+        services.AddSingleton(baseServiceProvider.GetRequiredService<IMessageBus>());
+        services.AddSingleton(baseServiceProvider.GetRequiredService<ISkillsLoader>());
+
+        var memoryStore = baseServiceProvider.GetService<IMemoryStore>();
+        if (memoryStore != null)
+            services.AddSingleton(memoryStore);
+
+        var subagentManager = baseServiceProvider.GetService<ISubagentManager>();
+        if (subagentManager != null)
+            services.AddSingleton(subagentManager);
+
+        var debugState = baseServiceProvider.GetService<IDebugState>();
+        if (debugState != null)
+            services.AddSingleton(debugState);
+
+        foreach (var tool in baseServiceProvider.GetServices<AITool>())
+            services.AddSingleton(typeof(AITool), tool);
     }
 
     private static string? GetLastSessionId(IWorkspaceManager workspace)
@@ -380,26 +376,13 @@ public class AgentCommand : ICliCommand
         return await ConfigurationLoader.LoadWithDefaultsAsync(configPath, cancellationToken);
     }
 
-    private static IConfiguration BuildConfiguration(string? configPath)
+    private static void LogResolvedConfiguration(string source, string? configPath, AgentConfig config, bool usingDefaultConfig)
     {
-        var builder = new ConfigurationBuilder();
+        var defaultProfileId = config.Llm.DefaultProfile ?? "default";
+        config.Llm.Profiles.TryGetValue(defaultProfileId, out var profile);
 
-        if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
-        {
-            builder.AddJsonFile(configPath, optional: false);
-        }
-        else
-        {
-            var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var defaultConfigPath = Path.Combine(homeDir, ".nbot", "config.json");
-            if (File.Exists(defaultConfigPath))
-            {
-                builder.AddJsonFile(defaultConfigPath, optional: false);
-            }
-        }
-
-        builder.AddEnvironmentVariables();
-        return builder.Build();
+        Console.WriteLine($"[NanoBot Config] source={source} configPath={(string.IsNullOrWhiteSpace(configPath) ? "<default>" : configPath)} usingDefaultConfig={usingDefaultConfig}");
+        Console.WriteLine($"[NanoBot Config] workspace={config.Workspace.Path} defaultProfile={defaultProfileId} provider={profile?.Provider ?? "openai"} model={profile?.Model ?? "<unknown>"} apiBase={profile?.ApiBase ?? "<null>"} maxTokens={profile?.MaxTokens}");
     }
 
     private static async Task RunSingleMessageAsync(
@@ -756,7 +739,7 @@ public class AgentCommand : ICliCommand
         if (renderMarkdown)
         {
             Console.WriteLine("🐈 NBot：");
-            RenderMarkdownWithSpectre(response);
+            RenderMarkdown(response);
         }
         else
         {
@@ -768,45 +751,23 @@ public class AgentCommand : ICliCommand
         Console.WriteLine();
     }
 
-    private static void RenderMarkdownWithSpectre(string content)
+    private static void RenderMarkdown(string content)
     {
         if (string.IsNullOrEmpty(content))
-        {
             return;
-        }
 
-        // 使用 Spectre.Console Markup 进行渲染
-        // 简单处理：直接使用 Markup 渲染，Spectre 会自动处理粗体、斜体等
         var lines = content.Split('\n');
         foreach (var line in lines)
         {
             var processedLine = ProcessMarkdownLine(line);
             try
             {
-                // 尝试使用 Markup 渲染，如果失败则直接输出
                 AnsiConsole.WriteLine(processedLine);
             }
             catch
             {
                 Console.WriteLine(processedLine);
             }
-        }
-    }
-
-    private static void PrintMarkdown(string content, IOutputFormatter? formatter = null)
-    {
-        if (string.IsNullOrEmpty(content))
-        {
-            return;
-        }
-
-        // 使用 Spectre.Console 的 Markup 进行渲染
-        // Spectre.Console 支持部分 Markdown 语法（粗体、斜体、代码等）
-        var lines = content.Split('\n');
-        foreach (var line in lines)
-        {
-            var processedLine = ProcessMarkdownLine(line);
-            Console.WriteLine(processedLine);
         }
     }
 

@@ -28,13 +28,28 @@ public class MemoryContextProvider : AIContextProvider
         InvokingContext context,
         CancellationToken cancellationToken)
     {
-        string? memoryContent = null;
+        var contextBuilder = new StringBuilder();
 
         if (_memoryStore != null)
         {
             try
             {
-                memoryContent = await _memoryStore.LoadAsync(cancellationToken);
+                var memoryContent = await _memoryStore.LoadAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(memoryContent))
+                {
+                    contextBuilder.AppendLine("## Long-term Memory");
+                    contextBuilder.AppendLine();
+                    contextBuilder.AppendLine(memoryContent.TrimEnd());
+                    contextBuilder.AppendLine();
+                }
+
+                // Add history context if enabled
+                var historyContent = _memoryStore.GetHistoryContext();
+                if (!string.IsNullOrWhiteSpace(historyContent))
+                {
+                    contextBuilder.AppendLine(historyContent.TrimEnd());
+                    contextBuilder.AppendLine();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -46,38 +61,69 @@ public class MemoryContextProvider : AIContextProvider
             }
         }
 
-        if (string.IsNullOrEmpty(memoryContent))
+        // Fallback to direct file read if IMemoryStore is not available
+        if (_memoryStore == null || string.IsNullOrEmpty(contextBuilder.ToString()))
         {
             var memoryPath = _workspace.GetMemoryFile();
 
-            if (!File.Exists(memoryPath))
+            if (File.Exists(memoryPath))
             {
-                return new AIContext();
+                try
+                {
+                    var memoryContent = await File.ReadAllTextAsync(memoryPath, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(memoryContent))
+                    {
+                        contextBuilder.AppendLine("## Long-term Memory");
+                        contextBuilder.AppendLine();
+                        contextBuilder.AppendLine(memoryContent.TrimEnd());
+                        contextBuilder.AppendLine();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to read memory file: {MemoryPath}", memoryPath);
+                }
             }
 
-            try
+            // Also try to read history file directly
+            var historyPath = _workspace.GetHistoryFile();
+            if (File.Exists(historyPath))
             {
-                memoryContent = await File.ReadAllTextAsync(memoryPath, cancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to read memory file: {MemoryPath}", memoryPath);
-                return new AIContext();
+                try
+                {
+                    var historyContent = await File.ReadAllTextAsync(historyPath, cancellationToken);
+                    if (!string.IsNullOrWhiteSpace(historyContent))
+                    {
+                        contextBuilder.AppendLine("## Recent History");
+                        contextBuilder.AppendLine();
+                        contextBuilder.AppendLine(historyContent.TrimEnd());
+                        contextBuilder.AppendLine();
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to read history file: {HistoryPath}", historyPath);
+                }
             }
         }
 
-        if (string.IsNullOrWhiteSpace(memoryContent))
+        var finalContent = contextBuilder.ToString().TrimEnd();
+        if (string.IsNullOrWhiteSpace(finalContent))
         {
             return new AIContext();
         }
 
         return new AIContext
         {
-            Instructions = $"## Memory\n\n{memoryContent}"
+            Instructions = finalContent
         };
     }
 

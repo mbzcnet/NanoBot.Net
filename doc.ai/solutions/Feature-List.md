@@ -71,8 +71,8 @@
 | `IMessageBus` | 消息总线接口 | ✅ |
 | `InboundMessage` | 入站消息 | ✅ |
 | `OutboundMessage` | 出站消息 | ✅ |
-| `BusMessage` | 总线消息基类 | ✅ |
-| `BusMessageType` | 消息类型枚举 | ✅ |
+| `BusMessage` | 总线消息基类 | ❌ 已删除 |
+| `BusMessageType` | 消息类型枚举 | ❌ 已删除 |
 
 ### 1.5 记忆存储（Memory）
 
@@ -85,6 +85,7 @@
 | 类名/接口 | 功能描述 | 状态 |
 |------------|----------|------|
 | `ISessionManager` | 会话管理器接口 | ✅ |
+| `IMessageStore` | 消息存储接口 | ✅ |
 
 ### 1.7 工作空间（Workspace）
 
@@ -119,6 +120,8 @@
 | 类名/接口 | 功能描述 | 状态 |
 |------------|----------|------|
 | `ISkillsLoader` | 技能加载器接口 | ✅ |
+| `ISkillsProvider` | 技能加载和访问能力 | ✅ |
+| `ISkillsMetadataProvider` | 技能元数据和需求检查 | ✅ |
 | `Skill` | 技能数据模型 | ✅ |
 | `SkillMetadata` | 技能元数据 | ✅ |
 | `SkillSummary` | 技能摘要 | ✅ |
@@ -155,6 +158,21 @@
 | `BrowserToolResponse` | 浏览器工具响应 | ✅ |
 | `BrowserActionRequest` | 浏览器操作请求 | ✅ |
 | `BrowserTabInfo` | 浏览器标签页信息 | ✅ |
+
+### 1.15 RPA 工具
+
+| 类名/接口 | 功能描述 | 状态 |
+|------------|----------|------|
+| `IRpaService` | RPA 服务接口 | ✅ |
+| `IRpaExecutor` | RPA 流程执行器 | ✅ |
+| `IRpaHealthProvider` | RPA 健康状态提供 | ✅ |
+| `IScreenAnalyzer` | 屏幕分析接口 | ✅ |
+
+### 1.16 定时任务（Jobs）
+
+| 类名/接口 | 功能描述 | 状态 |
+|------------|----------|------|
+| `ScheduledJob` | 定时任务基类 | ✅ |
 
 ---
 
@@ -371,7 +389,18 @@
 | `IProgressReporter` | 进度报告器接口 | ✅ |
 | `ToolHintFormatter` | 工具提示格式化器 | ✅ |
 
-### 6.2 记忆存储
+### 6.2 服务类
+
+| 类名 | 功能描述 | 状态 |
+|------|----------|------|
+| `MessageProcessor` | 非流式消息处理 | ✅ |
+| `StreamingProcessor` | 流式消息处理 | ✅ |
+| `MemoryConsolidationService` | 记忆整合服务 | ✅ |
+| `SessionTitleManager` | 会话标题管理 | ✅ |
+| `ImageContentProcessor` | 图片内容处理 | ✅ |
+| `AgentExtensions` | ChatClientAgent 扩展方法 | ✅ |
+
+### 6.3 记忆存储
 
 | 类名 | 功能描述 | 状态 |
 |------|----------|------|
@@ -428,6 +457,7 @@
 |------|----------|------|
 | `ICliCommand` | CLI 命令接口 | ✅ |
 | `NanoBotCommandBase` | CLI 命令基类 | ✅ |
+| `CliCommandContext` | CLI 命令上下文 | ✅ |
 | `Program` | 程序入口 | ✅ |
 | `LlmProfileConfigService` | LLM 配置文件服务 | ✅ |
 
@@ -512,6 +542,24 @@
 | `MessageAdapter` | MessageWithParts 与 Inbound/Outbound 消息转换 | ✅ |
 | `MessagePartConverter` | MessagePart 与 ChatMessage 转换器 | 🚧 |
 | `ToolExecutionTracker` | 工具执行追踪器（IProgress 支持） | ✅ |
+
+### 8.6 服务类
+
+| 类名 | 功能描述 | 状态 |
+|------|----------|------|
+| `ConfigPaths` | 统一配置路径 | ✅ |
+| `ChannelFormattingService` | 通道格式化服务 | ✅ |
+| `ChannelConfigRenderer` | 通道配置渲染器 | ✅ |
+| `ChatFormattingService` | 聊天格式化服务 | ✅ |
+| `SessionMessageParser` | 会话消息解析器 | ✅ |
+
+### 8.7 共享组件
+
+| 类名 | 功能描述 | 状态 |
+|------|----------|------|
+| `ChatMessage` | 聊天消息模型 | ✅ |
+| `ChatToolExecution` | 工具执行模型 | ✅ |
+| `MessagePartsRenderer` | Parts 交错渲染组件 | ✅ |
 
 ### 8.9 服务
 
@@ -786,25 +834,14 @@ graph TB
 
 | 状态 | 数量 |
 |------|------|
-| ✅ 已完成 | 168+ |
+| ✅ 已完成 | 185+ |
 | 🚧 开发中 | 0 |
-| 📋 计划中 | 45 |
+| 📋 计划中 | 40 |
 | 🔧 优化中 | 2 |
 | ⚠️ 已弃用 | 0 |
-| ❌ 已删除 | 0 |
+| ❌ 已删除 | 2 |
 
 ---
-
-## 功能统计
-
-|| 状态 | 数量 |
-||------|------|
-|| ✅ 已完成 | 168+ |
-|| 🚧 开发中 | 0 |
-|| 📋 计划中 | 45 |
-|| 🔧 优化中 | 2 |
-|| ⚠️ 已弃用 | 0 |
-|| ❌ 已删除 | 0 |
 
 ---
 

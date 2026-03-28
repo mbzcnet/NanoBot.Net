@@ -8,6 +8,11 @@ public class MemoryConfig
 
     public bool Enabled { get; set; } = true;
 
+    /// <summary>
+    /// Enable HISTORY.md for grep-searchable conversation archive.
+    /// </summary>
+    public bool EnableHistory { get; set; } = true;
+
     public int MemoryWindow { get; set; } = 100;
 
     /// <summary>

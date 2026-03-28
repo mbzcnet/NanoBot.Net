@@ -1,11 +1,15 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Agents.AI;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
+using NanoBot.Core.Configuration;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Memory;
+using NanoBot.Core.Skills;
 using NanoBot.Core.Workspace;
+using NanoBot.Providers;
 using Xunit;
 
 namespace NanoBot.Agent.Tests;
@@ -39,6 +43,29 @@ public class AgentRuntimeTests : IDisposable
         {
             Directory.Delete(_testDirectory, recursive: true);
         }
+    }
+
+    private static Mock<IChatClient> CreateChatClientMock()
+    {
+        var chatClientMock = new Mock<IChatClient>();
+        var metadata = new ChatClientMetadata("test");
+        chatClientMock.Setup(c => c.GetService(typeof(ChatClientMetadata), null))
+            .Returns(metadata);
+
+        var response = new ChatResponse(new ChatMessage(ChatRole.Assistant, "Test response"));
+        chatClientMock.Setup(c => c.GetResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(response);
+
+        chatClientMock.Setup(c => c.GetStreamingResponseAsync(
+                It.IsAny<IEnumerable<ChatMessage>>(),
+                It.IsAny<ChatOptions>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(StreamingResponse("Test response"));
+
+        return chatClientMock;
     }
 
     [Fact]
@@ -223,6 +250,58 @@ public class AgentRuntimeTests : IDisposable
 
         Assert.Contains("New session started", response);
         _sessionManagerMock.Verify(s => s.ClearSessionAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void GetToolCountForSession_NonDefaultProfile_UsesInjectedTools()
+    {
+        const string sessionKey = "chat_profile_session";
+        const string profileId = "alt";
+
+        _sessionManagerMock.Setup(s => s.GetSessionProfileId(sessionKey)).Returns(profileId);
+
+        var llmConfig = new LlmConfig
+        {
+            DefaultProfile = "default",
+            Profiles = new Dictionary<string, LlmProfile>
+            {
+                ["default"] = new() { Provider = "openai", Model = "gpt-4o-mini", ApiKey = "test-key" },
+                [profileId] = new() { Provider = "openai", Model = "gpt-4o-mini", ApiKey = "test-key", MaxTokens = 2048 }
+            }
+        };
+
+        var chatClientFactoryMock = new Mock<IChatClientFactory>();
+        chatClientFactoryMock
+            .Setup(f => f.CreateChatClient("openai", "gpt-4o-mini", "test-key", null, 2048))
+            .Returns(CreateChatClientMock().Object);
+
+        var skillsLoaderMock = new Mock<ISkillsLoader>();
+        skillsLoaderMock.Setup(s => s.GetAlwaysSkills()).Returns([]);
+        skillsLoaderMock.Setup(s => s.BuildSkillsSummaryAsync(It.IsAny<CancellationToken>())).ReturnsAsync(string.Empty);
+
+        var services = new ServiceCollection();
+        services.AddSingleton(_workspaceMock.Object);
+        services.AddSingleton(skillsLoaderMock.Object);
+        services.AddSingleton<ILoggerFactory>(new LoggerFactory());
+        services.AddSingleton(new AgentConfig { Memory = new MemoryConfig { MemoryWindow = 37, MaxInstructionChars = 1024 } });
+        services.AddSingleton<AITool>(AIFunctionFactory.Create(() => "ok", new AIFunctionFactoryOptions { Name = "test_tool" }));
+        var serviceProvider = services.BuildServiceProvider();
+
+        var runtime = new AgentRuntime(
+            _agent,
+            _busMock.Object,
+            _sessionManagerMock.Object,
+            _workspaceMock.Object,
+            null,
+            null,
+            50,
+            chatClientFactoryMock.Object,
+            llmConfig,
+            serviceProvider,
+            _loggerMock.Object);
+
+        Assert.Equal(profileId, runtime.GetSelectedProfileIdForSession(sessionKey));
+        Assert.Equal(1, runtime.GetToolCountForSession(sessionKey));
     }
 
     private static ChatClientAgent CreateAgent()

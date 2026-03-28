@@ -2,7 +2,6 @@
 @inject ISnackbar Snackbar
 @inject ILogger<Channels> Logger
 @using NanoBot.Core.Configuration
-@using NanoBot.Cli.Services
 @using NanoBot.Core.Channels
 @using NanoBot.WebUI.Components.Channels
 @rendermode InteractiveServer
@@ -14,15 +13,13 @@
     
     <div class="d-flex justify-space-between align-center mb-4">
         <MudText Typo="Typo.h4">通道配置</MudText>
-        <div class="d-flex gap-2">
-            <MudButton Variant="Variant.Outlined"
-                       Color="Color.Secondary"
-                       StartIcon="@Icons.Material.Filled.Refresh"
-                       Class="nb-config-outline-btn"
-                       OnClick="RefreshChannels">
-                刷新
-            </MudButton>
-        </div>
+        <MudButton Variant="Variant.Outlined"
+                   Color="Color.Secondary"
+                   StartIcon="@Icons.Material.Filled.Refresh"
+                   Class="nb-config-outline-btn"
+                   OnClick="RefreshChannels">
+            刷新
+        </MudButton>
     </div>
 
     @if (_isLoading)
@@ -32,149 +29,132 @@
             <MudText Class="mt-2">正在加载配置...</MudText>
         </div>
     }
+    else if (_config == null)
+    {
+        <MudAlert Severity="Severity.Warning" Class="nb-config-alert">
+            <MudText Typo="Typo.h6">配置文件未找到</MudText>
+            <MudText Class="mt-2">配置文件路径：<code>@_configPath</code></MudText>
+            <MudText Class="mt-2">请先运行以下命令初始化配置：</MudText>
+            <MudPaper Class="pa-2 mt-2 nb-code-callout" Elevation="0">
+                <code>nbot onboard</code>
+            </MudPaper>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Class="mt-4 nb-config-primary-btn"
+                       OnClick="CreateDefaultConfig">
+                创建默认配置
+            </MudButton>
+        </MudAlert>
+    }
     else
     {
-        @if (_config == null)
-        {
-            <MudAlert Severity="Severity.Warning" Class="nb-config-alert">
-                <MudText Typo="Typo.h6">配置文件未找到</MudText>
-                <MudText Class="mt-2">配置文件路径：<code>@_configPath</code></MudText>
-                <MudText Class="mt-2">请先运行以下命令初始化配置：</MudText>
-                <MudPaper Class="pa-2 mt-2 nb-code-callout" Elevation="0">
-                    <code>nbot onboard</code>
-                </MudPaper>
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Class="mt-4 nb-config-primary-btn"
-                           OnClick="CreateDefaultConfig">
-                    创建默认配置
-                </MudButton>
-            </MudAlert>
-        }
-        else
-        {
-            <MudPaper Elevation="0" Class="pa-4 mb-4 nb-config-card">
-                <MudText Typo="Typo.h6" Class="mb-4">全局设置</MudText>
-                <MudGrid>
-                    <MudItem xs="12" md="6">
-                        <MudCheckBox @bind-Checked="_config.Channels.SendProgress"
-                                     Label="发送进度更新"
-                                     T="bool"
-                                     Class="mb-2" />
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                            在执行工具时发送进度更新消息
-                        </MudText>
-                    </MudItem>
-                    <MudItem xs="12" md="6">
-                        <MudCheckBox @bind-Checked="_config.Channels.SendToolHints"
-                                     Label="发送工具提示"
-                                     T="bool"
-                                     Class="mb-2" />
-                        <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                            在工具调用时显示提示信息
-                        </MudText>
-                    </MudItem>
-                </MudGrid>
-                <MudDivider Class="my-4" />
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           StartIcon="@Icons.Material.Filled.Save"
-                           Class="nb-config-primary-btn"
-                           OnClick="SaveGlobalSettings">
-                    保存全局设置
-                </MudButton>
-            </MudPaper>
-        }
-
-        @if (_channelsLoading)
-        {
-            <div class="nb-config-loading">
-                <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
-                <MudText Class="mt-2">正在加载通道配置...</MudText>
-            </div>
-        }
-        else
-        {
+        <MudPaper Elevation="0" Class="pa-4 mb-4 nb-config-card">
+            <MudText Typo="Typo.h6" Class="mb-4">全局设置</MudText>
             <MudGrid>
-                @foreach (var channel in _channelCatalog.Entries)
-                {
-                    var isEnabled = _enabledChannels.Contains(channel.Id);
-                    var meta = _channelRegistry.GetChannelMeta(channel.Id);
-                    var cardClass = isEnabled ? "nb-channel-card nb-channel-enabled" : "nb-channel-card nb-channel-disabled";
-
-                    <MudItem xs="12" md="6">
-                        <MudCard Class="@cardClass">
-                            <MudCardHeader>
-                                <CardHeaderContent>
-                                    <div class="d-flex align-center justify-space-between">
-                                        <div class="d-flex align-center">
-                                            @if (!string.IsNullOrEmpty(channel.SystemImage))
-                                            {
-                                                <MudIcon Icon="@GetChannelIconName(channel.SystemImage)"
-                                                         Class="mr-2"
-                                                         Size="Size.Large" />
-                                            }
-                                            <MudText Typo="Typo.h6">@channel.Label</MudText>
-                                        </div>
-                                        @if (_config != null)
-                                        {
-                                            <MudSwitch @bind-Checked="@_channelToggleStates[channel.Id]"
-                                                      T="bool"
-                                                      Color="Color.Primary"
-                                                      OnChange="@((bool enabled) => OnChannelToggleChanged(channel.Id, enabled))" />
-                                        }
-                                    </div>
-                                </CardHeaderContent>
-                            </MudCardHeader>
-                            <MudCardContent>
-                                @if (meta != null)
-                                {
-                                    <MudText Typo="Typo.body2" Class="mb-2">
-                                        @meta.Blurb
-                                    </MudText>
-                                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
-                                        <strong>类型:</strong> @channel.DetailLabel
-                                    </MudText>
-                                    @if (isEnabled)
-                                    {
-                                        <MudChip T="string"
-                                                 Size="Size.Small"
-                                                 Color="Color.Success"
-                                                 Class="mt-2">
-                                            已启用
-                                        </MudChip>
-                                    }
-                                    else
-                                    {
-                                        <MudChip T="string"
-                                                 Size="Size.Small"
-                                                 Color="Color.Default"
-                                                 Class="mt-2">
-                                            未启用
-                                        </MudChip>
-                                    }
-                                }
-                            </MudCardContent>
-                            <MudCardActions>
-                                <MudButton Size="Size.Small"
-                                           Color="Color.Primary"
-                                           OnClick="@(() => EditChannel(channel.Id))">
-                                    配置
-                                </MudButton>
-                                @if (isEnabled && _config != null)
-                                {
-                                    <MudButton Size="Size.Small"
-                                               Color="Color.Warning"
-                                               OnClick="@(() => TestChannel(channel.Id))">
-                                        测试连接
-                                    </MudButton>
-                                }
-                            </MudCardActions>
-                        </MudCard>
-                    </MudItem>
-                }
+                <MudItem xs="12" md="6">
+                    <MudCheckBox @bind-Checked="_config.Channels.SendProgress"
+                                 Label="发送进度更新"
+                                 T="bool"
+                                 Class="mb-2" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        在执行工具时发送进度更新消息
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" md="6">
+                    <MudCheckBox @bind-Checked="_config.Channels.SendToolHints"
+                                 Label="发送工具提示"
+                                 T="bool"
+                                 Class="mb-2" />
+                    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                        在工具调用时显示提示信息
+                    </MudText>
+                </MudItem>
             </MudGrid>
-        }
+            <MudDivider Class="my-4" />
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Class="nb-config-primary-btn"
+                       OnClick="SaveGlobalSettings">
+                保存全局设置
+            </MudButton>
+        </MudPaper>
+    }
+
+    @if (!_channelsLoading && _config != null)
+    {
+        <MudGrid>
+            @foreach (var channel in _channelCatalog.Entries)
+            {
+                var isEnabled = _enabledChannels.Contains(channel.Id);
+                var meta = _channelRegistry.GetChannelMeta(channel.Id);
+                var cardClass = isEnabled ? "nb-channel-card nb-channel-enabled" : "nb-channel-card nb-channel-disabled";
+
+                <MudItem xs="12" md="6">
+                    <MudCard Class="@cardClass">
+                        <MudCardHeader>
+                            <CardHeaderContent>
+                                <div class="d-flex align-center justify-space-between">
+                                    <div class="d-flex align-center">
+                                        @if (!string.IsNullOrEmpty(channel.SystemImage))
+                                        {
+                                            <MudIcon Icon="@ChannelFormattingService.GetChannelIcon(channel.SystemImage)"
+                                                     Class="mr-2"
+                                                     Size="Size.Large" />
+                                        }
+                                        <MudText Typo="Typo.h6">@channel.Label</MudText>
+                                    </div>
+                                    @if (_config != null)
+                                    {
+                                        <MudSwitch @bind-Checked="@_channelToggleStates[channel.Id]"
+                                                  T="bool"
+                                                  Color="Color.Primary"
+                                                  OnChange="@((bool enabled) => OnChannelToggleChanged(channel.Id, enabled))" />
+                                    }
+                                </div>
+                            </CardHeaderContent>
+                        </MudCardHeader>
+                        <MudCardContent>
+                            @if (meta != null)
+                            {
+                                <MudText Typo="Typo.body2" Class="mb-2">@meta.Blurb</MudText>
+                                <MudText Typo="Typo.body2" Class="mud-text-secondary">
+                                    <strong>类型:</strong> @channel.DetailLabel
+                                </MudText>
+                                <MudChip T="string"
+                                         Size="Size.Small"
+                                         Color="@(isEnabled ? Color.Success : Color.Default)"
+                                         Class="mt-2">
+                                    @(isEnabled ? "已启用" : "未启用")
+                                </MudChip>
+                            }
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudButton Size="Size.Small"
+                                       Color="Color.Primary"
+                                       OnClick="@(() => EditChannel(channel.Id))">
+                                配置
+                            </MudButton>
+                            @if (isEnabled && _config != null)
+                            {
+                                <MudButton Size="Size.Small"
+                                           Color="Color.Warning"
+                                           OnClick="@(() => TestChannel(channel.Id))">
+                                    测试连接
+                                </MudButton>
+                            }
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+    else if (!_isLoading && _config != null)
+    {
+        <div class="nb-config-loading">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <MudText Class="mt-2">正在加载通道配置...</MudText>
+        </div>
     }
 
     <MudDialog Visible="@_isEditDialogOpen"
@@ -183,42 +163,9 @@
         <DialogContent>
             <MudText Typo="Typo.h6" Class="mb-4">配置 @_editingChannel?.Label</MudText>
 
-            @if (_editingChannel != null)
+            @if (_editingChannel != null && _channelConfigRef != null)
             {
-                @switch (_editingChannel.Id.ToLower())
-                {
-                    case "telegram":
-                        <TelegramConfigEditor Config="@_telegramConfig" ConfigChanged="@OnTelegramConfigChanged" />
-                        break;
-                    case "discord":
-                        <DiscordConfigEditor Config="@_discordConfig" ConfigChanged="@OnDiscordConfigChanged" />
-                        break;
-                    case "whatsapp":
-                        <WhatsAppConfigEditor Config="@_whatsAppConfig" ConfigChanged="@OnWhatsAppConfigChanged" />
-                        break;
-                    case "slack":
-                        <SlackConfigEditor Config="@_slackConfig" ConfigChanged="@OnSlackConfigChanged" />
-                        break;
-                    case "feishu":
-                        <FeishuConfigEditor Config="@_feishuConfig" ConfigChanged="@OnFeishuConfigChanged" />
-                        break;
-                    case "dingtalk":
-                        <DingTalkConfigEditor Config="@_dingTalkConfig" ConfigChanged="@OnDingTalkConfigChanged" />
-                        break;
-                    case "email":
-                        <EmailConfigEditor Config="@_emailConfig" ConfigChanged="@OnEmailConfigChanged" />
-                        break;
-                    case "qq":
-                        <QQConfigEditor Config="@_qqConfig" ConfigChanged="@OnQQConfigChanged" />
-                        break;
-                    case "matrix":
-                        <MatrixConfigEditor Config="@_matrixConfig" ConfigChanged="@OnMatrixConfigChanged" />
-                        break;
-                    case "mo":
-                    case "mochat":
-                        <MochatConfigEditor Config="@_mochatConfig" ConfigChanged="@OnMochatConfigChanged" />
-                        break;
-                }
+                @ChannelConfigRenderer.Render(_editingChannel.Id, _channelConfigRef.Config, obj => { _channelConfigRef.Config = obj; })
             }
         </DialogContent>
         <DialogActions>
@@ -236,25 +183,15 @@
     private AgentConfig? _config;
     private string _configPath = string.Empty;
     private bool _isLoading = true;
-    
-    private IChannelRegistry _channelRegistry = new ChannelRegistry();
+
+    private readonly IChannelRegistry _channelRegistry = new ChannelRegistry();
     private ChannelUiCatalog _channelCatalog = new();
     private HashSet<string> _enabledChannels = new();
     private Dictionary<string, bool> _channelToggleStates = new();
     private bool _channelsLoading = true;
     private ChannelUiMetaEntry? _editingChannel;
     private bool _isEditDialogOpen;
-    
-    private TelegramConfig _telegramConfig = new();
-    private DiscordConfig _discordConfig = new();
-    private WhatsAppConfig _whatsAppConfig = new();
-    private SlackConfig _slackConfig = new();
-    private FeishuConfig _feishuConfig = new();
-    private DingTalkConfig _dingTalkConfig = new();
-    private EmailConfig _emailConfig = new();
-    private QQConfig _qqConfig = new();
-    private MatrixConfig _matrixConfig = new();
-    private MochatConfig _mochatConfig = new();
+    private ChannelConfigRef? _channelConfigRef;
 
     private List<BreadcrumbItem> _breadcrumbItems = new();
     private DialogOptions _dialogOptions = new() { CloseButton = true, MaxWidth = MaxWidth.Medium, FullWidth = true };
@@ -284,17 +221,13 @@
         
         try
         {
-            _configPath = GetConfigPath();
+            _configPath = ConfigPaths.GetAgentConfigPath();
             
             if (File.Exists(_configPath))
-            {
                 _config = await Task.Run(async () => 
                     await ConfigurationLoader.LoadAsync(_configPath, CancellationToken.None));
-            }
             else
-            {
                 _config = null;
-            }
         }
         catch (Exception ex)
         {
@@ -316,27 +249,15 @@
         {
             _channelCatalog = _channelRegistry.GetCatalog();
             
-            _enabledChannels = new HashSet<string>();
-            _channelToggleStates = new Dictionary<string, bool>();
+            _enabledChannels.Clear();
+            _channelToggleStates.Clear();
 
-            if (_config != null)
+            foreach (var channel in _channelCatalog.Entries)
             {
-                foreach (var channel in _channelCatalog.Entries)
-                {
-                    var isEnabled = await IsChannelEnabled(channel.Id);
-                    if (isEnabled)
-                    {
-                        _enabledChannels.Add(channel.Id);
-                    }
-                    _channelToggleStates[channel.Id] = isEnabled;
-                }
-            }
-            else
-            {
-                foreach (var channel in _channelCatalog.Entries)
-                {
-                    _channelToggleStates[channel.Id] = false;
-                }
+                var isEnabled = _config != null && ChannelFormattingService.IsChannelEnabled(_config, channel.Id);
+                if (isEnabled)
+                    _enabledChannels.Add(channel.Id);
+                _channelToggleStates[channel.Id] = isEnabled;
             }
         }
         catch (Exception ex)
@@ -351,25 +272,6 @@
         }
     }
 
-    private async Task<bool> IsChannelEnabled(string channelId)
-    {
-        if (_config?.Channels == null) return false;
-
-        return channelId.ToLower() switch
-        {
-            "telegram" => _config.Channels.Telegram?.Enabled ?? false,
-            "discord" => _config.Channels.Discord?.Enabled ?? false,
-            "whatsapp" => _config.Channels.WhatsApp?.Enabled ?? false,
-            "slack" => _config.Channels.Slack?.Enabled ?? false,
-            "feishu" => _config.Channels.Feishu?.Enabled ?? false,
-            "dingtalk" => _config.Channels.DingTalk?.Enabled ?? false,
-            "email" => _config.Channels.Email?.Enabled ?? false,
-            "qq" => _config.Channels.QQ?.Enabled ?? false,
-            "matrix" => _config.Channels.Matrix?.Enabled ?? false,
-            _ => false
-        };
-    }
-
     private async Task OnChannelToggleChanged(string channelId, bool enabled)
     {
         if (_config == null)
@@ -378,20 +280,19 @@
             return;
         }
 
-        // 确保 Channels 不为 null
         _config.Channels ??= new ChannelsConfig();
 
         try
         {
             if (enabled)
             {
-                await EnableChannel(channelId);
+                ChannelFormattingService.EnableChannel(_config, channelId);
                 _enabledChannels.Add(channelId);
                 Snackbar.Add($"已启用 {_channelCatalog.ById[channelId]?.Label}", Severity.Success);
             }
             else
             {
-                await DisableChannel(channelId);
+                ChannelFormattingService.DisableChannel(_config, channelId);
                 _enabledChannels.Remove(channelId);
                 Snackbar.Add($"已禁用 {_channelCatalog.ById[channelId]?.Label}", Severity.Info);
             }
@@ -404,105 +305,16 @@
         }
     }
 
-    private async Task EnableChannel(string channelId)
-    {
-        _config.Channels ??= new ChannelsConfig();
-
-        switch (channelId.ToLower())
-        {
-            case "telegram":
-                _config.Channels.Telegram ??= new TelegramConfig();
-                _config.Channels.Telegram.Enabled = true;
-                break;
-            case "discord":
-                _config.Channels.Discord ??= new DiscordConfig();
-                _config.Channels.Discord.Enabled = true;
-                break;
-            case "whatsapp":
-                _config.Channels.WhatsApp ??= new WhatsAppConfig();
-                _config.Channels.WhatsApp.Enabled = true;
-                break;
-            case "slack":
-                _config.Channels.Slack ??= new SlackConfig();
-                _config.Channels.Slack.Enabled = true;
-                break;
-            case "feishu":
-                _config.Channels.Feishu ??= new FeishuConfig();
-                _config.Channels.Feishu.Enabled = true;
-                break;
-            case "dingtalk":
-                _config.Channels.DingTalk ??= new DingTalkConfig();
-                _config.Channels.DingTalk.Enabled = true;
-                break;
-            case "email":
-                _config.Channels.Email ??= new EmailConfig();
-                _config.Channels.Email.Enabled = true;
-                break;
-            case "qq":
-                _config.Channels.QQ ??= new QQConfig();
-                _config.Channels.QQ.Enabled = true;
-                break;
-            case "matrix":
-                _config.Channels.Matrix ??= new MatrixConfig();
-                _config.Channels.Matrix.Enabled = true;
-                break;
-        }
-
-        await SaveConfig();
-    }
-
-    private async Task DisableChannel(string channelId)
-    {
-        _config.Channels ??= new ChannelsConfig();
-
-        switch (channelId.ToLower())
-        {
-            case "telegram":
-                if (_config.Channels.Telegram != null) _config.Channels.Telegram.Enabled = false;
-                break;
-            case "discord":
-                if (_config.Channels.Discord != null) _config.Channels.Discord.Enabled = false;
-                break;
-            case "whatsapp":
-                if (_config.Channels.WhatsApp != null) _config.Channels.WhatsApp.Enabled = false;
-                break;
-            case "slack":
-                if (_config.Channels.Slack != null) _config.Channels.Slack.Enabled = false;
-                break;
-            case "feishu":
-                if (_config.Channels.Feishu != null) _config.Channels.Feishu.Enabled = false;
-                break;
-            case "dingtalk":
-                if (_config.Channels.DingTalk != null) _config.Channels.DingTalk.Enabled = false;
-                break;
-            case "email":
-                if (_config.Channels.Email != null) _config.Channels.Email.Enabled = false;
-                break;
-            case "qq":
-                if (_config.Channels.QQ != null) _config.Channels.QQ.Enabled = false;
-                break;
-            case "matrix":
-                if (_config.Channels.Matrix != null) _config.Channels.Matrix.Enabled = false;
-                break;
-        }
-
-        await SaveConfig();
-    }
-
     private async Task SaveConfig()
     {
         if (_config == null) return;
-
-        // 确保 Channels 不为 null
         _config.Channels ??= new ChannelsConfig();
 
         try
         {
             var configDir = Path.GetDirectoryName(_configPath);
             if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
-            {
                 Directory.CreateDirectory(configDir);
-            }
             
             await ConfigurationLoader.SaveAsync(_configPath, _config, CancellationToken.None);
         }
@@ -515,8 +327,6 @@
     private async Task SaveGlobalSettings()
     {
         if (_config == null) return;
-
-        // 确保 Channels 不为 null
         _config.Channels ??= new ChannelsConfig();
 
         try
@@ -539,7 +349,6 @@
 
     private void EditChannel(string channelId)
     {
-        // 如果配置不存在，创建默认配置
         if (_config == null)
         {
             _config = new AgentConfig
@@ -549,46 +358,10 @@
                 Channels = new ChannelsConfig()
             };
         }
-
-        // 确保 Channels 不为 null
         _config.Channels ??= new ChannelsConfig();
 
         _editingChannel = _channelCatalog.ById.GetValueOrDefault(channelId);
-
-        switch (channelId.ToLower())
-        {
-            case "telegram":
-                _telegramConfig = _config.Channels.Telegram ?? new TelegramConfig { Enabled = true };
-                break;
-            case "discord":
-                _discordConfig = _config.Channels.Discord ?? new DiscordConfig { Enabled = true };
-                break;
-            case "whatsapp":
-                _whatsAppConfig = _config.Channels.WhatsApp ?? new WhatsAppConfig { Enabled = true };
-                break;
-            case "slack":
-                _slackConfig = _config.Channels.Slack ?? new SlackConfig { Enabled = true };
-                break;
-            case "feishu":
-                _feishuConfig = _config.Channels.Feishu ?? new FeishuConfig { Enabled = true };
-                break;
-            case "dingtalk":
-                _dingTalkConfig = _config.Channels.DingTalk ?? new DingTalkConfig { Enabled = true };
-                break;
-            case "email":
-                _emailConfig = _config.Channels.Email ?? new EmailConfig { Enabled = true };
-                break;
-            case "qq":
-                _qqConfig = _config.Channels.QQ ?? new QQConfig { Enabled = true };
-                break;
-            case "matrix":
-                _matrixConfig = _config.Channels.Matrix ?? new MatrixConfig { Enabled = true };
-                break;
-            case "mo":
-            case "mochat":
-                _mochatConfig = _config.Channels.Mochat ?? new MochatConfig { Enabled = true };
-                break;
-        }
+        (_channelConfigRef, _) = ChannelFormattingService.GetChannelEditor(_config, channelId);
 
         _isEditDialogOpen = _editingChannel != null;
         StateHasChanged();
@@ -596,7 +369,7 @@
 
     private async Task SaveChannelConfig()
     {
-        if (_editingChannel == null)
+        if (_editingChannel == null || _channelConfigRef == null)
         {
             Snackbar.Add("没有要保存的配置", Severity.Warning);
             return;
@@ -608,46 +381,11 @@
             return;
         }
 
-        // 确保 Channels 不为 null
         _config.Channels ??= new ChannelsConfig();
 
         try
         {
-            switch (_editingChannel.Id.ToLower())
-            {
-                case "telegram":
-                    _config.Channels.Telegram = _telegramConfig;
-                    break;
-                case "discord":
-                    _config.Channels.Discord = _discordConfig;
-                    break;
-                case "whatsapp":
-                    _config.Channels.WhatsApp = _whatsAppConfig;
-                    break;
-                case "slack":
-                    _config.Channels.Slack = _slackConfig;
-                    break;
-                case "feishu":
-                    _config.Channels.Feishu = _feishuConfig;
-                    break;
-                case "dingtalk":
-                    _config.Channels.DingTalk = _dingTalkConfig;
-                    break;
-                case "email":
-                    _config.Channels.Email = _emailConfig;
-                    break;
-                case "qq":
-                    _config.Channels.QQ = _qqConfig;
-                    break;
-                case "matrix":
-                    _config.Channels.Matrix = _matrixConfig;
-                    break;
-                case "mo":
-                case "mochat":
-                    _config.Channels.Mochat = _mochatConfig;
-                    break;
-            }
-
+            ChannelFormattingService.SetChannelConfig(_config, _editingChannel.Id, _channelConfigRef.Config);
             await SaveConfig();
             Snackbar.Add($"{_editingChannel.Label} 配置已保存", Severity.Success);
             _isEditDialogOpen = false;
@@ -672,10 +410,7 @@
     {
         _isEditDialogOpen = visible;
         if (!visible)
-        {
             _editingChannel = null;
-        }
-
         return Task.CompletedTask;
     }
 
@@ -687,188 +422,23 @@
             return;
         }
 
-        try
+        var configObj = ChannelFormattingService.GetChannelConfig(_config, channelId);
+        if (configObj == null)
         {
-            switch (channelId.ToLower())
-            {
-                case "telegram":
-                    await TestTelegramConnection();
-                    break;
-                case "discord":
-                    await TestDiscordConnection();
-                    break;
-                case "whatsapp":
-                    await TestWhatsAppConnection();
-                    break;
-                case "slack":
-                    await TestSlackConnection();
-                    break;
-                case "feishu":
-                    await TestFeishuConnection();
-                    break;
-                case "dingtalk":
-                    await TestDingTalkConnection();
-                    break;
-                case "email":
-                    await TestEmailConnection();
-                    break;
-                case "qq":
-                    await TestQQConnection();
-                    break;
-                case "matrix":
-                    await TestMatrixConnection();
-                    break;
-                case "mo":
-                case "mochat":
-                    await TestMochatConnection();
-                    break;
-                default:
-                    Snackbar.Add("未知渠道", Severity.Warning);
-                    return;
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "测试渠道连接失败：{ChannelId}", channelId);
-            Snackbar.Add($"测试连接失败：{ex.Message}", Severity.Error);
-        }
-    }
-
-    private async Task TestTelegramConnection()
-    {
-        if (string.IsNullOrEmpty(_telegramConfig.Token))
-        {
-            Snackbar.Add("请先配置 Bot Token", Severity.Warning);
+            Snackbar.Add("未知渠道", Severity.Warning);
             return;
         }
-        Snackbar.Add("Telegram 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
 
-    private async Task TestDiscordConnection()
-    {
-        if (string.IsNullOrEmpty(_discordConfig.Token))
+        var error = ChannelFormattingService.ValidateChannelConfig(configObj, channelId);
+        if (error != null)
         {
-            Snackbar.Add("请先配置 Bot Token", Severity.Warning);
+            Snackbar.Add(error, Severity.Warning);
             return;
         }
-        Snackbar.Add("Discord 配置验证通过，请在启动后测试实际连接", Severity.Success);
+
+        var label = _channelCatalog.ById.GetValueOrDefault(channelId)?.Label ?? channelId;
+        Snackbar.Add($"{label} 配置验证通过，请在启动后测试实际连接", Severity.Success);
         await Task.CompletedTask;
-    }
-
-    private async Task TestWhatsAppConnection()
-    {
-        if (string.IsNullOrEmpty(_whatsAppConfig.BridgeUrl))
-        {
-            Snackbar.Add("请先配置 Bridge URL", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("WhatsApp 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestSlackConnection()
-    {
-        if (string.IsNullOrEmpty(_slackConfig.BotToken))
-        {
-            Snackbar.Add("请先配置 Bot Token", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("Slack 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestFeishuConnection()
-    {
-        if (string.IsNullOrEmpty(_feishuConfig.AppId) || string.IsNullOrEmpty(_feishuConfig.AppSecret))
-        {
-            Snackbar.Add("请先配置 App ID 和 App Secret", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("飞书配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestDingTalkConnection()
-    {
-        if (string.IsNullOrEmpty(_dingTalkConfig.ClientId) || string.IsNullOrEmpty(_dingTalkConfig.ClientSecret))
-        {
-            Snackbar.Add("请先配置 Client ID 和 Client Secret", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("钉钉配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestEmailConnection()
-    {
-        if (string.IsNullOrEmpty(_emailConfig.ImapHost) || string.IsNullOrEmpty(_emailConfig.SmtpHost))
-        {
-            Snackbar.Add("请先配置 IMAP 和 SMTP 服务器", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("Email 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestQQConnection()
-    {
-        if (string.IsNullOrEmpty(_qqConfig.AppId) || string.IsNullOrEmpty(_qqConfig.Secret))
-        {
-            Snackbar.Add("请先配置 App ID 和 Secret", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("QQ 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestMatrixConnection()
-    {
-        if (string.IsNullOrEmpty(_matrixConfig.AccessToken) || string.IsNullOrEmpty(_matrixConfig.Homeserver))
-        {
-            Snackbar.Add("请先配置 Homeserver 和 AccessToken", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("Matrix 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private async Task TestMochatConnection()
-    {
-        if (string.IsNullOrEmpty(_mochatConfig.ClawToken))
-        {
-            Snackbar.Add("请先配置 Claw Token", Severity.Warning);
-            return;
-        }
-        Snackbar.Add("Mochat 配置验证通过，请在启动后测试实际连接", Severity.Success);
-        await Task.CompletedTask;
-    }
-
-    private void OnTelegramConfigChanged(TelegramConfig config) => _telegramConfig = config;
-    private void OnDiscordConfigChanged(DiscordConfig config) => _discordConfig = config;
-    private void OnWhatsAppConfigChanged(WhatsAppConfig config) => _whatsAppConfig = config;
-    private void OnSlackConfigChanged(SlackConfig config) => _slackConfig = config;
-    private void OnFeishuConfigChanged(FeishuConfig config) => _feishuConfig = config;
-    private void OnDingTalkConfigChanged(DingTalkConfig config) => _dingTalkConfig = config;
-    private void OnEmailConfigChanged(EmailConfig config) => _emailConfig = config;
-    private void OnQQConfigChanged(QQConfig config) => _qqConfig = config;
-    private void OnMatrixConfigChanged(MatrixConfig config) => _matrixConfig = config;
-    private void OnMochatConfigChanged(MochatConfig config) => _mochatConfig = config;
-
-    private string GetChannelIconName(string systemImage)
-    {
-        return systemImage switch
-        {
-            "paperplane" => Icons.Material.Filled.Send,
-            "message" => Icons.Material.Filled.Message,
-            "bubble.left.and.bubble.right" => Icons.Material.Filled.Chat,
-            "number" => Icons.Material.Filled.Tag,
-            "work" => Icons.Material.Filled.Work,
-            "mail" => Icons.Material.Filled.Email,
-            "chat" => Icons.Material.Filled.Forum,
-            "network" => Icons.Material.Filled.Hub,
-            _ => Icons.Material.Filled.Extension
-        };
     }
 
     private async Task CreateDefaultConfig()
@@ -877,9 +447,7 @@
         {
             var configDir = Path.GetDirectoryName(_configPath);
             if (!string.IsNullOrEmpty(configDir) && !Directory.Exists(configDir))
-            {
                 Directory.CreateDirectory(configDir);
-            }
             
             _config = new AgentConfig
             {
@@ -898,11 +466,5 @@
         {
             Snackbar.Add($"创建配置失败: {ex.Message}", Severity.Error);
         }
-    }
-
-    private static string GetConfigPath()
-    {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
     }
 }

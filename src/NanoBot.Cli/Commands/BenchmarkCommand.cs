@@ -12,6 +12,8 @@ namespace NanoBot.Cli.Commands;
 
 public class BenchmarkCommand : NanoBotCommandBase
 {
+    public BenchmarkCommand(CliCommandContext context) : base(context) { }
+
     public override string Name => "benchmark";
     public override string Description => "Model availability benchmarking tool";
 
@@ -146,7 +148,7 @@ public class BenchmarkCommand : NanoBotCommandBase
 
                 // Run benchmark
                 var benchmarkEngine = GetService<IBenchmarkEngine>();
-                var tools = await ToolProvider.CreateDefaultToolsAsync(SharedServiceProvider!, cancellationToken: cancellationToken);
+                var tools = await ToolProvider.CreateDefaultToolsAsync(Context.ServiceProvider, cancellationToken: cancellationToken);
                 var result = await benchmarkEngine.RunBenchmarkAsync(
                     chatClient,
                     tools,

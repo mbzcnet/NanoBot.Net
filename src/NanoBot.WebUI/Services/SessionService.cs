@@ -1,59 +1,40 @@
-using NanoBot.Agent;
+using System.Text.Json;
+using System.IO;
+using Microsoft.Extensions.Logging;
 using NanoBot.Core.Sessions;
 using NanoBot.Core.Storage;
 using NanoBot.Core.Workspace;
-using System.Net;
-using System.Text.Json;
-using Microsoft.Extensions.AI;
+using AgentSessionManager = NanoBot.Agent.ISessionManager;
 
 namespace NanoBot.WebUI.Services;
 
 public class SessionService : ISessionService
 {
-    private sealed record SessionImageItem(
-        string OriginalUrl,
-        string ThumbnailUrl,
-        string Summary,
-        int Width,
-        int Height,
-        string ContentType,
-        long FileSize);
-
     private readonly ILogger<SessionService> _logger;
-    private readonly ISessionManager _sessionManager;
+    private readonly AgentSessionManager _sessionManager;
     private readonly IWorkspaceManager _workspace;
     private readonly IFileStorageService _fileStorage;
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    private readonly SessionMessageParser _parser;
 
     public SessionService(
         ILogger<SessionService> logger,
-        ISessionManager sessionManager,
+        AgentSessionManager sessionManager,
         IWorkspaceManager workspace,
-        IFileStorageService fileStorage)
+        IFileStorageService fileStorage,
+        SessionMessageParser parser)
     {
         _logger = logger;
         _sessionManager = sessionManager;
         _workspace = workspace;
         _fileStorage = fileStorage;
+        _parser = parser;
     }
 
     public Task<List<SessionInfo>> GetSessionsAsync()
     {
         try
         {
-            // SessionManager 从文件名提取 key 时会把 "_" 替换成 ":"（如 chat_xxx -> chat:xxx）
-            // 所以需要同时匹配 "chat:" 和 "chat_" 两种格式
             var allSessions = _sessionManager.ListSessions().ToList();
-            _logger.LogDebug("Total sessions from SessionManager: {Count}", allSessions.Count);
-            
-            foreach (var s in allSessions.Take(5))
-            {
-                _logger.LogDebug("Session key: {Key}", s.Key);
-            }
 
             var sessions = allSessions
                 .Where(s => s.Key.StartsWith("chat:") || s.Key.StartsWith("chat_"))
@@ -68,7 +49,6 @@ public class SessionService : ISessionService
                 })
                 .ToList();
 
-            _logger.LogDebug("Filtered sessions count: {Count}", sessions.Count);
             return Task.FromResult(sessions);
         }
         catch (Exception ex)
@@ -82,7 +62,6 @@ public class SessionService : ISessionService
     {
         try
         {
-            // 尝试匹配两种 key 格式：chat_xxx 和 chat:xxx
             var sessionKeyWithUnderscore = $"chat_{sessionId}";
             var sessionKeyWithColon = $"chat:{sessionId}";
             var agentSession = _sessionManager.ListSessions()
@@ -121,11 +100,8 @@ public class SessionService : ISessionService
 
             _sessionManager.SetSessionTitle(sessionKey, sessionTitle);
             if (!string.IsNullOrEmpty(profileId))
-            {
                 _sessionManager.SetSessionProfileId(sessionKey, profileId);
-            }
 
-            // 立即保存会话到文件，确保 ListSessions 可以读取到
             await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
 
             var session = new SessionInfo
@@ -155,7 +131,6 @@ public class SessionService : ISessionService
             var agentSession = await _sessionManager.GetOrCreateSessionAsync(sessionKey);
             _sessionManager.SetSessionTitle(sessionKey, newTitle);
             await _sessionManager.SaveSessionAsync(agentSession, sessionKey);
-            
             _logger.LogInformation("Renamed session {SessionId} to {NewTitle}", sessionId, newTitle);
         }
         catch (Exception ex)
@@ -189,7 +164,6 @@ public class SessionService : ISessionService
             var sessionKey = $"chat_{sessionId}";
             await _sessionManager.ClearSessionAsync(sessionKey);
             await _fileStorage.DeleteSessionDirectoryAsync(sessionId);
-
             _logger.LogInformation("Deleted session: {SessionId}", sessionId);
         }
         catch (Exception ex)
@@ -199,679 +173,8 @@ public class SessionService : ISessionService
         }
     }
 
-    public async Task<List<MessageInfo>> GetMessagesAsync(string sessionId)
-    {
-        try
-        {
-            var sessionKey = $"chat_{sessionId}";
-            await _sessionManager.GetOrCreateSessionAsync(sessionKey);
-
-            var sessionsPath = _workspace.GetSessionsPath();
-            var sessionFile = Path.Combine(sessionsPath, $"{sessionKey.Replace(":", "_")}.jsonl");
-
-            if (!File.Exists(sessionFile))
-                return new List<MessageInfo>();
-
-            var lines = await File.ReadAllLinesAsync(sessionFile);
-            var messagesList = ReadMessagesFromJsonLines(lines, sessionId);
-
-            return ConsolidateMessages(messagesList);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting messages for session {SessionId}", sessionId);
-            return new List<MessageInfo>();
-        }
-    }
-
-    private List<MessageInfo> ReadMessagesFromJsonLines(string[] lines, string sessionId)
-    {
-        var messagesList = new List<MessageInfo>();
-        MessageInfo? currentAssistant = null;
-        
-        // 用于跟踪 tool_call 的 callId 与对应 assistant 消息的索引
-        var pendingToolCalls = new Dictionary<string, int>(StringComparer.Ordinal);
-
-        foreach (var line in lines)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-                continue;
-
-            try
-            {
-                var msg = JsonSerializer.Deserialize<JsonElement>(line);
-                    
-                // 跳过 metadata 行
-                if (msg.TryGetProperty("_type", out var typeElement) && typeElement.GetString() == "metadata")
-                    continue;
-
-                string role = "user";
-                string content = string.Empty;
-                var timestamp = DateTime.Now;
-                var attachments = new List<AttachmentInfo>();
-                    
-                // 解析消息 - 支持两种格式
-                // 格式1: { "role": "user", "content": "text" }
-                // 格式2: { "role": "user", "contents": [{"$type": "text", "text": "..."}] }
-                    
-                if (msg.TryGetProperty("role", out var roleElement))
-                {
-                    role = roleElement.GetString()?.ToLower() ?? "user";
-                }
-
-                if (msg.TryGetProperty("timestamp", out var timestampElement) &&
-                    timestampElement.ValueKind == JsonValueKind.String &&
-                    DateTime.TryParse(timestampElement.GetString(), out var parsedTimestamp))
-                {
-                    timestamp = parsedTimestamp;
-                }
-
-                if (msg.TryGetProperty("content", out var contentElement))
-                {
-                    if (contentElement.ValueKind == JsonValueKind.String)
-                    {
-                        content = contentElement.GetString() ?? string.Empty;
-                    }
-                    else if (contentElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in contentElement.EnumerateArray())
-                        {
-                            if (item.ValueKind == JsonValueKind.String)
-                            {
-                                content += item.GetString();
-                            }
-                            else if (item.TryGetProperty("text", out var textElement) && textElement.ValueKind == JsonValueKind.String)
-                            {
-                                content += textElement.GetString() ?? string.Empty;
-                            }
-                        }
-                    }
-                }
-
-                ToolCallInfo? toolCallInfo = null;
-                var toolExecutions = new List<ToolExecutionInfo>();
-                var parts = new List<MessagePartInfo>();
-                
-                // 解析 tool_calls
-                if (msg.TryGetProperty("tool_calls", out var toolCallsElement) && toolCallsElement.ValueKind == JsonValueKind.Array)
-                {
-                    var toolCalls = new List<FunctionCallContent>();
-                    foreach (var call in toolCallsElement.EnumerateArray())
-                    {
-                        if (!call.TryGetProperty("function", out var functionElement))
-                        {
-                            continue;
-                        }
-
-                        var functionName = functionElement.TryGetProperty("name", out var nameElement)
-                            ? nameElement.GetString()
-                            : null;
-                        var argsString = functionElement.TryGetProperty("arguments", out var argsElement)
-                            ? argsElement.GetString()
-                            : null;
-
-                        Dictionary<string, object?>? arguments = null;
-                        if (!string.IsNullOrWhiteSpace(argsString))
-                        {
-                            try
-                            {
-                                arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsString);
-                            }
-                            catch
-                            {
-                                arguments = null;
-                            }
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(functionName))
-                        {
-                            var callId = call.TryGetProperty("id", out var idElement)
-                                ? idElement.GetString() ?? string.Empty
-                                : string.Empty;
-                            toolCalls.Add(new FunctionCallContent(callId, functionName, arguments));
-                            
-                            // 添加 tool_call part
-                            parts.Add(new MessagePartInfo
-                            {
-                                Type = "tool_call",
-                                CallId = callId,
-                                ToolName = functionName,
-                                Arguments = argsString ?? "{}"
-                            });
-                            
-                            // 记录 pending tool call
-                            if (!string.IsNullOrWhiteSpace(callId))
-                            {
-                                pendingToolCalls[callId] = messagesList.Count;
-                            }
-                        }
-                    }
-
-                    var firstToolCall = toolCalls.FirstOrDefault();
-                    if (firstToolCall != null)
-                    {
-                        var argsJson = firstToolCall.Arguments != null
-                            ? JsonSerializer.Serialize(firstToolCall.Arguments)
-                            : "{}";
-                        toolCallInfo = new ToolCallInfo(
-                            firstToolCall.Name ?? string.Empty,
-                            argsJson,
-                            firstToolCall.CallId
-                        );
-                    }
-
-                    foreach (var toolCall in toolCalls)
-                    {
-                        toolExecutions.Add(new ToolExecutionInfo
-                        {
-                            CallId = toolCall.CallId,
-                            Name = toolCall.Name ?? string.Empty,
-                            Arguments = toolCall.Arguments != null ? JsonSerializer.Serialize(toolCall.Arguments) : "{}"
-                        });
-                    }
-                }
-
-                // 如果有文本内容，添加 text part
-                if (!string.IsNullOrWhiteSpace(content))
-                {
-                    parts.Add(new MessagePartInfo
-                    {
-                        Type = "text",
-                        Text = content
-                    });
-                }
-
-                if (role == "tool")
-                {
-                    var toolCallId = msg.TryGetProperty("tool_call_id", out var toolCallIdElement)
-                        ? toolCallIdElement.GetString() ?? string.Empty
-                        : string.Empty;
-                    var toolName = msg.TryGetProperty("name", out var toolNameElement)
-                        ? toolNameElement.GetString() ?? string.Empty
-                        : string.Empty;
-
-                    var normalizedOutput = NormalizeToolOutput(content);
-                    var isError = LooksLikeErrorOutput(content);
-                    
-                    // 添加 tool_result part
-                    parts.Add(new MessagePartInfo
-                    {
-                        Type = "tool_result",
-                        CallId = toolCallId,
-                        ToolName = toolName,
-                        Output = normalizedOutput,
-                        IsError = isError
-                    });
-                    
-                    // 清理 pending tool call 记录
-                    if (!string.IsNullOrWhiteSpace(toolCallId))
-                    {
-                        pendingToolCalls.Remove(toolCallId);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(content) || !string.IsNullOrWhiteSpace(toolCallId) || !string.IsNullOrWhiteSpace(toolName))
-                    {
-                        toolExecutions.Add(new ToolExecutionInfo
-                        {
-                            CallId = toolCallId,
-                            Name = toolName,
-                            Arguments = "{}",
-                            Output = normalizedOutput,
-                            IsError = isError
-                        });
-                    }
-                }
-
-                if (role == "tool" && !string.IsNullOrWhiteSpace(content))
-                {
-                    if (TryExtractSnapshotImageUrl(content, out var snapshotImageUrl))
-                    {
-                        content = $"![snapshot]({snapshotImageUrl})";
-                    }
-
-                    content = string.Empty;
-                }
-
-                if (TryExtractSessionImages(msg, out var sessionImages))
-                {
-                    foreach (var image in sessionImages)
-                    {
-                        attachments.Add(new AttachmentInfo
-                        {
-                            Id = Guid.NewGuid().ToString("N"),
-                            MessageId = $"{sessionId}_{messagesList.Count}",
-                            FileType = image.ContentType,
-                            RelativePath = image.ThumbnailUrl,
-                            FileSize = image.FileSize,
-                            Url = image.OriginalUrl,
-                            Summary = image.Summary
-                        });
-                    }
-
-                    content = AppendImageSummaries(content, sessionImages);
-                }
-
-                if (!string.IsNullOrWhiteSpace(content) || toolCallInfo != null || attachments.Count > 0 || toolExecutions.Count > 0 || parts.Count > 0)
-                {
-                    var messageIndex = messagesList.Count;
-                    var messageInfo = new MessageInfo
-                    {
-                        Id = $"{sessionId}_{messageIndex}",
-                        SessionId = sessionId,
-                        Role = role,
-                        Content = content,
-                        Timestamp = timestamp,
-                        Attachments = attachments,
-                        ToolCall = toolCallInfo,
-                        ToolExecutions = toolExecutions,
-                        SourceIndex = messageIndex,
-                        Parts = parts.Count > 0 ? parts : new List<MessagePartInfo>()
-                    };
-                    
-                    // 如果是 assistant 消息且有 parts，记录为 currentAssistant
-                    if (role == "assistant" && parts.Count > 0)
-                    {
-                        currentAssistant = messageInfo;
-                    }
-                    
-                    messagesList.Add(messageInfo);
-                }
-            }
-            catch
-            {
-            }
-        }
-
-        return messagesList;
-    }
-
-    private List<MessageInfo> ConsolidateMessages(List<MessageInfo> messagesList)
-    {
-        var consolidatedList = new List<MessageInfo>();
-        MessageInfo? currentResponse = null;
-
-        foreach (var msg in messagesList)
-        {
-            if (msg.Role == "user" || msg.Role == "system")
-            {
-                consolidatedList.Add(msg);
-                currentResponse = null;
-            }
-            else
-            {
-                if (currentResponse != null)
-                {
-                    if (!string.IsNullOrWhiteSpace(msg.Content))
-                    {
-                        if (!string.IsNullOrWhiteSpace(currentResponse.Content))
-                        {
-                            currentResponse.Content += "\n\n";
-                        }
-                        currentResponse.Content += msg.Content;
-                    }
-
-                    if (msg.Attachments != null && msg.Attachments.Count > 0)
-                    {
-                        currentResponse.Attachments.AddRange(msg.Attachments);
-                    }
-
-                    if (currentResponse.ToolCall == null && msg.ToolCall != null)
-                    {
-                        currentResponse.ToolCall = msg.ToolCall;
-                    }
-
-                    if (msg.ToolExecutions.Count > 0)
-                    {
-                        MergeToolExecutions(currentResponse.ToolExecutions, msg.ToolExecutions);
-                    }
-
-                    // 按顺序合并 Parts，保证多行 assistant/tool 合并后仍能交错渲染
-                    if (msg.Parts != null && msg.Parts.Count > 0)
-                    {
-                        if (currentResponse.Parts == null)
-                            currentResponse.Parts = new List<MessagePartInfo>();
-                        currentResponse.Parts.AddRange(msg.Parts);
-                    }
-
-                    currentResponse.Timestamp = msg.Timestamp;
-                    currentResponse.SourceIndex = Math.Max(currentResponse.SourceIndex, msg.SourceIndex);
-                }
-                else
-                {
-                    if (msg.Role == "tool")
-                    {
-                        msg.Role = "assistant";
-                        // Tool 消息的内容应该只在 tool_result part 中显示，
-                        // 不应该作为普通消息内容显示
-                        msg.Content = string.Empty;
-                    }
-
-                    var retryCandidate = consolidatedList.LastOrDefault(m => m.Role == "user");
-                    msg.RetryPrompt = retryCandidate?.Content;
-                    msg.RetryFromIndex = retryCandidate?.SourceIndex;
-                    consolidatedList.Add(msg);
-                    currentResponse = msg;
-                }
-            }
-        }
-
-        return consolidatedList;
-    }
-
-    private static void MergeToolExecutions(List<ToolExecutionInfo> target, List<ToolExecutionInfo> source)
-    {
-        foreach (var incoming in source)
-        {
-            var existing = !string.IsNullOrWhiteSpace(incoming.CallId)
-                ? target.LastOrDefault(t => string.Equals(t.CallId, incoming.CallId, StringComparison.Ordinal))
-                : target.LastOrDefault();
-
-            if (existing == null)
-            {
-                target.Add(new ToolExecutionInfo
-                {
-                    CallId = incoming.CallId,
-                    Name = incoming.Name,
-                    Arguments = incoming.Arguments,
-                    Output = incoming.Output,
-                    IsError = incoming.IsError
-                });
-                continue;
-            }
-
-            if (!string.IsNullOrWhiteSpace(incoming.CallId) &&
-                string.IsNullOrWhiteSpace(existing.CallId))
-            {
-                existing.CallId = incoming.CallId;
-            }
-
-            if (string.IsNullOrWhiteSpace(existing.Name) && !string.IsNullOrWhiteSpace(incoming.Name))
-            {
-                existing.Name = incoming.Name;
-            }
-
-            if ((string.IsNullOrWhiteSpace(existing.Arguments) || existing.Arguments == "{}") &&
-                !string.IsNullOrWhiteSpace(incoming.Arguments) &&
-                incoming.Arguments != "{}")
-            {
-                existing.Arguments = incoming.Arguments;
-            }
-
-            if (string.IsNullOrWhiteSpace(existing.Output) && !string.IsNullOrWhiteSpace(incoming.Output))
-            {
-                existing.Output = incoming.Output;
-            }
-            else if (!string.IsNullOrWhiteSpace(incoming.Output) &&
-                     !string.Equals(existing.Output, incoming.Output, StringComparison.Ordinal))
-            {
-                existing.Output = string.IsNullOrWhiteSpace(existing.Output)
-                    ? incoming.Output
-                    : $"{existing.Output}\n{incoming.Output}";
-            }
-
-            existing.IsError = existing.IsError || incoming.IsError || LooksLikeErrorOutput(existing.Output);
-        }
-    }
-
-    private static bool LooksLikeErrorOutput(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return value.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("ERR_", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("SSL", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private string NormalizeToolOutput(string? rawOutput)
-    {
-        if (string.IsNullOrWhiteSpace(rawOutput))
-        {
-            return string.Empty;
-        }
-
-        var normalized = rawOutput.Trim();
-        if (TryExtractSnapshotMarkdown(normalized, out var snapshotMarkdown))
-        {
-            return string.IsNullOrWhiteSpace(snapshotMarkdown)
-                ? normalized
-                : $"{normalized}\n\n{snapshotMarkdown}";
-        }
-
-        return normalized;
-    }
-
-    private bool TryReadMessagesFromMetadata(string metadataLine, string sessionId, out List<MessageInfo> messages)
-    {
-        messages = new List<MessageInfo>();
-
-        try
-        {
-            var root = JsonSerializer.Deserialize<JsonElement>(metadataLine);
-            if (!root.TryGetProperty("metadata", out var metadata) ||
-                !metadata.TryGetProperty("agent_session", out var agentSession) ||
-                !agentSession.TryGetProperty("stateBag", out var stateBag) ||
-                !stateBag.TryGetProperty("FileBackedChatHistoryProvider", out var provider) ||
-                provider.ValueKind != JsonValueKind.Array)
-            {
-                return false;
-            }
-
-            var index = 0;
-            foreach (var item in provider.EnumerateArray())
-            {
-                var role = item.TryGetProperty("role", out var roleEl)
-                    ? roleEl.GetString()?.ToLowerInvariant() ?? "user"
-                    : "user";
-
-                var timestamp = DateTime.Now;
-                if (item.TryGetProperty("createdAt", out var createdAtEl) &&
-                    createdAtEl.ValueKind == JsonValueKind.String &&
-                    DateTime.TryParse(createdAtEl.GetString(), out var createdAt))
-                {
-                    timestamp = createdAt;
-                }
-
-                var textParts = new List<string>();
-                var sessionParts = new List<MessagePartInfo>();  // 用于有序渲染
-                ToolCallInfo? toolCall = null;
-                var toolExecutions = new List<ToolExecutionInfo>();
-                var toolExecutionLookup = new Dictionary<string, ToolExecutionInfo>(StringComparer.Ordinal);
-                var itemToolCallId = item.TryGetProperty("toolCallId", out var itemToolCallIdEl)
-                    ? itemToolCallIdEl.GetString() ?? string.Empty
-                    : item.TryGetProperty("tool_call_id", out var itemToolCallIdAltEl)
-                        ? itemToolCallIdAltEl.GetString() ?? string.Empty
-                        : string.Empty;
-                var itemToolName = item.TryGetProperty("name", out var itemToolNameEl)
-                    ? itemToolNameEl.GetString() ?? string.Empty
-                    : string.Empty;
-
-                if (item.TryGetProperty("content", out var itemContentEl))
-                {
-                    if (itemContentEl.ValueKind == JsonValueKind.String)
-                    {
-                        var text = itemContentEl.GetString();
-                        if (!string.IsNullOrWhiteSpace(text))
-                        {
-                            textParts.Add(text!);
-                        }
-                    }
-                    else if (itemContentEl.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var part in itemContentEl.EnumerateArray())
-                        {
-                            if (part.ValueKind == JsonValueKind.String)
-                            {
-                                var text = part.GetString();
-                                if (!string.IsNullOrWhiteSpace(text))
-                                {
-                                    textParts.Add(text!);
-                                }
-                            }
-                            else if (part.TryGetProperty("text", out var partTextEl) && partTextEl.ValueKind == JsonValueKind.String)
-                            {
-                                var text = partTextEl.GetString();
-                                if (!string.IsNullOrWhiteSpace(text))
-                                {
-                                    textParts.Add(text!);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (item.TryGetProperty("contents", out var contents) && contents.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var content in contents.EnumerateArray())
-                    {
-                        if (!content.TryGetProperty("$type", out var typeEl))
-                        {
-                            continue;
-                        }
-
-                        var type = typeEl.GetString();
-                        if (type == "text" &&
-                            content.TryGetProperty("text", out var textEl) &&
-                            textEl.ValueKind == JsonValueKind.String)
-                        {
-                            var text = textEl.GetString();
-                            if (!string.IsNullOrWhiteSpace(text))
-                            {
-                                textParts.Add(text!);
-                                // 添加有序 text part
-                                sessionParts.Add(new MessagePartInfo
-                                {
-                                    Type = "text",
-                                    Text = text
-                                });
-                            }
-                        }
-                        else if (type == "functionCall")
-                        {
-                            var name = content.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? string.Empty : string.Empty;
-                            var callId = content.TryGetProperty("callId", out var callIdEl) ? callIdEl.GetString() : null;
-                            string args = "{}";
-                            if (content.TryGetProperty("arguments", out var argsEl))
-                            {
-                                args = argsEl.GetRawText();
-                            }
-
-                            toolCall = new ToolCallInfo(name, args, callId);
-                            var execution = new ToolExecutionInfo
-                            {
-                                CallId = callId ?? string.Empty,
-                                Name = name,
-                                Arguments = args
-                            };
-                            toolExecutions.Add(execution);
-                            if (!string.IsNullOrWhiteSpace(execution.CallId))
-                            {
-                                toolExecutionLookup[execution.CallId] = execution;
-                            }
-                            
-                            // 添加有序 tool_call part
-                            sessionParts.Add(new MessagePartInfo
-                            {
-                                Type = "tool_call",
-                                CallId = callId ?? string.Empty,
-                                ToolName = name,
-                                Arguments = args
-                            });
-                        }
-                        else if (type == "functionResult" &&
-                                 content.TryGetProperty("result", out var resultEl))
-                        {
-                            var result = resultEl.ValueKind == JsonValueKind.String
-                                ? resultEl.GetString()
-                                : resultEl.GetRawText();
-
-                            if (!string.IsNullOrWhiteSpace(result))
-                            {
-                                var callId = content.TryGetProperty("callId", out var resultCallIdEl)
-                                    ? resultCallIdEl.GetString() ?? string.Empty
-                                    : string.Empty;
-                                if (!string.IsNullOrWhiteSpace(callId) && toolExecutionLookup.TryGetValue(callId, out var existingExecution))
-                                {
-                                    existingExecution.Output = NormalizeToolOutput(result!);
-                                    existingExecution.IsError = LooksLikeErrorOutput(result!);
-                                }
-                                else
-                                {
-                                    toolExecutions.Add(new ToolExecutionInfo
-                                    {
-                                        CallId = callId,
-                                        Name = "tool",
-                                        Arguments = "{}",
-                                        Output = NormalizeToolOutput(result!),
-                                        IsError = LooksLikeErrorOutput(result!)
-                                    });
-                                }
-                                
-                                // 添加有序 tool_result part
-                                sessionParts.Add(new MessagePartInfo
-                                {
-                                    Type = "tool_result",
-                                    CallId = callId,
-                                    ToolName = "tool",
-                                    Output = NormalizeToolOutput(result!),
-                                    IsError = LooksLikeErrorOutput(result!)
-                                });
-                            }
-                        }
-                    }
-                }
-
-                var combinedContent = string.Join("\n\n", textParts.Where(p => !string.IsNullOrWhiteSpace(p)));
-
-                if (role == "tool")
-                {
-                    if (!string.IsNullOrWhiteSpace(combinedContent) ||
-                        !string.IsNullOrWhiteSpace(itemToolCallId) ||
-                        !string.IsNullOrWhiteSpace(itemToolName))
-                    {
-                        toolExecutions.Add(new ToolExecutionInfo
-                        {
-                            CallId = itemToolCallId,
-                            Name = itemToolName,
-                            Arguments = "{}",
-                            Output = NormalizeToolOutput(combinedContent),
-                            IsError = LooksLikeErrorOutput(combinedContent)
-                        });
-                    }
-                    combinedContent = string.Empty;
-                }
-
-                if (!string.IsNullOrWhiteSpace(combinedContent) || toolCall != null || toolExecutions.Count > 0)
-                {
-                    messages.Add(new MessageInfo
-                    {
-                        Id = item.TryGetProperty("messageId", out var messageIdEl) ? messageIdEl.GetString() ?? $"{sessionId}_{index}" : $"{sessionId}_{index}",
-                        SessionId = sessionId,
-                        Role = role,
-                        Content = combinedContent,
-                        Timestamp = timestamp,
-                        ToolCall = toolCall,
-                        ToolExecutions = toolExecutions,
-                        SourceIndex = index,
-                        Parts = sessionParts.Count > 0 ? sessionParts : new List<MessagePartInfo>()
-                    });
-                }
-
-                index++;
-            }
-
-            return messages.Count > 0;
-        }
-        catch
-        {
-            messages = new List<MessageInfo>();
-            return false;
-        }
-    }
+    public Task<List<MessageInfo>> GetMessagesAsync(string sessionId)
+        => _parser.ParseMessagesAsync(sessionId);
 
     public Task<MessageInfo> AddMessageAsync(string sessionId, string role, string content, List<AttachmentInfo>? attachments = null)
     {
@@ -879,7 +182,7 @@ public class SessionService : ISessionService
         {
             var now = DateTime.Now;
             var messageId = Guid.NewGuid().ToString("N");
-            
+
             var message = new MessageInfo
             {
                 Id = messageId,
@@ -906,7 +209,7 @@ public class SessionService : ISessionService
         {
             var sessionKey = $"chat_{sessionId}";
             var sessionsPath = _workspace.GetSessionsPath();
-            var sessionFile = Path.Combine(sessionsPath, $"{sessionKey.Replace(":", "_")}.jsonl");
+            var sessionFile = Path.Combine(sessionsPath, $"chat_{sessionId}.jsonl");
 
             if (!File.Exists(sessionFile))
             {
@@ -914,18 +217,15 @@ public class SessionService : ISessionService
                 return;
             }
 
-            // 读取所有行
             var allLines = await File.ReadAllLinesAsync(sessionFile);
             if (allLines.Length == 0)
-            {
                 return;
-            }
 
-            // 第一行是 metadata，需要保留
+            // First line is metadata
             var metadataLine = allLines[0];
             var messageLines = allLines.Skip(1).ToList();
 
-            // 过滤掉 metadata 行（_type 为 metadata 的行）
+            // Filter out metadata lines
             var actualMessageLines = messageLines.Where(line =>
             {
                 if (string.IsNullOrWhiteSpace(line)) return false;
@@ -933,39 +233,28 @@ public class SessionService : ISessionService
                 {
                     var doc = JsonSerializer.Deserialize<JsonElement>(line);
                     if (doc.TryGetProperty("_type", out var typeElement))
-                    {
                         return typeElement.GetString() != "metadata";
-                    }
                     return true;
                 }
-                catch
-                {
-                    return false;
-                }
+                catch { return false; }
             }).ToList();
 
-            // 验证索引范围
             if (fromIndex < 0 || fromIndex >= actualMessageLines.Count)
             {
-                _logger.LogWarning("Invalid message index {FromIndex} for session {SessionId}, total messages: {Count}", 
+                _logger.LogWarning("Invalid message index {FromIndex} for session {SessionId}, total messages: {Count}",
                     fromIndex, sessionId, actualMessageLines.Count);
                 return;
             }
 
-            // 保留从开头到 fromIndex 之前的消息
             var linesToKeep = actualMessageLines.Take(fromIndex).ToList();
 
-            // 重新构建文件内容
             var newLines = new List<string> { metadataLine };
             newLines.AddRange(linesToKeep);
 
-            // 写回文件
             await File.WriteAllLinesAsync(sessionFile, newLines);
-
-            // 清除会话缓存，强制重新加载
             await _sessionManager.InvalidateAsync(sessionKey);
 
-            _logger.LogInformation("Deleted messages from index {FromIndex} for session {SessionId}, remaining messages: {Count}", 
+            _logger.LogInformation("Deleted messages from index {FromIndex} for session {SessionId}, remaining messages: {Count}",
                 fromIndex, sessionId, linesToKeep.Count);
         }
         catch (Exception ex)
@@ -975,259 +264,9 @@ public class SessionService : ISessionService
         }
     }
 
-    private string GenerateDefaultTitle(string sessionKey)
+    private static string GenerateDefaultTitle(string sessionKey)
     {
         var sessionId = sessionKey.Replace("chat_", "").Replace("chat:", "");
         return $"会话 {sessionId.Substring(0, Math.Min(8, sessionId.Length))}";
-    }
-
-    private string? GetSnapshotUrl(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        var normalized = imagePath.Replace('\\', '/');
-        if (normalized.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            return normalized;
-        }
-
-        if (Path.IsPathRooted(imagePath))
-        {
-            var sessionsRoot = _workspace.GetSessionsPath().Replace('\\', '/');
-            if (!normalized.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"/api/files/local?path={Uri.EscapeDataString(imagePath)}";
-            }
-
-            normalized = normalized[sessionsRoot.Length..].TrimStart('/');
-        }
-
-        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized["sessions/".Length..];
-        }
-
-        normalized = normalized.TrimStart('/');
-        return string.IsNullOrWhiteSpace(normalized) ? null : $"/api/files/sessions/{normalized}";
-    }
-
-    private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
-    {
-        value = null;
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (var property in element.EnumerateObject())
-        {
-            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            value = property.Value.ValueKind == JsonValueKind.String
-                ? property.Value.GetString()
-                : property.Value.GetRawText();
-            return true;
-        }
-
-        return false;
-    }
-
-    private bool TryExtractSnapshotImageUrl(string toolContent, out string imageUrl)
-    {
-        imageUrl = string.Empty;
-        if (string.IsNullOrWhiteSpace(toolContent))
-        {
-            return false;
-        }
-
-        if (!TryParseToolResultJson(toolContent, out var rootElement))
-        {
-            return false;
-        }
-
-        if (!TryGetJsonString(rootElement, "action", out var action) ||
-            string.IsNullOrWhiteSpace(action))
-        {
-            return false;
-        }
-
-        if (!string.Equals(action, "snapshot", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(action, "capture", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        if (!TryGetJsonString(rootElement, "imagePath", out var imagePath) ||
-            string.IsNullOrWhiteSpace(imagePath))
-        {
-            return false;
-        }
-
-        var resolved = GetSnapshotUrl(imagePath);
-        if (string.IsNullOrWhiteSpace(resolved))
-        {
-            return false;
-        }
-
-        imageUrl = resolved;
-        return true;
-    }
-
-    private bool TryExtractSnapshotMarkdown(string toolContent, out string markdown)
-    {
-        markdown = string.Empty;
-        if (!TryExtractSnapshotImageUrl(toolContent, out var imageUrl) ||
-            string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return false;
-        }
-
-        markdown = $"![snapshot]({imageUrl})";
-        return true;
-    }
-
-    private static bool TryParseToolResultJson(string raw, out JsonElement rootElement)
-    {
-        rootElement = default;
-        if (string.IsNullOrWhiteSpace(raw))
-        {
-            return false;
-        }
-
-        var normalized = raw.Trim();
-        if (!TryParseJsonWithRepair(normalized, out var firstPass))
-        {
-            return false;
-        }
-
-        if (firstPass.ValueKind == JsonValueKind.String)
-        {
-            var inner = firstPass.GetString();
-            if (string.IsNullOrWhiteSpace(inner))
-            {
-                return false;
-            }
-
-            return TryParseJsonWithRepair(inner, out rootElement) && rootElement.ValueKind == JsonValueKind.Object;
-        }
-
-        if (firstPass.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        rootElement = firstPass;
-        return true;
-    }
-
-    private static bool TryParseJsonWithRepair(string raw, out JsonElement rootElement)
-    {
-        rootElement = default;
-        var normalized = raw.Trim();
-
-        try
-        {
-            rootElement = JsonSerializer.Deserialize<JsonElement>(normalized);
-            return true;
-        }
-        catch (JsonException)
-        {
-            if (!normalized.Contains("\\u0022", StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            try
-            {
-                rootElement = JsonSerializer.Deserialize<JsonElement>(normalized.Replace("\\u0022", "\""));
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-    }
-
-    private static string WrapToolHintAsHtml(string toolHint)
-    {
-        var normalized = toolHint.Trim();
-        var encoded = WebUtility.HtmlEncode(normalized);
-        return $"<div class=\"nb-tool-hint\">{encoded}</div>";
-    }
-
-    private static bool TryExtractSessionImages(JsonElement message, out List<SessionImageItem> images)
-    {
-        images = [];
-        if (!message.TryGetProperty("images", out var imagesElement) || imagesElement.ValueKind != JsonValueKind.Array)
-        {
-            return false;
-        }
-
-        foreach (var image in imagesElement.EnumerateArray())
-        {
-            var originalUrl = image.TryGetProperty("original_url", out var originalElement)
-                ? originalElement.GetString() ?? string.Empty
-                : string.Empty;
-            var thumbnailUrl = image.TryGetProperty("thumbnail_url", out var thumbnailElement)
-                ? thumbnailElement.GetString() ?? string.Empty
-                : string.Empty;
-            var summary = image.TryGetProperty("summary", out var summaryElement)
-                ? summaryElement.GetString() ?? string.Empty
-                : string.Empty;
-            var width = image.TryGetProperty("width", out var widthElement) && widthElement.ValueKind == JsonValueKind.Number
-                ? widthElement.GetInt32()
-                : 0;
-            var height = image.TryGetProperty("height", out var heightElement) && heightElement.ValueKind == JsonValueKind.Number
-                ? heightElement.GetInt32()
-                : 0;
-            var contentType = image.TryGetProperty("content_type", out var contentTypeElement)
-                ? contentTypeElement.GetString() ?? string.Empty
-                : string.Empty;
-            var fileSize = image.TryGetProperty("file_size", out var fileSizeElement) && fileSizeElement.ValueKind == JsonValueKind.Number
-                ? fileSizeElement.GetInt64()
-                : 0;
-
-            if (string.IsNullOrWhiteSpace(originalUrl) || string.IsNullOrWhiteSpace(thumbnailUrl))
-            {
-                continue;
-            }
-
-            images.Add(new SessionImageItem(
-                OriginalUrl: originalUrl,
-                ThumbnailUrl: thumbnailUrl,
-                Summary: summary,
-                Width: width,
-                Height: height,
-                ContentType: contentType,
-                FileSize: fileSize));
-        }
-
-        return images.Count > 0;
-    }
-
-    private static string AppendImageSummaries(string content, List<SessionImageItem> images)
-    {
-        if (images.Count == 0)
-        {
-            return content;
-        }
-
-        var blocks = images
-            .Select(image =>
-            {
-                var summary = string.IsNullOrWhiteSpace(image.Summary) ? "未提供概述" : image.Summary;
-                var encoded = WebUtility.HtmlEncode(summary);
-                return $"<div class=\"nb-image-summary\">图片概述：{encoded}</div>";
-            });
-
-        var summaryBlock = string.Join("\n", blocks);
-        return string.IsNullOrWhiteSpace(content) ? summaryBlock : $"{content}\n\n{summaryBlock}";
     }
 }

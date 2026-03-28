@@ -14,6 +14,7 @@ public class MemoryStore : IMemoryStore
     private readonly ILogger<MemoryStore>? _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _cachedMemory;
+    private string? _cachedHistory;
 
     public MemoryStore(
         IWorkspaceManager workspace,
@@ -94,6 +95,49 @@ public class MemoryStore : IMemoryStore
         var memory = _cachedMemory ?? LoadAsync().GetAwaiter().GetResult();
         return string.IsNullOrEmpty(memory) ? string.Empty : $"## Long-term Memory\n{memory}";
     }
+
+    public async Task AppendHistoryAsync(string entry, CancellationToken cancellationToken = default)
+    {
+        if (!_config.EnableHistory)
+        {
+            _logger?.LogDebug("History is disabled, skipping append");
+            return;
+        }
+
+        await _lock.WaitAsync(cancellationToken);
+        try
+        {
+            var historyPath = _workspace.GetHistoryFile();
+            var directory = Path.GetDirectoryName(historyPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            // Append entry with blank line separator (matches original Python implementation)
+            await File.AppendAllTextAsync(historyPath, entry.TrimEnd() + "\n\n", cancellationToken);
+            _cachedHistory = null; // Invalidate cache
+            _logger?.LogDebug("History entry appended: {Length} chars", entry.Length);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
+    public string GetHistoryContext()
+    {
+        var historyPath = _workspace.GetHistoryFile();
+        if (!File.Exists(historyPath))
+        {
+            return string.Empty;
+        }
+
+        _cachedHistory ??= File.ReadAllText(historyPath);
+        return string.IsNullOrEmpty(_cachedHistory) ? string.Empty : $"## Recent History\n{_cachedHistory.TrimEnd()}";
+    }
+
+    public string GetHistoryFilePath() => _workspace.GetHistoryFile();
 
     private async Task<string> LoadWithoutLockAsync(CancellationToken cancellationToken)
     {

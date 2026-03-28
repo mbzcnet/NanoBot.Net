@@ -2,7 +2,7 @@ using MudBlazor.Services;
 using NanoBot.WebUI.Components;
 using NanoBot.WebUI.Services;
 using NanoBot.WebUI.Middleware;
-using NanoBot.Cli.Extensions;
+using NanoBot.Agent;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Configuration.Validators;
 using NanoBot.Core.Sessions;
@@ -23,7 +23,8 @@ if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
 {
     try
     {
-        agentConfig = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+        agentConfig = await ConfigurationLoader.LoadWithDefaultsAsync(configPath, CancellationToken.None);
+        LogResolvedConfiguration("WebUI", configPath, agentConfig, usingDefaultConfig: false);
         
         var validationResult = WebUIConfigValidator.Validate(agentConfig.WebUI);
         if (!validationResult.IsValid)
@@ -51,6 +52,7 @@ else
 {
     Console.WriteLine("⚠️  未找到配置文件，使用默认配置");
     agentConfig = new AgentConfig();
+    LogResolvedConfiguration("WebUI", configPath, agentConfig, usingDefaultConfig: true);
 }
 
 ApplyWebUIConfiguration(builder.Configuration, agentConfig.WebUI, args);
@@ -81,6 +83,7 @@ builder.Services.AddCors(options =>
 builder.Services.AddNanoBot(agentConfig);
 
 builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddSingleton<SessionMessageParser>();
 builder.Services.AddSingleton<ISessionService, SessionService>();
 builder.Services.AddSingleton<IAgentService, AgentService>();
 builder.Services.AddScoped<ILocalizationService, LocalizationService>();
@@ -145,6 +148,15 @@ static string GetConfigPath(string[] args)
         }
     }
     return string.Empty;
+}
+
+static void LogResolvedConfiguration(string source, string? configPath, AgentConfig config, bool usingDefaultConfig)
+{
+    var defaultProfileId = config.Llm.DefaultProfile ?? "default";
+    config.Llm.Profiles.TryGetValue(defaultProfileId, out var profile);
+
+    Console.WriteLine($"[NanoBot Config] source={source} configPath={(string.IsNullOrWhiteSpace(configPath) ? "<default>" : configPath)} usingDefaultConfig={usingDefaultConfig}");
+    Console.WriteLine($"[NanoBot Config] workspace={config.Workspace.Path} defaultProfile={defaultProfileId} provider={profile?.Provider ?? "openai"} model={profile?.Model ?? "<unknown>"} apiBase={profile?.ApiBase ?? "<null>"} maxTokens={profile?.MaxTokens}");
 }
 
 static void ApplyWebUIConfiguration(IConfiguration configuration, WebUIConfig webUIConfig, string[] args)

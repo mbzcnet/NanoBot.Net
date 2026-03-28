@@ -26,6 +26,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\NanoBot.Channels\NanoBot.Channels.csproj" />
     <ProjectReference Include="..\..\src\NanoBot.Core\NanoBot.Core.csproj" />
+    <ProjectReference Include="..\..\src\NanoBot.Infrastructure\NanoBot.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

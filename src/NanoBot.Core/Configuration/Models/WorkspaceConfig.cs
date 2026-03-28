@@ -33,6 +33,8 @@ public class WorkspaceConfig
 
     public string GetMemoryFile() => System.IO.Path.Combine(GetResolvedPath(), "memory", "MEMORY.md");
 
+    public string GetHistoryFile() => System.IO.Path.Combine(GetResolvedPath(), "memory", "HISTORY.md");
+
     public string GetCachePath() => System.IO.Path.Combine(GetResolvedPath(), "cache");
 
     public string GetUploadsPath() => System.IO.Path.Combine(GetSessionsPath(), "uploads");

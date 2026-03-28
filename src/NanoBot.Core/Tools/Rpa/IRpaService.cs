@@ -1,47 +1,31 @@
 namespace NanoBot.Core.Tools.Rpa;
 
 /// <summary>
-/// RPA 服务接口
+/// RPA service interface - the main entry point for RPA capabilities.
 /// </summary>
-public interface IRpaService
+/// <remarks>
+/// This interface combines execution, screen analysis, and health monitoring capabilities.
+/// For specific capabilities, use <see cref="IRpaExecutor"/>, <see cref="IScreenAnalyzer"/>, or <see cref="IRpaHealthProvider"/>.
+/// </remarks>
+public interface IRpaService : IRpaExecutor, IScreenAnalyzer, IRpaHealthProvider, IDisposable
 {
     /// <summary>
-    /// 执行操作流程
-    /// </summary>
-    Task<RpaFlowResult> ExecuteFlowAsync(RpaFlowRequest request, CancellationToken ct = default);
-
-    /// <summary>
-    /// 执行单个操作
-    /// </summary>
-    Task ExecuteActionAsync(RpaAction action, CancellationToken ct = default);
-
-    /// <summary>
-    /// 获取屏幕尺寸
+    /// Gets the screen size.
     /// </summary>
     Task<(int Width, int Height)> GetScreenSizeAsync();
 
     /// <summary>
-    /// 获取当前鼠标位置
+    /// Gets the current cursor position.
     /// </summary>
     Task<(int X, int Y)> GetCursorPositionAsync();
 
     /// <summary>
-    /// 截图并调用 OmniParser 分析
-    /// </summary>
-    Task<OmniParserResult> AnalyzeScreenAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// 获取服务健康状态
-    /// </summary>
-    Task<RpaHealthStatus> GetHealthStatusAsync(CancellationToken ct = default);
-
-    /// <summary>
-    /// 启动服务（启动 OmniParser 服务等）
+    /// Starts the RPA service (e.g., OmniParser).
     /// </summary>
     Task StartAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// 停止服务
+    /// Stops the RPA service.
     /// </summary>
     Task StopAsync();
 }

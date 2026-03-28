@@ -3,7 +3,6 @@
 @inject ISnackbar Snackbar
 @inject ILogger<ConfigProfiles> Logger
 @using NanoBot.Core.Configuration
-@using NanoBot.Cli.Services
 @rendermode InteractiveServer
 
 <PageTitle>NanoBot - LLM Profile 管理</PageTitle>
@@ -117,7 +116,7 @@
         _isLoading = true;
         try
         {
-            var configPath = GetConfigPath();
+            var configPath = ConfigPaths.GetAgentConfigPath();
             if (File.Exists(configPath))
             {
                 _config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
@@ -184,7 +183,7 @@
         
         try
         {
-            var configPath = GetConfigPath();
+            var configPath = ConfigPaths.GetAgentConfigPath();
             await ConfigurationLoader.SaveAsync(configPath, _config, CancellationToken.None);
         }
         catch (Exception ex)
@@ -194,9 +193,4 @@
         }
     }
 
-    private string GetConfigPath()
-    {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
 }

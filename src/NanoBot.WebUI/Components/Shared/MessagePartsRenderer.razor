@@ -1,0 +1,114 @@
+@using NanoBot.WebUI.Components.Shared
+@using NanoBot.WebUI.Components.Parts
+@using NanoBot.Core.Sessions
+
+@* OpenCode 风格：按 Parts 顺序交错渲染（文本与工具交替显示） *@
+@if (Message.HasSessionParts)
+{
+    @* 使用有序 Parts 渲染 *@
+    foreach (var part in Message.SessionParts!)
+    {
+        @switch (part.Type)
+        {
+            case "text" when !string.IsNullOrWhiteSpace(part.Text):
+                <div class="nb-part-text">
+                    <MarkdownRenderer Content="@part.Text" />
+                </div>
+                break;
+            case "tool_call":
+                <div class="nb-tool-execution-card">
+                    <div class="nb-tool-io-header nb-tool-io-header-in">
+                        <MudIcon Icon="@Icons.Material.Filled.Input" Size="Size.Small" Class="mr-1" />
+                        <span>IN</span>
+                        <span class="nb-tool-io-name">@part.ToolName</span>
+                    </div>
+                    <div class="nb-tool-io-body">
+                        <pre><code>@ChatFormattingService.FormatToolPayload(part.Arguments ?? "{}")</code></pre>
+                    </div>
+                </div>
+                break;
+            case "tool_result":
+                <div class="@($"nb-tool-execution-card {(part.IsError ? "nb-tool-error" : "")}")">
+                    <div class="@($"nb-tool-io-header {(part.IsError ? "nb-tool-io-header-error" : "nb-tool-io-header-out")}")">
+                        <MudIcon Icon="@(part.IsError ? Icons.Material.Filled.ErrorOutline : Icons.Material.Filled.Output)" Size="Size.Small" Class="mr-1" />
+                        <span>OUT</span>
+                    </div>
+                    <div class="nb-tool-io-body">
+                        @if (ChatFormattingService.ShouldRenderToolOutputAsMarkdown(part.Output ?? ""))
+                        {
+                            <div class="nb-tool-io-markdown">
+                                <MarkdownRenderer Content="@ChatFormattingService.FormatToolOutput(part.Output ?? "")" />
+                            </div>
+                        }
+                        else
+                        {
+                            <pre><code>@ChatFormattingService.FormatToolOutput(part.Output ?? "")</code></pre>
+                        }
+                    </div>
+                </div>
+                break;
+        }
+    }
+}
+else if (Message.ToolExecutions.Any())
+{
+    @* 传统渲染方式：先工具执行列表，再文本内容 *@
+    <div class="nb-tool-execution-list">
+        @foreach (var toolExecution in Message.ToolExecutions)
+        {
+            <div class="nb-tool-execution-card">
+                <div class="nb-tool-io-header nb-tool-io-header-in">
+                    <MudIcon Icon="@Icons.Material.Filled.Input" Size="Size.Small" Class="mr-1" />
+                    <span>IN</span>
+                    <span class="nb-tool-io-name">@toolExecution.Name</span>
+                </div>
+                <div class="nb-tool-io-body">
+                    <pre><code>@ChatFormattingService.FormatToolPayload(toolExecution.Arguments)</code></pre>
+                </div>
+
+                <div class="@($"nb-tool-io-header {(toolExecution.IsError ? "nb-tool-io-header-error" : "nb-tool-io-header-out")}")">
+                    <MudIcon Icon="@(toolExecution.IsError ? Icons.Material.Filled.ErrorOutline : Icons.Material.Filled.Output)" Size="Size.Small" Class="mr-1" />
+                    <span>OUT</span>
+                </div>
+                <div class="nb-tool-io-body">
+                    @if (ChatFormattingService.ShouldRenderToolOutputAsMarkdown(toolExecution.Output))
+                    {
+                        <div class="nb-tool-io-markdown">
+                            <MarkdownRenderer Content="@ChatFormattingService.FormatToolOutput(toolExecution.Output)" />
+                        </div>
+                    }
+                    else
+                    {
+                        <pre><code>@ChatFormattingService.FormatToolOutput(toolExecution.Output)</code></pre>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    @* 显示消息内容 *@
+    @if (Message.Parts?.Any() == true)
+    {
+        foreach (var part in Message.Parts)
+        {
+            <MessagePartComponent Part="part" />
+        }
+    }
+    else if (!string.IsNullOrEmpty(Message.Content))
+    {
+        <MarkdownRenderer Content="@Message.Content" />
+    }
+}
+else
+{
+    @* 无工具执行，仅显示文本内容 *@
+    @if (!string.IsNullOrEmpty(Message.Content))
+    {
+        <MarkdownRenderer Content="@Message.Content" />
+    }
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public ChatMessage Message { get; set; } = null!;
+}

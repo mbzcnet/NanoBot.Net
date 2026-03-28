@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
-using System.Net;
-using System.Reflection;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -17,8 +16,8 @@ using NanoBot.Core.Skills;
 using NanoBot.Core.Subagents;
 using NanoBot.Core.Tools;
 using NanoBot.Core.Workspace;
-using NanoBot.Infrastructure.Memory;
 using NanoBot.Providers;
+using NanoBot.Agent.Services;
 
 namespace NanoBot.Agent;
 
@@ -35,18 +34,11 @@ public interface IAgentRuntime
 
 public sealed class AgentRuntime : IAgentRuntime, IDisposable
 {
-    private static readonly Regex MarkdownImageRegex = new(@"!\[(?<alt>[^\]]*)\]\((?<url>[^)\s]+)(?:\s+""[^""]*"")?\)", RegexOptions.Compiled);
-    private static readonly Regex DefaultSessionTitleRegex = new(@"^会话 \d{2}-\d{2} \d{2}:\d{2}$", RegexOptions.Compiled);
     private readonly ChatClientAgent _defaultAgent;
     private readonly IMessageBus _bus;
     private readonly ISessionManager _sessionManager;
-    private readonly IWorkspaceManager _workspace;
-    private readonly IMemoryStore? _memoryStore;
-    private readonly ISubagentManager? _subagentManager;
     private readonly ILogger<AgentRuntime>? _logger;
-    private readonly IDebugState? _debugState;
     private readonly string _sessionsDirectory;
-    private readonly int _memoryWindow;
     private CancellationTokenSource? _runningCts;
     private bool _disposed;
     private bool _stopped;
@@ -56,6 +48,11 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private readonly LlmConfig? _llmConfig;
     private readonly IServiceProvider? _serviceProvider;
     private readonly ConcurrentDictionary<string, ChatClientAgent> _profileAgents = new(StringComparer.Ordinal);
+
+    // Service instances
+    private readonly MessageProcessor _messageProcessor;
+    private readonly StreamingProcessor _streamingProcessor;
+    private readonly ISessionManager _innerSessionManager;
 
     // Command registry
     private readonly Dictionary<string, CommandDefinition> _commands = new(StringComparer.OrdinalIgnoreCase);
@@ -90,21 +87,90 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         _defaultAgent = agent ?? throw new ArgumentNullException(nameof(agent));
         _bus = bus ?? throw new ArgumentNullException(nameof(bus));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
-        _workspace = workspace ?? throw new ArgumentNullException(nameof(workspace));
-        _memoryStore = memoryStore;
-        _subagentManager = subagentManager;
-        _memoryWindow = memoryWindow;
+        _logger = logger;
         _chatClientFactory = chatClientFactory;
         _llmConfig = llmConfig;
         _serviceProvider = serviceProvider;
-        _logger = logger;
-        _debugState = debugState;
-        _sessionsDirectory = _workspace.GetSessionsPath();
+        _sessionsDirectory = workspace.GetSessionsPath();
 
         if (!Directory.Exists(_sessionsDirectory))
         {
             Directory.CreateDirectory(_sessionsDirectory);
         }
+
+        // Helper function to get ChatClient from agent
+        IChatClient? GetChatClient(string? sessionKey)
+        {
+            var agentForSession = GetAgentForSession(sessionKey ?? "");
+            return agentForSession.GetChatClientSafe();
+        }
+
+        // Helper function to get agent for session
+        ChatClientAgent GetAgent(string sessionKey) => GetAgentForSession(sessionKey);
+
+        // Helper to set session token
+        void SetSessionToken(string sessionKey)
+        {
+            if (_sessionTokens.TryGetValue(sessionKey, out var cts))
+            {
+                return;
+            }
+            cts = new CancellationTokenSource();
+            _sessionTokens.AddOrUpdate(sessionKey, _ => cts, (_, _) => cts);
+        }
+
+        // Create image processor
+        var imageProcessor = new ImageContentProcessor(workspace, null);
+
+        // Create memory consolidation service
+        var memoryService = new MemoryConsolidationService(
+            memoryStore,
+            workspace,
+            sessionManager,
+            memoryWindow,
+            GetChatClient,
+            null);
+
+        // Create session title manager
+        var titleManager = new SessionTitleManager(
+            sessionManager,
+            GetChatClient,
+            null);
+
+        // Create message processor
+        _messageProcessor = new MessageProcessor(
+            agent,
+            sessionManager,
+            memoryService,
+            titleManager,
+            imageProcessor,
+            GetAgent,
+            GetChatClient,
+            GetRuntimeMetadata,
+            null);
+
+        // Create streaming processor
+        _streamingProcessor = new StreamingProcessor(
+            agent,
+            sessionManager,
+            memoryService,
+            titleManager,
+            imageProcessor,
+            GetAgent,
+            GetChatClient,
+            SetSessionToken,
+#if DEBUG
+            debugState != null ? new Debug.DebugLogger(
+                debugState,
+                sessionManager,
+                llmConfig,
+                workspace,
+                null) : null,
+#endif
+            null);
+
+        // Store reference for command handlers
+        _innerSessionManager = sessionManager;
 
         // Register built-in commands
         RegisterCommand(new CommandDefinition(
@@ -114,7 +180,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             Handler: async (msg, ct) =>
             {
                 var existingSession = await _sessionManager.GetOrCreateSessionAsync(msg.SessionKey, ct);
-                return await HandleNewSessionCommandAsync(msg, existingSession, ct);
+                return await _messageProcessor.HandleNewSessionCommandAsync(msg, existingSession, ct);
             }
         ));
 
@@ -134,7 +200,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             Name: "/stop",
             Description: "Stop the current task",
             Immediate: true,
-            Handler: async (msg, ct) =>
+            Handler: async (msg, _) =>
             {
                 var sessionKey = msg.SessionKey;
                 await TryCancelSessionAsync(sessionKey);
@@ -155,10 +221,10 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
     private string BuildHelpText()
     {
-        var sb = new StringBuilder("🐈 nanobot commands:\n");
+        var sb = new StringBuilder("nanobot commands:\n");
         foreach (var cmd in _commands.Values.OrderBy(c => c.Name))
         {
-            sb.AppendLine($"{cmd.Name} — {cmd.Description}");
+            sb.AppendLine($"{cmd.Name} - {cmd.Description}");
         }
         return sb.ToString().TrimEnd();
     }
@@ -182,7 +248,16 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
 
                     try
                     {
-                        var response = await ProcessMessageAsync(msg, _runningCts.Token);
+                        // Try to handle as a command first
+                        var commandResult = await TryHandleCommandAsync(msg, _runningCts.Token);
+                        if (commandResult != null)
+                        {
+                            await _bus.PublishOutboundAsync(commandResult, _runningCts.Token);
+                            continue;
+                        }
+
+                        // Process through message processor
+                        var response = await _messageProcessor.ProcessMessageAsync(msg, _runningCts.Token);
                         if (response != null)
                         {
                             await _bus.PublishOutboundAsync(response, _runningCts.Token);
@@ -228,7 +303,9 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         string chatId = "direct",
         CancellationToken cancellationToken = default)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var sw = Stopwatch.StartNew();
+        var session = await _sessionManager.GetOrCreateSessionAsync(sessionKey, cancellationToken);
+        LogSessionDiagnostics(sessionKey, session, "before-direct");
         var msg = new InboundMessage
         {
             Channel = channel,
@@ -237,7 +314,16 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             Content = content
         };
 
-        var response = await ProcessMessageAsync(msg, cancellationToken, sessionKey);
+        var commandResult = await TryHandleCommandAsync(msg, cancellationToken);
+        if (commandResult != null)
+        {
+            sw.Stop();
+            _logger?.LogInformation("[TIMING] ProcessDirectAsync total: {ElapsedMs}ms", sw.ElapsedMilliseconds);
+            return commandResult.Content ?? string.Empty;
+        }
+
+        var response = await _messageProcessor.ProcessMessageAsync(msg, cancellationToken, sessionKey);
+        LogSessionDiagnostics(sessionKey, session, "after-direct");
         sw.Stop();
         _logger?.LogInformation("[TIMING] ProcessDirectAsync total: {ElapsedMs}ms", sw.ElapsedMilliseconds);
         return response?.Content ?? string.Empty;
@@ -250,975 +336,133 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         string chatId = "direct",
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var swTotal = System.Diagnostics.Stopwatch.StartNew();
-        var preview = content.Length > 80 ? content[..80] + "..." : content;
-        _logger?.LogInformation("[TIMING] Starting streaming request from {Channel}: {Preview}", channel, preview);
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var session = await _sessionManager.GetOrCreateSessionAsync(sessionKey, cancellationToken);
-        sw.Stop();
-        _logger?.LogInformation("[TIMING] GetOrCreateSessionAsync: {ElapsedMs}ms", sw.ElapsedMilliseconds);
-
-        // Create CancellationTokenSource for this session
-        var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _sessionTokens.AddOrUpdate(sessionKey, _ => sessionCts, (_, _) => sessionCts);
-
-        sw.Restart();
-        var userMessage = BuildUserMessage(content);
-        userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
-        _logger?.LogInformation("[TIMING] Create user message: {ElapsedMs}ms", sw.ElapsedMilliseconds);
-
-        // 自动提取标题：如果是第一条用户消息，使用消息内容作为标题
-        await TryAutoSetSessionTitleAsync(session, sessionKey, content, cancellationToken);
-
-        sw.Restart();
-        _logger?.LogInformation("[TIMING] About to call GetAgentForSession and RunStreamingAsync...");
-
-        try
+        LogSessionDiagnostics(sessionKey, session, "before-streaming");
+        var msg = new InboundMessage
         {
-            await foreach (var update in StreamWithToolHintsAsync(session, userMessage, sessionKey, sessionCts.Token))
-            {
-                yield return update;
-            }
+            Channel = channel,
+            SenderId = "user",
+            ChatId = chatId,
+            Content = content
+        };
 
-            sw.Stop();
-            _logger?.LogInformation("[TIMING] RunStreamingAsync completed: {ElapsedMs}ms", sw.ElapsedMilliseconds);
-        }
-        finally
-        {
-            _sessionTokens.TryRemove(sessionKey, out _);
-            sessionCts.Dispose();
-
-            try
-            {
-                await _sessionManager.SaveSessionAsync(session, sessionKey, CancellationToken.None);
-                _logger?.LogInformation("[TIMING] Session saved after streaming");
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Failed to save session after streaming for {SessionKey}", sessionKey);
-            }
-
-            _ = TryConsolidateMemoryAsync(session, sessionKey, CancellationToken.None).ContinueWith(t =>
-            {
-                if (t.IsFaulted)
-                    _logger?.LogWarning(t.Exception, "Background memory consolidation failed");
-            }, TaskContinuationOptions.OnlyOnFaulted);
-
-            swTotal.Stop();
-            _logger?.LogInformation("[TIMING] ProcessDirectStreamingAsync total: {ElapsedMs}ms", swTotal.ElapsedMilliseconds);
-        }
-    }
-
-    private async IAsyncEnumerable<AgentResponseUpdate> StreamWithToolHintsAsync(
-        AgentSession session,
-        ChatMessage userMessage,
-        string sessionKey,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
-    {
-        var swInner = System.Diagnostics.Stopwatch.StartNew();
-        var firstChunkReceived = false;
-
-        var agent = GetAgentForSession(sessionKey);
-        ToolExecutionContext.SetCurrentSessionKey(sessionKey);
-
-        // Debug logging: Start a new request log and collect LLM request info
-        var requestId = -1;
-        var debugLogCompleted = false;
-        if (_debugState?.IsDebugEnabled(sessionKey) == true)
-        {
-            requestId = await _debugState.StartRequestLogAsync(sessionKey, cancellationToken);
-        }
-
-        // Accumulate response content for debug logging (only current request)
-        var responseContentBuilder = new StringBuilder();
-
-        // Timing tracking for debug logging
-        var requestTime = DateTime.UtcNow;
-        DateTime? responseStartTime = null;
-        DateTime? responseEndTime = null;
-
-        try
-        {
-            // Build LLM request info for debugging
-            if (requestId > 0)
-            {
-                try
-                {
-                    await WriteLLMRequestDebugLogAsync(sessionKey, requestId, agent, session, userMessage, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to write debug log for LLM request");
-                }
-            }
-
-            // [REQUEST_LOG] 记录完整的LLM请求内容
-            try
-            {
-                var requestLog = new StringBuilder();
-                requestLog.AppendLine("\n=== LLM REQUEST DUMP ===");
-                
-                // 1. 获取Agent的ChatOptions
-                var chatClient = agent.GetChatClient();
-                requestLog.AppendLine($"[ChatClient Type]: {chatClient?.GetType().FullName ?? "null"}");
-                
-                // 2. 检查FunctionInvokingChatClient
-                var funcInvoker = chatClient?.GetService<FunctionInvokingChatClient>();
-                requestLog.AppendLine($"[FunctionInvokingChatClient]: {funcInvoker != null}");
-                requestLog.AppendLine($"[AdditionalTools Count]: {funcInvoker?.AdditionalTools?.Count ?? -1}");
-                
-                // 3. 获取AIContextProviders
-                requestLog.AppendLine("\n[AIContextProviders]:");
-                var aiContextProvidersField = typeof(ChatClientAgent).GetField("_aiContextProviders", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (aiContextProvidersField != null)
-                {
-                    var providers = aiContextProvidersField.GetValue(agent) as IEnumerable<AIContextProvider>;
-                    if (providers != null)
-                    {
-                        requestLog.AppendLine($"  Count: {providers.Count()}");
-                        foreach (var provider in providers)
-                        {
-                            requestLog.AppendLine($"  - {provider.GetType().Name}");
-                        }
-                    }
-                }
-                
-                // 4. 获取ChatHistoryProvider
-                var historyProviderField = typeof(ChatClientAgent).GetField("_chatHistoryProvider", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (historyProviderField != null)
-                {
-                    var historyProvider = historyProviderField.GetValue(agent) as ChatHistoryProvider;
-                    requestLog.AppendLine($"\n[ChatHistoryProvider]: {historyProvider?.GetType().Name ?? "null"}");
-                }
-                
-                // 5. 获取Options中的Tools
-                var optionsField = typeof(ChatClientAgent).GetField("_options", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (optionsField != null)
-                {
-                    var options = optionsField.GetValue(agent) as ChatClientAgentOptions;
-                    if (options?.ChatOptions != null)
-                    {
-                        requestLog.AppendLine($"\n[ChatOptions.Tools Count]: {options.ChatOptions.Tools?.Count ?? 0}");
-                        if (options.ChatOptions.Tools != null)
-                        {
-                            foreach (var tool in options.ChatOptions.Tools.Take(5)) // 只显示前5个
-                            {
-                                requestLog.AppendLine($"  - {tool.Name}");
-                            }
-                            if (options.ChatOptions.Tools.Count > 5)
-                            {
-                                requestLog.AppendLine($"  ... and {options.ChatOptions.Tools.Count - 5} more");
-                            }
-                        }
-                        requestLog.AppendLine($"\n[ChatOptions.Instructions Length]: {options.ChatOptions.Instructions?.Length ?? 0}");
-                    }
-                }
-                
-                // 6. 获取实际发送的消息
-                requestLog.AppendLine($"\n[User Message]: {userMessage.Text}");
-                
-                requestLog.AppendLine("\n=== END LLM REQUEST DUMP ===");
-                
-                _logger?.LogInformation(requestLog.ToString());
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "[REQUEST_LOG] Failed to dump LLM request");
-            }
-
-            await foreach (var update in agent.RunStreamingAsync([userMessage], session, cancellationToken: cancellationToken))
-            {
-                swInner.Stop();
-                if (!firstChunkReceived)
-                {
-                    firstChunkReceived = true;
-                    responseStartTime = DateTime.UtcNow;
-                    _logger?.LogInformation("[TIMING] ★★★ FIRST CHUNK from agent.RunStreamingAsync: {ElapsedMs}ms ★★★", swInner.ElapsedMilliseconds);
-                }
-                else
-                {
-                    _logger?.LogInformation("[TIMING] Subsequent chunk: {ElapsedMs}ms, text: {Text}", swInner.ElapsedMilliseconds, update.Text?.Length > 50 ? update.Text[..50] + "..." : update.Text);
-                }
-
-                var functionCalls = update.Contents.OfType<FunctionCallContent>().ToList();
-                if (functionCalls.Any())
-                {
-                    var toolHint = ToolHintFormatter.FormatToolHint(functionCalls);
-                    if (!string.IsNullOrEmpty(toolHint))
-                    {
-                        var toolHintMarkdown = WrapToolHintAsMarkdown(toolHint);
-                        var toolHintUpdate = new AgentResponseUpdate
-                        {
-                            Role = ChatRole.Assistant,
-                            Contents = { new TextContent(toolHintMarkdown) },
-                            AdditionalProperties = new()
-                        };
-                        toolHintUpdate.AdditionalProperties["_tool_hint"] = true;
-                        
-                        // 将 tool 信息序列化到 AdditionalProperties，供 WebUI 前端提取 ToolCallDetails
-                        var firstCall = functionCalls.First();
-                        var toolCallInfo = new Dictionary<string, object?>
-                        {
-                            ["name"] = firstCall.Name ?? "",
-                            ["callId"] = firstCall.CallId ?? "",
-                            ["arguments"] = firstCall.Arguments != null 
-                                ? JsonSerializer.Serialize(firstCall.Arguments) 
-                                : "{}"
-                        };
-                        toolHintUpdate.AdditionalProperties["_tool_call_info"] = JsonSerializer.Serialize(toolCallInfo);
-                        
-                        yield return toolHintUpdate;
-                    }
-                }
-
-                // Handle tool results (FunctionResultContent) - emit them for CLI display
-                var functionResults = update.Contents.OfType<FunctionResultContent>().ToList();
-                if (functionResults.Any())
-                {
-                    foreach (var result in functionResults)
-                    {
-                        var toolResultText = FormatToolResult(result);
-                        if (!string.IsNullOrEmpty(toolResultText))
-                        {
-                            var toolResultUpdate = new AgentResponseUpdate
-                            {
-                                Role = ChatRole.Tool,
-                                Contents = { new TextContent(toolResultText) },
-                                AdditionalProperties = new()
-                            };
-                            toolResultUpdate.AdditionalProperties["_tool_result"] = true;
-                            toolResultUpdate.AdditionalProperties["tool_call_id"] = result.CallId ?? "unknown";
-                            yield return toolResultUpdate;
-                        }
-                    }
-                }
-
-                // 提取快照图片上下文，通过 AdditionalProperties 传递，不注入到文本中
-                var imageContexts = ExtractSnapshotImageContext(update.Contents);
-                if (imageContexts != null && imageContexts.Length > 0)
-                {
-                    _logger?.LogInformation("Snapshot images extracted for session {SessionKey}: {Count} images", sessionKey, imageContexts.Length);
-                    var imageUpdate = new AgentResponseUpdate
-                    {
-                        Role = ChatRole.Assistant,
-                        Contents = { new TextContent(string.Empty) },
-                        AdditionalProperties = new()
-                    };
-                    imageUpdate.AdditionalProperties["_snapshot_images"] = imageContexts;
-                    yield return imageUpdate;
-                }
-
-                // Accumulate response text for debug logging (only current request)
-                if (!string.IsNullOrEmpty(update.Text))
-                {
-                    responseContentBuilder.Append(update.Text);
-                }
-
-                // Accumulate tool calls for debug logging
-                foreach (var call in functionCalls)
-                {
-                    var argsStr = call.Arguments != null ? JsonSerializer.Serialize(call.Arguments) : "{}";
-                    responseContentBuilder.AppendLine($"```\nact tool call {call.Name}\ncommand: {argsStr}\n```");
-                    responseContentBuilder.AppendLine();
-                }
-
-                swInner.Restart();
-                yield return update;
-            }
-
-            responseEndTime = DateTime.UtcNow;
-
-            // Debug logging: Log final LLM response after streaming completes
-            if (requestId > 0)
-            {
-                try
-                {
-                    var responseContent = responseContentBuilder.ToString();
-                    var timingInfo = new StringBuilder();
-                    timingInfo.AppendLine("\n---\n");
-                    timingInfo.AppendLine("## OUT - LLM Response");
-                    timingInfo.AppendLine();
-                    timingInfo.AppendLine("### Timing");
-                    timingInfo.AppendLine($"- **Request Time**: {requestTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
-                    timingInfo.AppendLine($"- **Response Start**: {(responseStartTime.HasValue ? responseStartTime.Value.ToString("yyyy-MM-dd HH:mm:ss.fff") : "N/A")} UTC");
-                    timingInfo.AppendLine($"- **Response End**: {responseEndTime:yyyy-MM-dd HH:mm:ss.fff} UTC");
-                    if (responseStartTime.HasValue && responseEndTime.HasValue)
-                    {
-                        var duration = responseEndTime.Value - responseStartTime.Value;
-                        timingInfo.AppendLine($"- **Duration**: {duration.TotalMilliseconds:F0}ms");
-                    }
-                    timingInfo.AppendLine();
-                    timingInfo.AppendLine("### Content");
-                    timingInfo.AppendLine();
-                    timingInfo.AppendLine(responseContent);
-                    
-                    await _debugState!.AppendToLogAsync(sessionKey, requestId, timingInfo.ToString(), cancellationToken);
-
-                    // Mark request as completed with [END] marker
-                    await _debugState.FinishRequestLogAsync(sessionKey, requestId, "Stream completed normally", cancellationToken);
-                    debugLogCompleted = true;
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to write debug log for LLM response");
-                }
-            }
-        }
-        finally
-        {
-            ToolExecutionContext.SetCurrentSessionKey(null);
-
-            // Ensure debug log is marked as ended even if an exception occurred
-            // Use sync version to avoid async operation being cancelled during process exit
-            if (requestId > 0 && _debugState?.IsDebugEnabled(sessionKey) == true && !debugLogCompleted)
-            {
-                try
-                {
-                    _debugState.FinishRequestLogSync(sessionKey, requestId, "Stream ended (abnormal/completed in finally)");
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogWarning(ex, "Failed to write debug log end marker");
-                }
-            }
-        }
-
-        swInner.Stop();
-        _logger?.LogInformation("[TIMING] RunStreamingAsync completed: {ElapsedMs}ms", swInner.ElapsedMilliseconds);
-    }
-
-    private async Task<OutboundMessage?> ProcessMessageAsync(
-        InboundMessage msg,
-        CancellationToken cancellationToken,
-        string? overrideSessionKey = null)
-    {
-        var preview = msg.Content.Length > 80 ? msg.Content[..80] + "..." : msg.Content;
-        _logger?.LogInformation("Processing message from {Channel}:{SenderId}: {Preview}", msg.Channel, msg.SenderId, preview);
-
-        var sessionKey = overrideSessionKey ?? msg.SessionKey;
-
-        if (msg.Channel == "system")
-        {
-            return await ProcessSystemMessageAsync(msg, cancellationToken);
-        }
-
-        // Try to handle as a command
         var commandResult = await TryHandleCommandAsync(msg, cancellationToken);
         if (commandResult != null)
         {
-            return commandResult;
+            yield return new AgentResponseUpdate(ChatRole.Assistant, commandResult.Content ?? string.Empty);
+            yield break;
         }
 
-        var session = await _sessionManager.GetOrCreateSessionAsync(sessionKey, cancellationToken);
-
-        // Set runtime metadata in session state
-        if (_runtimeMetadata.TryGetValue(sessionKey, out var metadata))
+        await foreach (var update in _streamingProcessor.ProcessDirectStreamingAsync(content, sessionKey, channel, chatId, cancellationToken))
         {
-            session.StateBag.SetValue("runtime:untrusted", JsonSerializer.Serialize(metadata));
+            yield return update;
         }
 
-        // Create or reuse CancellationTokenSource for this session
-        var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        _sessionTokens.AddOrUpdate(sessionKey, _ => sessionCts, (_, _) => sessionCts);
-
-        var imageUrls = msg.Media?.Where(static m => !string.IsNullOrWhiteSpace(m)).ToArray();
-        var userMessage = BuildUserMessage(msg.Content, imageUrls);
-        userMessage = userMessage.WithAgentRequestMessageSource(AgentRequestMessageSourceType.External, "user");
-
-        // 自动提取标题：如果是第一条用户消息，使用消息内容作为标题
-        await TryAutoSetSessionTitleAsync(session, sessionKey, msg.Content, cancellationToken);
-
-        AgentResponse response;
-        ToolExecutionContext.SetCurrentSessionKey(sessionKey);
-        try
-        {
-            var agent = GetAgentForSession(sessionKey);
-            response = await agent.RunAsync([userMessage], session, cancellationToken: sessionCts.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger?.LogInformation("Session {SessionKey} was cancelled", sessionKey);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Agent run failed for session {SessionKey}", sessionKey);
-            throw;
-        }
-        finally
-        {
-            ToolExecutionContext.SetCurrentSessionKey(null);
-            // Clean up session token
-            _sessionTokens.TryRemove(sessionKey, out _);
-            sessionCts.Dispose();
-        }
-
-        var responseText = response.Text;
-        if (string.IsNullOrWhiteSpace(responseText))
-        {
-            responseText = "I've completed processing but have no response to give.";
-        }
-
-        // 提取快照图片上下文，通过 Metadata 传递，不注入到文本中
-        var snapshotImageContexts = ExtractSnapshotImageContext(response.Messages.SelectMany(m => m.Contents));
-        Dictionary<string, object> messageMetadata = new();
-        if (msg.Metadata != null)
-        {
-            foreach (var kvp in msg.Metadata)
-            {
-                messageMetadata[kvp.Key] = kvp.Value;
-            }
-        }
-        if (snapshotImageContexts != null && snapshotImageContexts.Length > 0)
-        {
-            _logger?.LogInformation("Snapshot images extracted for non-streaming response session {SessionKey}: {Count} images", sessionKey, snapshotImageContexts.Length);
-            messageMetadata["_snapshot_images"] = snapshotImageContexts;
-        }
-
-        preview = responseText.Length > 120 ? responseText[..120] + "..." : responseText;
-        _logger?.LogInformation("Response to {Channel}:{SenderId}: {Preview}", msg.Channel, msg.SenderId, preview);
-
-        await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-
-        await TryConsolidateMemoryAsync(session, sessionKey, cancellationToken);
-
-        return new OutboundMessage
-        {
-            Channel = msg.Channel,
-            ChatId = msg.ChatId,
-            Content = responseText,
-            Metadata = messageMetadata
-        };
+        LogSessionDiagnostics(sessionKey, session, "after-streaming");
     }
 
-    /// <summary>
-    /// 从内容中提取快照图片上下文，不注入 Markdown 文本
-    /// </summary>
-    public record MarkdownImageContext(string Url, string AltText, int Index);
-
-    private MarkdownImageContext[]? ExtractSnapshotImageContext(IEnumerable<AIContent> contents)
+    public async Task<bool> TryCancelSessionAsync(string sessionKey)
     {
-        var images = new List<(string Url, int Index)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var index = 0;
+        var cancelled = false;
 
-        foreach (var content in contents)
+        if (_sessionTokens.TryGetValue(sessionKey, out var cts))
         {
-            if (content is not FunctionResultContent functionResult)
-            {
-                continue;
-            }
+            cts.Cancel();
+            _logger?.LogInformation("Cancelled session {SessionKey}", sessionKey);
+            cancelled = true;
+        }
 
-            var payload = GetFunctionResultPayload(functionResult);
-            if (string.IsNullOrWhiteSpace(payload))
+        // Cancel subagents for this session
+        if (_serviceProvider?.GetService<ISubagentManager>() is { } subagentManager)
+        {
+            if (subagentManager.CancelSession(sessionKey))
             {
-                continue;
-            }
-
-            try
-            {
-                using var document = JsonDocument.Parse(payload);
-                var rootElement = document.RootElement;
-
-                if (rootElement.ValueKind == JsonValueKind.String)
-                {
-                    var innerJson = rootElement.GetString();
-                    if (!string.IsNullOrWhiteSpace(innerJson))
-                    {
-                        try
-                        {
-                            using var innerDoc = JsonDocument.Parse(innerJson);
-                            ExtractSnapshotUrls(innerDoc.RootElement, seen, images, ref index);
-                        }
-                        catch (JsonException) { }
-                    }
-                }
-                else
-                {
-                    ExtractSnapshotUrls(rootElement, seen, images, ref index);
-                }
-            }
-            catch (JsonException)
-            {
+                _logger?.LogInformation("Cancelled subagents for session {SessionKey}", sessionKey);
+                cancelled = true;
             }
         }
 
-        if (images.Count == 0)
+        if (!cancelled)
+        {
+            _logger?.LogDebug("No active session found for {SessionKey}", sessionKey);
+        }
+
+        await Task.Delay(0);
+        return cancelled;
+    }
+
+    public void SetRuntimeMetadata(string sessionKey, IReadOnlyDictionary<string, string> metadata)
+    {
+        _runtimeMetadata[sessionKey] = metadata;
+        _logger?.LogDebug("Set runtime metadata for session {SessionKey}", sessionKey);
+    }
+
+    private IReadOnlyDictionary<string, string>? GetRuntimeMetadata(string sessionKey)
+    {
+        return _runtimeMetadata.TryGetValue(sessionKey, out var metadata) ? metadata : null;
+    }
+
+    internal string? GetSelectedProfileIdForSession(string sessionKey)
+    {
+        var profileId = _sessionManager.GetSessionProfileId(sessionKey);
+        if (string.IsNullOrEmpty(profileId))
+        {
+            return _llmConfig?.DefaultProfile;
+        }
+
+        return profileId;
+    }
+
+    private LlmProfile? GetEffectiveProfileForSession(string sessionKey)
+    {
+        if (_llmConfig == null)
         {
             return null;
         }
 
-        return images.Select((img, i) => new MarkdownImageContext(img.Url, $"snapshot-{i + 1}", i)).ToArray();
+        var selectedProfileId = GetSelectedProfileIdForSession(sessionKey) ?? _llmConfig.DefaultProfile ?? "default";
+        if (_llmConfig.Profiles.TryGetValue(selectedProfileId, out var selectedProfile))
+        {
+            return selectedProfile;
+        }
+
+        return _llmConfig.Profiles.TryGetValue("default", out var defaultProfile) ? defaultProfile : null;
     }
 
-    private void ExtractSnapshotUrls(JsonElement rootElement, HashSet<string> seen, List<(string Url, int Index)> images, ref int index)
+    internal int GetToolCountForSession(string sessionKey)
     {
-        if (rootElement.ValueKind != JsonValueKind.Object)
+        var agent = GetAgentForSession(sessionKey);
+        return agent.GetOptions()?.ChatOptions?.Tools?.Count ?? 0;
+    }
+
+    private void LogSessionDiagnostics(string sessionKey, AgentSession? session, string phase)
+    {
+        if (_logger == null || !_logger.IsEnabled(LogLevel.Information))
         {
             return;
         }
 
-        if (!TryGetJsonString(rootElement, "action", out var action) ||
-            string.IsNullOrWhiteSpace(action))
-        {
-            return;
-        }
-
-        if (!string.Equals(action, "snapshot", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(action, "capture", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        if (!TryGetJsonString(rootElement, "imagePath", out var imagePath) ||
-            string.IsNullOrWhiteSpace(imagePath))
-        {
-            return;
-        }
-
-        var imageUrl = ToSessionFileUrl(imagePath);
-        if (string.IsNullOrWhiteSpace(imageUrl) || !seen.Add(imageUrl!))
-        {
-            return;
-        }
-
-        images.Add((imageUrl, index++));
-    }
-
-    private static string WrapToolHintAsMarkdown(string toolHint)
-    {
-        // 直接返回 Markdown 格式
-        // 格式: [TOOL_CALL]tool_name("args")|||tool_name2("args")[/TOOL_CALL]
-        return $"\n{toolHint}\n";
-    }
-
-    private static bool TryGetJsonString(JsonElement element, string propertyName, out string? value)
-    {
-        value = null;
-        if (element.ValueKind != JsonValueKind.Object)
-        {
-            return false;
-        }
-
-        foreach (var property in element.EnumerateObject())
-        {
-            if (!string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
-            value = property.Value.ValueKind == JsonValueKind.String
-                ? property.Value.GetString()
-                : property.Value.GetRawText();
-            return true;
-        }
-
-        return false;
-    }
-
-    private static string? GetFunctionResultPayload(FunctionResultContent functionResult)
-    {
-        if (functionResult.Result == null)
-        {
-            return null;
-        }
-
-        if (functionResult.Result is string text)
-        {
-            return text;
-        }
-
-        if (functionResult.Result is JsonElement jsonElement)
-        {
-            return jsonElement.GetRawText();
-        }
-
-        try
-        {
-            return JsonSerializer.Serialize(functionResult.Result);
-        }
-        catch
-        {
-            return functionResult.Result.ToString();
-        }
-    }
-
-    /// <summary>
-    /// Formats a tool result for display in CLI
-    /// </summary>
-    private static string? FormatToolResult(FunctionResultContent functionResult)
-    {
-        var payload = GetFunctionResultPayload(functionResult);
-        if (string.IsNullOrWhiteSpace(payload))
-        {
-            return null;
-        }
-
-        // Try to parse as JSON to extract meaningful information
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            var root = document.RootElement;
-
-            // Handle different result formats
-            if (root.ValueKind == JsonValueKind.Object)
-            {
-                // Check for error
-                if (root.TryGetProperty("error", out var errorElement))
-                {
-                    var errorMsg = errorElement.GetString() ?? errorElement.GetRawText();
-                    return $"[ERROR] {errorMsg}";
-                }
-
-                // Check for content/output
-                if (root.TryGetProperty("content", out var contentElement))
-                {
-                    var content = contentElement.GetString() ?? contentElement.GetRawText();
-                    return Truncate(content, 200);
-                }
-
-                if (root.TryGetProperty("output", out var outputElement))
-                {
-                    var output = outputElement.GetString() ?? outputElement.GetRawText();
-                    return Truncate(output, 200);
-                }
-
-                // Check for action-based results (browser, etc.)
-                if (root.TryGetProperty("action", out var actionElement))
-                {
-                    var action = actionElement.GetString();
-                    if (root.TryGetProperty("url", out var urlElement))
-                    {
-                        var url = urlElement.GetString();
-                        return $"{action}: {url}";
-                    }
-                    if (root.TryGetProperty("imagePath", out var imagePathElement))
-                    {
-                        var imagePath = imagePathElement.GetString();
-                        return $"{action}: snapshot captured";
-                    }
-                    return action;
-                }
-
-                // For search results, show summary
-                if (root.TryGetProperty("results", out var resultsElement) && resultsElement.ValueKind == JsonValueKind.Array)
-                {
-                    var count = resultsElement.GetArrayLength();
-                    return $"Found {count} results";
-                }
-
-                // Default: show truncated JSON
-                var json = root.GetRawText();
-                return Truncate(json, 150);
-            }
-
-            // For string results
-            if (root.ValueKind == JsonValueKind.String)
-            {
-                var str = root.GetString() ?? payload;
-                return Truncate(str, 200);
-            }
-        }
-        catch (JsonException)
-        {
-            // Not valid JSON, return as-is
-        }
-
-        // Fallback: return truncated payload
-        return Truncate(payload, 200);
-    }
-
-    private static string Truncate(string value, int maxLength)
-    {
-        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
-        {
-            return value ?? "";
-        }
-        return value[..maxLength] + "…";
-    }
-
-    private string? ToSessionFileUrl(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        var normalized = imagePath.Replace('\\', '/');
-        if (normalized.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            return normalized;
-        }
-
-        if (Path.IsPathRooted(imagePath))
-        {
-            var sessionsRoot = _workspace.GetSessionsPath().Replace('\\', '/');
-            if (!normalized.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return $"/api/files/local?path={Uri.EscapeDataString(imagePath)}";
-            }
-
-            normalized = normalized[sessionsRoot.Length..].TrimStart('/');
-        }
-
-        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized["sessions/".Length..];
-        }
-
-        normalized = normalized.TrimStart('/');
-        return string.IsNullOrWhiteSpace(normalized) ? null : $"/api/files/sessions/{normalized}";
-    }
-
-    private string? ToLocalSessionFilePath(string? imagePath)
-    {
-        if (string.IsNullOrWhiteSpace(imagePath))
-        {
-            return null;
-        }
-
-        if (imagePath.StartsWith("/api/files/sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            var relative = imagePath["/api/files/sessions/".Length..].TrimStart('/');
-            return Path.Combine(_workspace.GetSessionsPath(), relative.Replace('/', Path.DirectorySeparatorChar));
-        }
-
-        if (Path.IsPathRooted(imagePath))
-        {
-            if (File.Exists(imagePath))
-            {
-                return imagePath;
-            }
-
-            var sessionsRoot = _workspace.GetSessionsPath();
-            if (imagePath.StartsWith(sessionsRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return imagePath;
-            }
-
-            return null;
-        }
-
-        var normalized = imagePath.Replace('\\', '/').TrimStart('/');
-        if (normalized.StartsWith("sessions/", StringComparison.OrdinalIgnoreCase))
-        {
-            normalized = normalized["sessions/".Length..];
-        }
-
-        var sessionsRoot2 = _workspace.GetSessionsPath();
-        var sessionPath = Path.Combine(sessionsRoot2, normalized.Replace('/', Path.DirectorySeparatorChar));
-        if (File.Exists(sessionPath))
-        {
-            return sessionPath;
-        }
-
-        var workspaceRoot = _workspace.GetWorkspacePath();
-        var workspacePath = Path.Combine(workspaceRoot, normalized.Replace('/', Path.DirectorySeparatorChar));
-        if (File.Exists(workspacePath))
-        {
-            return workspacePath;
-        }
-
-        return null;
-    }
-
-    private ChatMessage BuildUserMessage(string content, IEnumerable<string>? extraImageUrls = null)
-    {
-        var contents = new List<AIContent>();
-        if (!string.IsNullOrWhiteSpace(content))
-        {
-            contents.Add(new TextContent(content));
-        }
-
-        var imageUrls = ExtractMarkdownImageUrls(content);
-        if (extraImageUrls != null)
-        {
-            imageUrls.AddRange(extraImageUrls.Where(static u => !string.IsNullOrWhiteSpace(u)));
-        }
-
-        foreach (var imageUrl in imageUrls.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            if (!TryLoadImageContent(imageUrl, out var imageContent))
-            {
-                continue;
-            }
-
-            contents.Add(imageContent);
-        }
-
-        return contents.Count switch
-        {
-            0 => new ChatMessage(ChatRole.User, string.Empty),
-            1 when contents[0] is TextContent text => new ChatMessage(ChatRole.User, text.Text),
-            _ => new ChatMessage(ChatRole.User, contents)
-        };
-    }
-
-    private List<string> ExtractMarkdownImageUrls(string content)
-    {
-        if (string.IsNullOrWhiteSpace(content))
-        {
-            return [];
-        }
-
-        var urls = new List<string>();
-        var matches = MarkdownImageRegex.Matches(content);
-        foreach (Match match in matches)
-        {
-            if (!match.Success)
-            {
-                continue;
-            }
-
-            var url = match.Groups["url"].Value.Trim();
-            if (!string.IsNullOrWhiteSpace(url))
-            {
-                urls.Add(url);
-            }
-        }
-
-        return urls;
-    }
-
-    private bool TryLoadImageContent(string imageUrl, out DataContent imageContent)
-    {
-        imageContent = default!;
-        if (string.IsNullOrWhiteSpace(imageUrl))
-        {
-            return false;
-        }
-
-        var localPath = ToLocalSessionFilePath(imageUrl);
-        if (string.IsNullOrWhiteSpace(localPath) || !File.Exists(localPath))
-        {
-            return false;
-        }
-
-        try
-        {
-            var bytes = File.ReadAllBytes(localPath);
-            if (bytes.Length == 0)
-            {
-                return false;
-            }
-
-            var mediaType = GetImageMediaType(localPath);
-            imageContent = new DataContent(bytes, mediaType);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to load image content for LLM request: {ImageUrl}", imageUrl);
-            return false;
-        }
-    }
-
-    private string GetImageMediaType(string path)
-    {
-        return Path.GetExtension(path).ToLowerInvariant() switch
-        {
-            ".png" => "image/png",
-            ".jpg" => "image/jpeg",
-            ".jpeg" => "image/jpeg",
-            ".webp" => "image/webp",
-            ".gif" => "image/gif",
-            ".bmp" => "image/bmp",
-            ".svg" => "image/svg+xml",
-            _ => "image/png"
-        };
-    }
-
-    private async Task<OutboundMessage?> ProcessSystemMessageAsync(
-        InboundMessage msg,
-        CancellationToken cancellationToken)
-    {
-        _logger?.LogInformation("Processing system message from {SenderId}", msg.SenderId);
-
-        string originChannel;
-        string originChatId;
-
-        if (msg.ChatId.Contains(':'))
-        {
-            var parts = msg.ChatId.Split(':', 2);
-            originChannel = parts[0];
-            originChatId = parts[1];
-        }
-        else
-        {
-            originChannel = "cli";
-            originChatId = msg.ChatId;
-        }
-
-        var sessionKey = $"{originChannel}:{originChatId}";
-        var session = await _sessionManager.GetOrCreateSessionAsync(sessionKey, cancellationToken);
-
-        var systemMessage = new ChatMessage(ChatRole.User, $"[System: {msg.SenderId}] {msg.Content}");
-
-        AgentResponse response;
-        try
-        {
-            var agent = GetAgentForSession(sessionKey);
-            response = await agent.RunAsync([systemMessage], session, cancellationToken: cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Agent run failed for system message");
-            throw;
-        }
-
-        var responseText = response.Messages.FirstOrDefault()?.Text ?? "Background task completed.";
-
-        await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-
-        return new OutboundMessage
-        {
-            Channel = originChannel,
-            ChatId = originChatId,
-            Content = responseText
-        };
-    }
-
-    private async Task<OutboundMessage> HandleNewSessionCommandAsync(
-        InboundMessage msg,
-        AgentSession existingSession,
-        CancellationToken cancellationToken)
-    {
-        var sessionKey = msg.SessionKey;
-
-        if (_memoryStore != null)
-        {
-            try
-            {
-                var chatClient = GetChatClientFromAgent(sessionKey);
-                if (chatClient != null)
-                {
-                    var consolidator = new MemoryConsolidator(
-                        chatClient,
-                        _memoryStore,
-                        _workspace,
-                        _memoryWindow,
-                        null);
-
-                    var messages = GetSessionMessages(existingSession);
-                    await consolidator.ConsolidateAsync(messages, 0, archiveAll: true, cancellationToken);
-                    _logger?.LogInformation("Memory consolidation completed for /new command");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to consolidate memory for /new command");
-            }
-        }
-
-        await _sessionManager.ClearSessionAsync(sessionKey, cancellationToken);
-
-        return new OutboundMessage
-        {
-            Channel = msg.Channel,
-            ChatId = msg.ChatId,
-            Content = "New session started."
-        };
+        var selectedProfileId = GetSelectedProfileIdForSession(sessionKey) ?? _llmConfig?.DefaultProfile ?? "default";
+        var effectiveProfile = GetEffectiveProfileForSession(sessionKey);
+        var history = session?.GetAllMessages()?.ToList() ?? [];
+        var historyCount = history.Count;
+        var functionCallCount = history.SelectMany(m => m.Contents).Count(c => c is FunctionCallContent);
+        var functionResultCount = history.SelectMany(m => m.Contents).Count(c => c is FunctionResultContent);
+        var toolCount = GetToolCountForSession(sessionKey);
+
+        _logger.LogInformation(
+            "Agent runtime diagnostics ({Phase}) session={SessionKey} profile={ProfileId} provider={Provider} model={Model} apiBase={ApiBase} maxTokens={MaxTokens} tools={ToolCount} historyMessages={HistoryCount} functionCalls={FunctionCallCount} functionResults={FunctionResultCount}",
+            phase,
+            sessionKey,
+            selectedProfileId,
+            effectiveProfile?.Provider ?? "openai",
+            effectiveProfile?.Model ?? "<unknown>",
+            effectiveProfile?.ApiBase,
+            effectiveProfile?.MaxTokens,
+            toolCount,
+            historyCount,
+            functionCallCount,
+            functionResultCount);
     }
 
     private async Task<OutboundMessage?> TryHandleCommandAsync(InboundMessage msg, CancellationToken cancellationToken)
@@ -1233,321 +477,39 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             return null;
         }
 
-        // Immediate commands are handled without agent processing
-        if (command.Immediate)
-        {
-            return await command.Handler(msg, cancellationToken);
-        }
-
-        // Non-immediate commands (like /new) are also handled directly
-        // This is for backward compatibility - /new needs session access
         return await command.Handler(msg, cancellationToken);
     }
 
-    public async Task<bool> TryCancelSessionAsync(string sessionKey)
-    {
-        var cancelled = false;
-
-        // Cancel the agent task
-        if (_sessionTokens.TryGetValue(sessionKey, out var cts))
-        {
-            cts.Cancel();
-            _logger?.LogInformation("Cancelled session {SessionKey}", sessionKey);
-            cancelled = true;
-        }
-
-        // Cancel subagents for this session
-        if (_subagentManager != null)
-        {
-            if (_subagentManager.CancelSession(sessionKey))
-            {
-                _logger?.LogInformation("Cancelled subagents for session {SessionKey}", sessionKey);
-                cancelled = true;
-            }
-        }
-
-        if (!cancelled)
-        {
-            _logger?.LogDebug("No active session found for {SessionKey}", sessionKey);
-        }
-
-        await Task.Delay(0); // Allow cancellation to propagate
-        return cancelled;
-    }
-
-    public void SetRuntimeMetadata(string sessionKey, IReadOnlyDictionary<string, string> metadata)
-    {
-        _runtimeMetadata[sessionKey] = metadata;
-        _logger?.LogDebug("Set runtime metadata for session {SessionKey}", sessionKey);
-    }
-
-    public IReadOnlyDictionary<string, string>? GetRuntimeMetadata(string sessionKey)
-    {
-        return _runtimeMetadata.TryGetValue(sessionKey, out var metadata) ? metadata : null;
-    }
-
-    private IChatClient? GetChatClientFromAgent(string? sessionKey = null)
-    {
-        if (!string.IsNullOrEmpty(sessionKey))
-        {
-            var agent = GetAgentForSession(sessionKey);
-            
-            if (agent == null)
-            {
-                return null;
-            }
-            
-            var client = agent.GetChatClient();
-            
-            if (client == null)
-            {
-                // 尝试直接反射获取
-                var chatClientField = typeof(Microsoft.Agents.AI.ChatClientAgent)
-                    .GetField("_chatClient", BindingFlags.NonPublic | BindingFlags.Instance);
-                if (chatClientField != null)
-                {
-                    client = chatClientField.GetValue(agent) as IChatClient;
-                }
-            }
-            
-            return client;
-        }
-        
-        var defaultClient = _defaultAgent?.GetChatClient();
-        return defaultClient;
-    }
-
-    private List<ChatMessage> GetSessionMessages(AgentSession session)
-    {
-        return session.GetAllMessages().ToList();
-    }
-
-    private async Task TryConsolidateMemoryAsync(AgentSession session, string sessionKey, CancellationToken cancellationToken)
-    {
-        if (_memoryStore == null)
-            return;
-
-        try
-        {
-            var messages = GetSessionMessages(session);
-            if (messages.Count <= _memoryWindow)
-            {
-                _logger?.LogDebug("Memory consolidation skipped: {Count} messages <= window {Window}", messages.Count, _memoryWindow);
-                return;
-            }
-
-            var chatClient = GetChatClientFromAgent(sessionKey);
-            if (chatClient == null)
-            {
-                _logger?.LogWarning("Could not get ChatClient for memory consolidation");
-                return;
-            }
-
-            var consolidator = new MemoryConsolidator(
-                chatClient,
-                _memoryStore,
-                _workspace,
-                _memoryWindow);
-
-            _logger?.LogInformation("Starting memory consolidation for {Count} messages", messages.Count);
-            var lastConsolidated = _sessionManager.GetLastConsolidated(sessionKey);
-            var newLastConsolidated = await consolidator.ConsolidateAsync(messages, lastConsolidated, archiveAll: false, cancellationToken);
-
-            if (newLastConsolidated.HasValue)
-            {
-                _sessionManager.SetLastConsolidated(sessionKey, newLastConsolidated.Value);
-                await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-            }
-            _logger?.LogInformation("Memory consolidation completed");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Memory consolidation failed");
-        }
-    }
-
-    private async Task TryAutoSetSessionTitleAsync(AgentSession session, string sessionKey, string userContent, CancellationToken cancellationToken)
-    {
-        try
-        {
-            // 获取当前标题
-            var currentTitle = _sessionManager.GetSessionTitle(sessionKey);
-
-            // 如果标题已设置（非空且不是默认格式），则不自动更新
-            if (!string.IsNullOrEmpty(currentTitle) && !IsDefaultSessionTitle(currentTitle))
-            {
-                return;
-            }
-
-            // 获取会话中的消息数量
-            var messages = GetSessionMessages(session);
-
-            // 如果这是第一条用户消息（session 中还没有消息），则使用内容作为标题
-            if (messages.Count == 0)
-            {
-                string newTitle;
-                
-                if (userContent.Length > 50)
-                {
-                    // 如果消息超过 50 字符，使用 LLM 生成标题
-                    newTitle = await GenerateTitleWithLLMAsync(sessionKey, userContent, cancellationToken);
-                    
-                    // 如果 LLM 生成失败，回退到截断方式
-                    if (string.IsNullOrWhiteSpace(newTitle))
-                    {
-                        newTitle = userContent.Substring(0, 50) + "...";
-                    }
-                }
-                else
-                {
-                    // 短消息直接使用截断方式
-                    newTitle = userContent;
-                }
-
-                if (!string.IsNullOrWhiteSpace(newTitle))
-                {
-                    _sessionManager.SetSessionTitle(sessionKey, newTitle);
-                    // 立即保存以更新文件中的标题
-                    await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-                    _logger?.LogInformation("Auto-set session title for {SessionKey} to: {Title}", sessionKey, newTitle);
-                }
-            }
-            // 如果标题仍为默认值，但会话中已有消息，用第一条用户消息回填
-            else if (messages.Count > 0 && IsDefaultSessionTitle(currentTitle))
-            {
-                var firstUserMessage = messages.FirstOrDefault(m => m.Role == ChatRole.User);
-                if (firstUserMessage?.Text is not null)
-                {
-                    var firstContent = firstUserMessage.Text;
-                    string newTitle;
-
-                    if (firstContent.Length > 50)
-                    {
-                        newTitle = await GenerateTitleWithLLMAsync(sessionKey, firstContent, cancellationToken);
-                        if (string.IsNullOrWhiteSpace(newTitle))
-                        {
-                            newTitle = firstContent.Substring(0, 50) + "...";
-                        }
-                    }
-                    else
-                    {
-                        newTitle = firstContent;
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(newTitle))
-                    {
-                        _sessionManager.SetSessionTitle(sessionKey, newTitle);
-                        await _sessionManager.SaveSessionAsync(session, sessionKey, cancellationToken);
-                        _logger?.LogInformation("Backfilled session title for {SessionKey} to: {Title}", sessionKey, newTitle);
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to auto-set session title for {SessionKey}", sessionKey);
-        }
-    }
-
-    private async Task<string> GenerateTitleWithLLMAsync(string sessionKey, string userContent, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var chatClient = GetChatClientFromAgent(sessionKey);
-            if (chatClient == null)
-            {
-                _logger?.LogWarning("No chat client available for session {SessionKey}", sessionKey);
-                return string.Empty;
-            }
-
-            var systemPrompt = "You are a title generator. Generate a very short title (max 10 characters, Chinese OK) for the user's message. ONLY output the title, nothing else. No punctuation, no quotes, no explanation.";
-            
-            var response = await chatClient.GetResponseAsync(
-                [
-                    new ChatMessage(ChatRole.System, systemPrompt),
-                    new ChatMessage(ChatRole.User, userContent)
-                ],
-                cancellationToken: cancellationToken);
-
-            var title = response.Messages.FirstOrDefault()?.Text?.Trim() ?? string.Empty;
-            
-            // 清理标题：移除可能的标点符号和引号
-            title = title.Trim('"', '\'', '。', '.', '！', '!', '？', '?', ' ', '\n', '\r');
-            
-            // 如果标题为空或和原消息完全一样，说明 LLM 没有正确处理，回退到截断
-            if (string.IsNullOrWhiteSpace(title) || title == userContent)
-            {
-                return string.Empty; // 信号回退
-            }
-            
-            return title;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogWarning(ex, "Failed to generate title with LLM for session {SessionKey}", sessionKey);
-            return string.Empty;
-        }
-    }
-
     /// <summary>
-    /// 检查标题是否为默认格式（如"会话 03-16 14:30"）
-    /// </summary>
-    private static bool IsDefaultSessionTitle(string title)
-    {
-        return !string.IsNullOrEmpty(title) && DefaultSessionTitleRegex.IsMatch(title);
-    }
-
-    public void Dispose()
-    {
-        if (_disposed) return;
-
-        Stop();
-        _runningCts?.Dispose();
-        _disposed = true;
-
-        _logger?.LogInformation("Agent runtime disposed");
-    }
-
-    /// <summary>
-    /// 清除 agent 缓存，使配置修改后强制重新创建 agent
-    /// </summary>
-    public void ClearAgentCache()
-    {
-        _profileAgents.Clear();
-        _logger?.LogInformation("Agent cache cleared");
-    }
-
-    /// <summary>
-    /// 获取指定 profile 的 ChatClientAgent，如果未指定则使用默认 agent
+    /// Gets the ChatClientAgent for a session, considering profile settings.
     /// </summary>
     private ChatClientAgent GetAgentForSession(string sessionKey)
     {
-        // 如果没有配置 profile 支持，直接返回默认 agent
         if (_chatClientFactory == null || _llmConfig == null)
         {
             return _defaultAgent;
         }
 
-        // 获取会话的 profile ID
         var profileId = _sessionManager.GetSessionProfileId(sessionKey);
         if (string.IsNullOrEmpty(profileId))
         {
+            _logger?.LogDebug("Using default agent for session {SessionKey} because no profile is bound", sessionKey);
             return _defaultAgent;
         }
 
-        // 检查是否是默认 profile
         if (profileId.Equals(_llmConfig.DefaultProfile, StringComparison.OrdinalIgnoreCase) ||
             (string.IsNullOrEmpty(_llmConfig.DefaultProfile) && profileId == "default"))
         {
+            _logger?.LogDebug("Using default agent for session {SessionKey} with profile {ProfileId}", sessionKey, profileId);
             return _defaultAgent;
         }
 
-        // 从缓存获取或创建该 profile 的 agent
+        _logger?.LogDebug("Using profile-specific agent for session {SessionKey} with profile {ProfileId}", sessionKey, profileId);
         return _profileAgents.GetOrAdd(profileId, _ => CreateAgentForProfile(profileId));
     }
 
     /// <summary>
-    /// 为指定 profile 创建新的 ChatClientAgent
+    /// Creates a new ChatClientAgent for a specific profile.
     /// </summary>
     private ChatClientAgent CreateAgentForProfile(string profileId)
     {
@@ -1579,6 +541,9 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             var memoryStore = _serviceProvider.GetService<IMemoryStore>();
             var loggerFactory = _serviceProvider.GetService<ILoggerFactory>();
             var agentConfig = _serviceProvider.GetService<AgentConfig>();
+            var tools = _serviceProvider.GetServices<AITool>().ToList();
+            var memoryWindow = agentConfig?.Memory?.MemoryWindow ?? 50;
+            var maxInstructionChars = agentConfig?.Memory?.MaxInstructionChars ?? 0;
 
             var agentOptions = new AgentOptions
             {
@@ -1586,16 +551,27 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 MaxTokens = profile.MaxTokens
             };
 
+            _logger?.LogInformation(
+                "Creating profile agent details profile={ProfileId} provider={Provider} model={Model} apiBase={ApiBase} maxTokens={MaxTokens} tools={ToolCount} memoryWindow={MemoryWindow} maxInstructionChars={MaxInstructionChars}",
+                profileId,
+                profile.Provider ?? "openai",
+                profile.Model,
+                profile.ApiBase,
+                profile.MaxTokens,
+                tools.Count,
+                memoryWindow,
+                maxInstructionChars);
+
             return NanoBotAgentFactory.Create(
                 chatClient,
                 workspace,
                 skillsLoader,
-                null, // tools will be resolved from DI in factory
+                tools,
                 loggerFactory,
                 agentOptions,
                 memoryStore,
-                _memoryWindow,
-                0,
+                memoryWindow,
+                maxInstructionChars,
                 agentConfig?.Timezone);
         }
         catch (Exception ex)
@@ -1605,175 +581,29 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         }
     }
 
-    private async Task WriteLLMRequestDebugLogAsync(
-        string sessionKey,
-        int requestId,
-        ChatClientAgent agent,
-        AgentSession session,
-        ChatMessage userMessage,
-        CancellationToken cancellationToken)
+    public void ClearAgentCache()
     {
-        var sb = new StringBuilder();
-
-        // Get LLM configuration info
-        var profileId = _sessionManager.GetSessionProfileId(sessionKey);
-        LlmProfile? profile = null;
-        if (!string.IsNullOrEmpty(profileId) && _llmConfig?.Profiles != null)
-        {
-            _llmConfig.Profiles.TryGetValue(profileId, out profile);
-        }
-
-        sb.AppendLine("### LLM Config");
-        if (profile != null)
-        {
-            sb.AppendLine($"- **Model**: {profile.Model}");
-            sb.AppendLine($"- **Provider**: {profile.Provider ?? "openai"}");
-            sb.AppendLine($"- **API Base**: {profile.ApiBase ?? "(default)"}");
-            sb.AppendLine($"- **Temperature**: {profile.Temperature}");
-            sb.AppendLine($"- **Max Tokens**: {profile.MaxTokens}");
-        }
-        else
-        {
-            sb.AppendLine("- *(Using default agent configuration)*");
-        }
-        sb.AppendLine();
-
-        // Get system prompt / instructions from agent
-        var instructions = NanoBotAgentFactory.BuildInstructions(_workspace, null);
-        sb.AppendLine("### System Prompt (Instructions)");
-        sb.AppendLine("```");
-        sb.AppendLine(instructions);
-        sb.AppendLine("```");
-        sb.AppendLine();
-
-        // Get tools from FunctionInvokingChatClient.AdditionalTools
-        var toolsLogged = false;
-        var chatClient = agent.GetChatClient();
-        if (chatClient != null)
-        {
-            try
-            {
-                var functionInvoker = chatClient.GetService<FunctionInvokingChatClient>();
-                if (functionInvoker?.AdditionalTools != null && functionInvoker.AdditionalTools.Count > 0)
-                {
-                    sb.AppendLine("### Tools (from FunctionInvokingChatClient.AdditionalTools)");
-                    foreach (var tool in functionInvoker.AdditionalTools)
-                    {
-                        var toolName = tool.Name ?? "unknown";
-                        var toolDesc = (tool.Description ?? "").Split('\n')[0];
-                        sb.AppendLine($"- **{toolName}**: {toolDesc}");
-                    }
-                    sb.AppendLine();
-                    toolsLogged = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Failed to get FunctionInvokingChatClient from ChatClient");
-            }
-        }
-
-        // Fallback: get tools directly from DI IReadOnlyList<AITool>
-        if (!toolsLogged && _serviceProvider != null)
-        {
-            try
-            {
-                var aiTools = _serviceProvider.GetService<IReadOnlyList<AITool>>();
-                if (aiTools != null && aiTools.Count > 0)
-                {
-                    sb.AppendLine("### Tools (from IReadOnlyList<AITool> DI)");
-                    foreach (var tool in aiTools)
-                    {
-                        var toolName = tool.Name ?? "unknown";
-                        var toolDesc = (tool.Description ?? "").Split('\n')[0];
-                        sb.AppendLine($"- **{toolName}**: {toolDesc}");
-                    }
-                    sb.AppendLine();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogDebug(ex, "Failed to get IReadOnlyList<AITool> from service provider");
-            }
-        }
-
-        // Build messages
-        sb.AppendLine("### Messages");
-        sb.AppendLine("| Time | Role | Content |");
-        sb.AppendLine("|------|------|---------|");
-
-        foreach (var msg in session.GetAllMessages())
-        {
-            var role = msg.Role.Value ?? "unknown";
-            var text = TruncateForDebug(msg.Text, 200);
-            var hasFunctionCalls = msg.Contents.Any(c => c is FunctionCallContent);
-            var functionCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
-            var functionSummary = "";
-
-            if (hasFunctionCalls && functionCalls.Any())
-            {
-                functionSummary = " [tool_calls: " + string.Join(", ", functionCalls.Select(f => f.Name ?? "?")) + "]";
-            }
-
-            // Use current UTC time as timestamp since ChatMessage doesn't have timestamp
-            var timestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
-            sb.AppendLine($"| {timestamp} | {role} | {EscapeForMarkdown(text)}{functionSummary} |");
-        }
-
-        var userText = TruncateForDebug(userMessage.Text, 200);
-        var userHasFunctionCalls = userMessage.Contents.Any(c => c is FunctionCallContent);
-        var userTimestamp = DateTime.UtcNow.ToString("HH:mm:ss.fff");
-        sb.AppendLine($"| {userTimestamp} | user | {EscapeForMarkdown(userText)}{(userHasFunctionCalls ? " [tool_calls]" : "")} |");
-
-        await _debugState!.AppendToLogAsync(sessionKey, requestId, sb.ToString(), cancellationToken);
+        _profileAgents.Clear();
+        _logger?.LogInformation("Cleared cached profile agents");
     }
 
-    private string CollectResponseContent(AgentSession session)
+    public void Dispose()
     {
-        var sb = new StringBuilder();
-
-        var messages = session.GetAllMessages().ToList();
-        var recentMessages = messages.Skip(Math.Max(0, messages.Count - 10));
-
-        foreach (var msg in recentMessages)
+        if (_disposed)
         {
-            var role = msg.Role.Value ?? "unknown";
-            var text = msg.Text ?? "";
-
-            if (role == "assistant" && !string.IsNullOrEmpty(text))
-            {
-                sb.AppendLine(text);
-                sb.AppendLine();
-            }
-
-            var functionCalls = msg.Contents.OfType<FunctionCallContent>().ToList();
-            foreach (var call in functionCalls)
-            {
-                var argsStr = call.Arguments != null ? JsonSerializer.Serialize(call.Arguments) : "{}";
-                sb.AppendLine($"[tool_call: {call.Name} {argsStr}]");
-                sb.AppendLine();
-            }
+            return;
         }
 
-        return sb.ToString();
-    }
+        _disposed = true;
+        Stop();
 
-    private static string TruncateForDebug(string? text, int maxLength)
-    {
-        if (string.IsNullOrEmpty(text))
-            return "";
+        foreach (var cts in _sessionTokens.Values)
+        {
+            cts.Dispose();
+        }
 
-        return text.Length <= maxLength ? text : text[..maxLength] + "...";
-    }
-
-    private static string EscapeForMarkdown(string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return "";
-
-        return text
-            .Replace("|", "\\|")
-            .Replace("\n", " ")
-            .Replace("**", "\\*\\*");
+        _sessionTokens.Clear();
+        ClearAgentCache();
+        _runningCts?.Dispose();
     }
 }

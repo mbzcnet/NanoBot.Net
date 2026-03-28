@@ -1,45 +1,25 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using NanoBot.Core.Configuration;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace NanoBot.Cli.Commands;
 
 public abstract class NanoBotCommandBase : ICliCommand
 {
-    protected static IServiceProvider? SharedServiceProvider { get; private set; }
-    protected static AgentConfig? SharedConfig { get; private set; }
-    protected static string? SharedConfigPath { get; private set; }
+    protected CliCommandContext Context { get; }
 
-    public static void Initialize(IServiceProvider provider, AgentConfig config, string? configPath = null)
+    protected NanoBotCommandBase(CliCommandContext context)
     {
-        SharedServiceProvider = provider;
-        SharedConfig = config;
-        SharedConfigPath = configPath;
+        Context = context;
     }
 
     public abstract string Name { get; }
     public abstract string Description { get; }
     public abstract Command CreateCommand();
 
-    protected T GetService<T>() where T : notnull
-    {
-        return SharedServiceProvider!.GetRequiredService<T>();
-    }
+    protected T GetService<T>() where T : notnull => Context.GetService<T>();
 
-    protected AgentConfig GetConfig()
-    {
-        return SharedConfig!;
-    }
+    protected AgentConfig GetConfig() => Context.Config;
 
-    protected string GetConfigPath()
-    {
-        if (!string.IsNullOrEmpty(SharedConfigPath))
-        {
-            return Path.GetFullPath(SharedConfigPath);
-        }
-
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
+    protected string GetConfigPath() => Context.GetResolvedConfigPath();
 }

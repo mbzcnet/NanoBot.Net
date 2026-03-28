@@ -105,13 +105,27 @@ public class MemoryConsolidator
 
             if (call?.Arguments is not IDictionary<string, object?> args)
             {
-                _logger?.LogWarning("Memory consolidation: LLM did not call save_memory, skipping");
-                return null;
+                _logger?.LogWarning("Memory consolidation: LLM did not call save_memory, falling back to raw archive");
+                await RawArchiveAsync(oldMessages, cancellationToken);
+                return archiveAll ? 0 : messages.Count - keepCount;
             }
 
+            var historyEntry = args.TryGetValue("history_entry", out var he) ? he?.ToString() : null;
             var memoryUpdate = args.TryGetValue("memory_update", out var mu) ? mu?.ToString() : null;
 
-            if (!string.IsNullOrWhiteSpace(memoryUpdate) && memoryUpdate != currentMemory)
+            // Validate required fields
+            if (string.IsNullOrWhiteSpace(historyEntry) || string.IsNullOrWhiteSpace(memoryUpdate))
+            {
+                _logger?.LogWarning("Memory consolidation: missing required fields in save_memory call, falling back to raw archive");
+                await RawArchiveAsync(oldMessages, cancellationToken);
+                return archiveAll ? 0 : messages.Count - keepCount;
+            }
+
+            // Append history entry
+            await AppendHistoryEntryAsync(historyEntry, cancellationToken);
+
+            // Update memory file if changed
+            if (memoryUpdate != currentMemory)
             {
                 await WriteMemoryAsync(memoryUpdate!, cancellationToken);
             }
@@ -184,5 +198,50 @@ Arguments:
         }
         await File.WriteAllTextAsync(memoryPath, content, cancellationToken);
         _logger?.LogInformation("Memory file updated: {Path}", memoryPath);
+    }
+
+    private async Task AppendHistoryEntryAsync(string entry, CancellationToken cancellationToken)
+    {
+        var historyPath = _workspace.GetHistoryFile();
+        var directory = Path.GetDirectoryName(historyPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        // Format entry with timestamp prefix if not already present
+        var formattedEntry = entry.Trim();
+        if (!formattedEntry.StartsWith("["))
+        {
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            formattedEntry = $"[{timestamp}] {formattedEntry}";
+        }
+
+        // Append with blank line separator (matches original Python implementation)
+        await File.AppendAllTextAsync(historyPath, formattedEntry + "\n\n", cancellationToken);
+        _logger?.LogInformation("History entry appended: {Length} chars", formattedEntry.Length);
+    }
+
+    private async Task RawArchiveAsync(IList<ChatMessage> messages, CancellationToken cancellationToken)
+    {
+        // Fallback when LLM fails - dump raw messages to HISTORY.md
+        var sb = new StringBuilder();
+        sb.AppendLine($"[RAW] {messages.Count} messages");
+
+        foreach (var message in messages)
+        {
+            if (string.IsNullOrWhiteSpace(message.Text))
+            {
+                continue;
+            }
+
+            var timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm");
+            var role = message.Role == ChatRole.User ? "USER" : "ASSISTANT";
+            var text = FilterBase64Content(message.Text);
+            sb.AppendLine($"[{timestamp}] {role}: {text}");
+        }
+
+        await AppendHistoryEntryAsync(sb.ToString(), cancellationToken);
+        _logger?.LogWarning("Memory consolidation degraded: raw-archived {Count} messages", messages.Count);
     }
 }

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using NanoBot.Core.Configuration;
 using NanoBot.Providers.Decorators;
 using OpenAI.Chat;
+using System.Net;
 
 namespace NanoBot.Providers;
 
@@ -108,8 +109,9 @@ public class ChatClientFactory : IChatClientFactory
             ? (Environment.GetEnvironmentVariable(spec.EnvKey) ?? "")
             : apiKey;
         var resolvedApiBase = apiBase ?? spec.DefaultApiBase;
+        var normalizedApiBase = NormalizeApiBaseForConnectivity(resolvedApiBase);
 
-        _logger.LogInformation("Creating ChatClient for provider {Provider} with model {Model}", provider, model);
+        _logger.LogInformation("Creating ChatClient for provider {Provider} with model {Model} apiBase={ApiBase} normalizedApiBase={NormalizedApiBase}", provider, model, resolvedApiBase, normalizedApiBase);
 
         var resolvedModel = ResolveModel(model, spec.LiteLLMPrefix);
 
@@ -139,7 +141,7 @@ public class ChatClientFactory : IChatClientFactory
 
         var clientOptions = new OpenAI.OpenAIClientOptions 
         { 
-            Endpoint = new Uri(resolvedApiBase),
+            Endpoint = new Uri(normalizedApiBase),
             NetworkTimeout = networkTimeout
         };
 
@@ -163,6 +165,48 @@ public class ChatClientFactory : IChatClientFactory
 
         var interimClient = new InterimTextRetryChatClient(sanitizingClient, _logger);
         return new EmptyChoicesProtectionChatClient(interimClient);
+    }
+
+    private string NormalizeApiBaseForConnectivity(string apiBase)
+    {
+        if (!Uri.TryCreate(apiBase, UriKind.Absolute, out var uri))
+        {
+            return apiBase;
+        }
+
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+        {
+            return apiBase;
+        }
+
+        if (IPAddress.TryParse(uri.Host, out _))
+        {
+            return apiBase;
+        }
+
+        try
+        {
+            var addresses = Dns.GetHostAddresses(uri.Host);
+            var ipv4 = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+            if (ipv4 == null)
+            {
+                return apiBase;
+            }
+
+            var builder = new UriBuilder(uri)
+            {
+                Host = ipv4.ToString()
+            };
+
+            var normalized = builder.Uri.ToString();
+            _logger.LogInformation("Resolved apiBase host {Host} to IPv4 {IPv4} for connectivity; normalizedApiBase={NormalizedApiBase}", uri.Host, ipv4, normalized);
+            return normalized;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to normalize apiBase host {Host}; using original apiBase {ApiBase}", uri.Host, apiBase);
+            return apiBase;
+        }
     }
 
     private static string ResolveModel(string model, string? liteLLMPrefix)

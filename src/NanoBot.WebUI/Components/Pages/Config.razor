@@ -4,7 +4,6 @@
 @inject NavigationManager NavigationManager
 @inject NanoBot.Agent.IAgentRuntime AgentRuntime
 @using NanoBot.Core.Configuration
-@using NanoBot.Cli.Services
 @using Microsoft.Extensions.Localization
 @rendermode InteractiveServer
 
@@ -201,7 +200,7 @@
         
         try
         {
-            _configPath = GetConfigPath();
+            _configPath = ConfigPaths.GetAgentConfigPath();
             
             if (File.Exists(_configPath))
             {
@@ -304,12 +303,6 @@
         }
     }
 
-
-    private static string GetConfigPath()
-    {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
 
     private string GetResolvedWorkspacePath()
     {

@@ -14,7 +14,6 @@
 @using NanoBot.Core.Configuration
 @using NanoBot.Core.Messages
 @using NanoBot.Core.Sessions
-@using NanoBot.Cli.Services
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.JSInterop
 @using Microsoft.Extensions.Configuration
@@ -45,118 +44,12 @@
                                 @if (message.Role.ToLower() != "user")
                                 {
                                     <div class="nb-message-header">
-                                        <MudIcon Icon="@GetMessageIcon(message.Role)" Size="Size.Small" Class="mr-2" />
-                                        <MudText Typo="Typo.caption">@GetMessageSender(message.Role)</MudText>
+                                        <MudIcon Icon="@ChatFormattingService.GetMessageIcon(message.Role)" Size="Size.Small" Class="mr-2" />
+                                        <MudText Typo="Typo.caption">@ChatFormattingService.GetMessageSender(message.Role)</MudText>
                                     </div>
                                 }
 
-                                @* OpenCode 风格：按 Parts 顺序交错渲染（文本与工具交替显示） *@
-                                @if (message.HasSessionParts)
-                                {
-                                    @* 使用有序 Parts 渲染 *@
-                                    @foreach (var part in message.SessionParts!)
-                                    {
-                                        @switch (part.Type)
-                                        {
-                                            case "text" when !string.IsNullOrWhiteSpace(part.Text):
-                                                <div class="nb-part-text">
-                                                    <MarkdownRenderer Content="@part.Text" />
-                                                </div>
-                                                break;
-                                            case "tool_call":
-                                                <div class="nb-tool-execution-card">
-                                                    <div class="nb-tool-io-header nb-tool-io-header-in">
-                                                        <MudIcon Icon="@Icons.Material.Filled.Input" Size="Size.Small" Class="mr-1" />
-                                                        <span>IN</span>
-                                                        <span class="nb-tool-io-name">@part.ToolName</span>
-                                                    </div>
-                                                    <div class="nb-tool-io-body">
-                                                        <pre><code>@FormatToolPayload(part.Arguments ?? "{}")</code></pre>
-                                                    </div>
-                                                </div>
-                                                break;
-                                            case "tool_result":
-                                                <div class="@($"nb-tool-execution-card {(part.IsError ? "nb-tool-error" : "")}")">
-                                                    <div class="@($"nb-tool-io-header {(part.IsError ? "nb-tool-io-header-error" : "nb-tool-io-header-out")}")">
-                                                        <MudIcon Icon="@(part.IsError ? Icons.Material.Filled.ErrorOutline : Icons.Material.Filled.Output)" Size="Size.Small" Class="mr-1" />
-                                                        <span>OUT</span>
-                                                    </div>
-                                                    <div class="nb-tool-io-body">
-                                                        @if (ShouldRenderToolOutputAsMarkdown(part.Output ?? ""))
-                                                        {
-                                                            <div class="nb-tool-io-markdown">
-                                                                <MarkdownRenderer Content="@FormatToolOutput(part.Output ?? "")" />
-                                                            </div>
-                                                        }
-                                                        else
-                                                        {
-                                                            <pre><code>@FormatToolOutput(part.Output ?? "")</code></pre>
-                                                        }
-                                                    </div>
-                                                </div>
-                                                break;
-                                        }
-                                    }
-                                }
-                                else if (message.ToolExecutions.Any())
-                                {
-                                    @* 传统渲染方式：先工具执行列表，再文本内容 *@
-                                    <div class="nb-tool-execution-list">
-                                        @foreach (var toolExecution in message.ToolExecutions)
-                                        {
-                                            <div class="nb-tool-execution-card">
-                                                <div class="nb-tool-io-header nb-tool-io-header-in">
-                                                    <MudIcon Icon="@Icons.Material.Filled.Input" Size="Size.Small" Class="mr-1" />
-                                                    <span>IN</span>
-                                                    <span class="nb-tool-io-name">@toolExecution.Name</span>
-                                                </div>
-                                                <div class="nb-tool-io-body">
-                                                    <pre><code>@FormatToolPayload(toolExecution.Arguments)</code></pre>
-                                                </div>
-
-                                                <div class="@($"nb-tool-io-header {(toolExecution.IsError ? "nb-tool-io-header-error" : "nb-tool-io-header-out")}")">
-                                                    <MudIcon Icon="@(toolExecution.IsError ? Icons.Material.Filled.ErrorOutline : Icons.Material.Filled.Output)" Size="Size.Small" Class="mr-1" />
-                                                    <span>OUT</span>
-                                                </div>
-                                                <div class="nb-tool-io-body">
-                                                    @if (ShouldRenderToolOutputAsMarkdown(toolExecution.Output))
-                                                    {
-                                                        <div class="nb-tool-io-markdown">
-                                                            <MarkdownRenderer Content="@FormatToolOutput(toolExecution.Output)" />
-                                                        </div>
-                                                    }
-                                                    else
-                                                    {
-                                                        <pre><code>@FormatToolOutput(toolExecution.Output)</code></pre>
-                                                    }
-                                                </div>
-                                            </div>
-                                        }
-                                    </div>
-
-                                    @* 显示消息内容 *@
-                                    @if (message.Parts?.Any() == true)
-                                    {
-                                        @* 使用 Part 组件渲染 *@
-                                        @foreach (var part in message.Parts)
-                                        {
-                                            <MessagePartComponent Part="part" />
-                                        }
-                                    }
-                                    else if (!string.IsNullOrEmpty(message.Content))
-                                    {
-                                        @* 回退到 Markdown 渲染 *@
-                                        <MarkdownRenderer Content="@message.Content" />
-                                    }
-                                }
-                                else
-                                {
-                                    @* 无工具执行，仅显示文本内容 *@
-                                    @if (!string.IsNullOrEmpty(message.Content))
-                                    {
-                                        <MarkdownRenderer Content="@message.Content" />
-                                    }
-                                }
+                                <MessagePartsRenderer Message="message" />
 
                                 @if (message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ||
                                      message.Role.Equals("assistant", StringComparison.OrdinalIgnoreCase))
@@ -304,7 +197,6 @@
     {
         _cancellationTokenSource = new CancellationTokenSource();
 
-        // Check for debug=1 query parameter and enable debug mode
         var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
         if (HttpUtility.ParseQueryString(uri.Query).Get("debug") == "1")
         {
@@ -372,10 +264,9 @@
             SourceIndex = m.SourceIndex,
             RetryFromIndex = m.RetryFromIndex,
             RetryPrompt = m.RetryPrompt,
-            SessionParts = m.Parts  // 加载有序 Parts 用于交错渲染
+            SessionParts = m.Parts
         }).ToList();
 
-        // 自动滚动到底部
         await Task.Yield();
         await ScrollToBottom();
     }
@@ -384,7 +275,7 @@
     {
         try
         {
-            var configPath = GetConfigPath();
+            var configPath = ConfigPaths.GetAgentConfigPath();
             if (!File.Exists(configPath))
             {
                 _profileOptions.Clear();
@@ -450,7 +341,6 @@
         _inputMessage = string.Empty;
         _attachedImageUrl = null;
 
-        // 添加用户消息到 UI
         _messages.Add(new ChatMessage
         {
             Role = "user",
@@ -458,7 +348,6 @@
             Timestamp = DateTime.Now
         });
 
-        // 每次发送前创建新的 CancellationTokenSource，确保可以正确取消
         _cancellationTokenSource?.Dispose();
         _cancellationTokenSource = new CancellationTokenSource();
 
@@ -471,7 +360,6 @@
         {
             Logger.LogInformation("Sending message to Agent for session {SessionId}", SessionId);
 
-            // 使用流式响应；初始化 SessionParts 以便流式时也按顺序交错渲染
             var assistantMessage = new ChatMessage
             {
                 Role = "assistant",
@@ -487,7 +375,7 @@
                 if (chunk.ToolCallDetails != null)
                 {
                     Logger.LogInformation("Tool call detected: {ToolName} with args: {Args}",
-                        chunk.ToolCallDetails.Name, chunk.ToolCallDetails.Arguments);
+                        chunk.ToolCallDetails!.Name, chunk.ToolCallDetails.Arguments);
 
                     assistantMessage.ToolCall = chunk.ToolCallDetails;
                     var existingExecution = assistantMessage.ToolExecutions.LastOrDefault(t =>
@@ -498,24 +386,23 @@
                     {
                         existingExecution = new ChatToolExecution
                         {
-                            CallId = chunk.ToolCallDetails.CallId ?? string.Empty,
-                            Name = chunk.ToolCallDetails.Name,
+                            CallId = chunk.ToolCallDetails!.CallId ?? string.Empty,
+                            Name = chunk.ToolCallDetails!.Name ?? string.Empty,
                             Arguments = chunk.ToolCallDetails.Arguments ?? "{}"
                         };
                         assistantMessage.ToolExecutions.Add(existingExecution);
 
-                        // 仅在新 execution 时添加一次 tool_call part，避免同一工具调用被后端发两次（tool_hint + functionCalls update）导致 IN 重复
                         assistantMessage.SessionParts!.Add(new MessagePartInfo
                         {
                             Type = "tool_call",
-                            CallId = chunk.ToolCallDetails.CallId ?? string.Empty,
-                            ToolName = chunk.ToolCallDetails.Name ?? string.Empty,
+                            CallId = chunk.ToolCallDetails!.CallId ?? string.Empty,
+                            ToolName = chunk.ToolCallDetails!.Name ?? string.Empty,
                             Arguments = chunk.ToolCallDetails.Arguments ?? "{}"
                         });
                     }
                     else
                     {
-                        existingExecution.Name = chunk.ToolCallDetails.Name;
+                        existingExecution.Name = chunk.ToolCallDetails!.Name ?? string.Empty;
                         existingExecution.Arguments = chunk.ToolCallDetails.Arguments ?? "{}";
                     }
                 }
@@ -538,9 +425,8 @@
                     }
 
                     targetExecution.Output += chunk.Content;
-                    targetExecution.IsError = LooksLikeErrorOutput(targetExecution.Output);
+                    targetExecution.IsError = ChatFormattingService.LooksLikeErrorOutput(targetExecution.Output);
 
-                    // 流式时按顺序添加或追加 tool_result part
                     var lastToolResult = assistantMessage.SessionParts!
                         .Select((p, i) => (Part: p, Index: i))
                         .Where(x => x.Part.Type == "tool_result" && string.Equals(x.Part.CallId, chunk.ToolResultCallId, StringComparison.Ordinal))
@@ -548,7 +434,7 @@
                     if (lastToolResult.Part != null)
                     {
                         lastToolResult.Part.Output = (lastToolResult.Part.Output ?? "") + chunk.Content;
-                        lastToolResult.Part.IsError = LooksLikeErrorOutput(lastToolResult.Part.Output ?? "");
+                        lastToolResult.Part.IsError = ChatFormattingService.LooksLikeErrorOutput(lastToolResult.Part.Output ?? "");
                     }
                     else
                     {
@@ -558,15 +444,14 @@
                             CallId = chunk.ToolResultCallId ?? string.Empty,
                             ToolName = targetExecution.Name,
                             Output = chunk.Content,
-                            IsError = LooksLikeErrorOutput(chunk.Content)
+                            IsError = ChatFormattingService.LooksLikeErrorOutput(chunk.Content)
                         });
                     }
                 }
-                else if (!chunk.IsToolHint)  // tool-hint 块不追加正文内容（正文中的 [TOOL_CALL] 已被过滤）
+                else if (!chunk.IsToolHint)
                 {
                     assistantMessage.Content += chunk.Content;
 
-                    // 流式时按顺序添加或追加 text part
                     if (assistantMessage.SessionParts!.Count > 0 && assistantMessage.SessionParts[assistantMessage.SessionParts.Count - 1].Type == "text")
                     {
                         var lastText = assistantMessage.SessionParts[assistantMessage.SessionParts.Count - 1];
@@ -602,15 +487,13 @@
         {
             Logger.LogError(ex, "Error sending message for session {SessionId}", SessionId);
 
-            // 获取配置信息用于显示
             var sessionInfo = await SessionService.GetSessionAsync(SessionId);
             var profileId = sessionInfo?.ProfileId ?? "default";
 
-            // 尝试加载配置获取模型信息
             var modelInfo = "";
             try
             {
-                var configPath = GetConfigPath();
+                var configPath = ConfigPaths.GetAgentConfigPath();
                 if (File.Exists(configPath))
                 {
                     var config = await ConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
@@ -644,9 +527,7 @@
         {
             var file = e.File;
             if (file is null)
-            {
                 return;
-            }
 
             if (!file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
             {
@@ -654,10 +535,7 @@
                 return;
             }
 
-            // 从配置读取最大文件大小
             var maxFileSize = GetMaxFileSizeFromConfig();
-
-            // 检查文件大小
             if (file.Size > maxFileSize)
             {
                 var maxFileSizeMb = maxFileSize / 1024 / 1024;
@@ -678,7 +556,7 @@
 
     private async Task CopyMessage(ChatMessage message)
     {
-        var content = BuildCopyContent(message);
+        var content = ChatFormattingService.BuildCopyContent(message);
         if (string.IsNullOrWhiteSpace(content))
         {
             Snackbar.Add("没有可复制的内容", Severity.Info);
@@ -692,9 +570,7 @@
     private async Task EditMessage(ChatMessage message)
     {
         if (!message.Role.Equals("user", StringComparison.OrdinalIgnoreCase) || message.SourceIndex < 0)
-        {
             return;
-        }
 
         _inputMessage = message.Content;
         await SessionService.DeleteMessagesFromAsync(SessionId, message.SourceIndex);
@@ -742,17 +618,13 @@
     public async Task HandlePastedImageDataUrl(string dataUrl, string contentType)
     {
         if (string.IsNullOrWhiteSpace(dataUrl) || !dataUrl.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
-        {
             return;
-        }
 
         try
         {
             var commaIndex = dataUrl.IndexOf(',');
             if (commaIndex < 0)
-            {
                 return;
-            }
 
             var base64 = dataUrl[(commaIndex + 1)..];
             var bytes = Convert.FromBase64String(base64);
@@ -798,12 +670,6 @@
         };
     }
 
-    private static string GetConfigPath()
-    {
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(homeDir, ".nbot", "config.json");
-    }
-
     private void StopGeneration()
     {
         Logger.LogInformation("Stopping generation for session {SessionId}", SessionId);
@@ -818,34 +684,20 @@
         try
         {
             var maxFileSizeStr = Configuration["WebUI:Features:MaxFileSize"] ?? "10MB";
-
-            // 解析配置字符串（如 "10MB", "5MB", "1GB" 等）
             maxFileSizeStr = maxFileSizeStr.Trim().ToUpperInvariant();
 
             if (long.TryParse(maxFileSizeStr, out var bytes))
-            {
                 return bytes;
-            }
 
             if (maxFileSizeStr.EndsWith("KB", StringComparison.Ordinal))
-            {
-                var num = double.Parse(maxFileSizeStr[..^2]);
-                return (long)(num * 1024);
-            }
+                return (long)(double.Parse(maxFileSizeStr[..^2]) * 1024);
 
             if (maxFileSizeStr.EndsWith("MB", StringComparison.Ordinal))
-            {
-                var num = double.Parse(maxFileSizeStr[..^2]);
-                return (long)(num * 1024 * 1024);
-            }
+                return (long)(double.Parse(maxFileSizeStr[..^2]) * 1024 * 1024);
 
             if (maxFileSizeStr.EndsWith("GB", StringComparison.Ordinal))
-            {
-                var num = double.Parse(maxFileSizeStr[..^2]);
-                return (long)(num * 1024 * 1024 * 1024);
-            }
+                return (long)(double.Parse(maxFileSizeStr[..^2]) * 1024 * 1024 * 1024);
 
-            // 默认 10MB
             return 10 * 1024 * 1024;
         }
         catch (Exception ex)
@@ -857,12 +709,8 @@
 
     private async Task HandleKeyDown(KeyboardEventArgs e)
     {
-        // Enter 发送消息，Shift+Enter 换行（不发送）
         if (e.Key == "Enter" && !e.ShiftKey)
-        {
             await SendMessage();
-        }
-        // Shift+Enter 时只阻止发送，让 MudTextField 处理换行
     }
 
     private async Task ScrollToBottom()
@@ -892,162 +740,4 @@
             Snackbar.Add($"建立新對話失敗: {ex.Message}", Severity.Error);
         }
     }
-
-    private static string FormatToolPayload(string? payload)
-        => string.IsNullOrWhiteSpace(payload) ? "{}" : payload;
-
-    private static string FormatToolOutput(string? output)
-        => string.IsNullOrWhiteSpace(output) ? "(no output)" : output;
-
-    private static bool ShouldRenderToolOutputAsMarkdown(string? output)
-    {
-        if (string.IsNullOrWhiteSpace(output))
-        {
-            return false;
-        }
-
-        return output.Contains("![", StringComparison.Ordinal) ||
-               output.Contains("/api/files/sessions/", StringComparison.OrdinalIgnoreCase) ||
-               output.Contains("](", StringComparison.Ordinal) ||
-               LooksLikeMarkdownTable(output);
-    }
-
-    private static bool LooksLikeMarkdownTable(string output)
-    {
-        var lines = output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        if (lines.Length < 2)
-        {
-            return false;
-        }
-
-        for (var i = 0; i < lines.Length - 1; i++)
-        {
-            var header = lines[i];
-            var separator = lines[i + 1];
-            if (!header.Contains('|', StringComparison.Ordinal) ||
-                !separator.Contains('|', StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            var normalizedSeparator = separator.Replace(" ", string.Empty);
-            if (normalizedSeparator.All(ch => ch == '|' || ch == '-' || ch == ':'))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool LooksLikeErrorOutput(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        return value.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("exception", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("ERR_", StringComparison.OrdinalIgnoreCase) ||
-               value.Contains("SSL", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string BuildCopyContent(ChatMessage message)
-    {
-        var segments = new List<string>();
-        if (!string.IsNullOrWhiteSpace(message.Content))
-        {
-            segments.Add(message.Content);
-        }
-
-        foreach (var toolExecution in message.ToolExecutions)
-        {
-            segments.Add($"IN {toolExecution.Name}\n{FormatToolPayload(toolExecution.Arguments)}");
-            segments.Add($"OUT\n{FormatToolOutput(toolExecution.Output)}");
-        }
-
-        return string.Join("\n\n", segments.Where(s => !string.IsNullOrWhiteSpace(s)));
-    }
-
-    private string GetMessageIcon(string role)
-    {
-        return role?.ToLowerInvariant() switch
-        {
-            "user" => Icons.Material.Filled.Person,
-            "system" => Icons.Material.Filled.Info,
-            _ => Icons.Material.Filled.SmartToy
-        };
-    }
-
-    private string GetMessageSender(string role)
-    {
-        return role?.ToLowerInvariant() switch
-        {
-            "user" => "您",
-            "system" => "系统提示",
-            _ => "AI 助手"
-        };
-    }
-
-    private class ChatMessage
-    {
-        public string? Id { get; set; }
-        public int SourceIndex { get; set; } = -1;
-        public int? RetryFromIndex { get; set; }
-        public string? RetryPrompt { get; set; }
-        public string Role { get; set; } = string.Empty;
-        public string Content { get; set; } = string.Empty;
-        public DateTime Timestamp { get; set; }
-        public ToolCallInfo? ToolCall { get; set; }
-        public List<ChatToolExecution> ToolExecutions { get; set; } = new();
-        public List<MessagePart>? Parts { get; set; }
-        
-        /// <summary>
-        /// 从 SessionService 加载的有序 Parts（包含 text、tool_call、tool_result）
-        /// 用于 OpenCode 风格的交错渲染
-        /// </summary>
-        public List<Core.Sessions.MessagePartInfo>? SessionParts { get; set; }
-
-        /// <summary>
-        /// 是否有有效的 SessionParts（用于判断是否使用交错渲染）
-        /// </summary>
-        public bool HasSessionParts => SessionParts != null && SessionParts.Count > 0;
-
-        /// <summary>
-        /// 获取或创建 Part 列表（用于向后兼容）
-        /// </summary>
-        public List<MessagePart> GetOrCreateParts(string sessionId)
-        {
-            if (Parts != null && Parts.Any())
-                return Parts;
-
-            // 从 Content 创建 TextPart
-            var parts = new List<MessagePart>();
-            if (!string.IsNullOrEmpty(Content))
-            {
-                parts.Add(new TextPart
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    MessageId = Id ?? Guid.NewGuid().ToString(),
-                    SessionId = sessionId,
-                    Text = Content
-                });
-            }
-            return parts;
-        }
-
-    }
-
-    private class ChatToolExecution
-    {
-        public string CallId { get; set; } = string.Empty;
-        public string Name { get; set; } = string.Empty;
-        public string Arguments { get; set; } = "{}";
-        public string Output { get; set; } = string.Empty;
-        public bool IsError { get; set; }
-    }
-
-    private sealed record ProfileOption(string ProfileId, string Display);
 }

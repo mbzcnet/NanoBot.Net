@@ -70,7 +70,7 @@ public class GatewayCommand : ICliCommand
 
         var services = new ServiceCollection();
 
-        services.AddNanoBot(config);
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBot(services, config);
 
         if (verbose)
         {
@@ -143,27 +143,5 @@ public class GatewayCommand : ICliCommand
 
             Console.WriteLine("Gateway stopped.");
         }
-    }
-
-    private static IConfiguration BuildConfiguration(string? configPath)
-    {
-        var builder = new ConfigurationBuilder();
-
-        if (!string.IsNullOrEmpty(configPath) && File.Exists(configPath))
-        {
-            builder.AddJsonFile(configPath, optional: false);
-        }
-        else
-        {
-            var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            var defaultConfigPath = Path.Combine(homeDir, ".nbot", "config.json");
-            if (File.Exists(defaultConfigPath))
-            {
-                builder.AddJsonFile(defaultConfigPath, optional: false);
-            }
-        }
-
-        builder.AddEnvironmentVariables();
-        return builder.Build();
     }
 }

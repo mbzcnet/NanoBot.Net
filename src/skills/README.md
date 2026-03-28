@@ -15,10 +15,15 @@ The skill format and metadata structure follow OpenClaw's conventions to maintai
 
 ## Available Skills
 
-| Skill | Description |
+|| Skill | Description |
 |-------|-------------|
-| `github` | Interact with GitHub using the `gh` CLI |
-| `weather` | Get weather info using wttr.in and Open-Meteo |
-| `summarize` | Summarize URLs, files, and YouTube videos |
-| `tmux` | Remote-control tmux sessions |
-| `skill-creator` | Create new skills |
+|| `browser` | Playwright-based web automation for scraping and interacting with web pages |
+|| `clawhub` | Search and install skills from ClawHub, the public skill registry |
+|| `cron` | Schedule reminders and recurring tasks |
+|| `github` | Interact with GitHub using the `gh` CLI |
+|| `memory` | Two-layer memory system with grep-based recall |
+|| `rpa` | Desktop RPA automation with OmniParser vision analysis |
+|| `skill-creator` | Create or update AgentSkills |
+|| `summarize` | Summarize URLs, files, and YouTube videos |
+|| `tmux` | Remote-control tmux sessions |
+|| `weather` | Get weather info using wttr.in and Open-Meteo |
