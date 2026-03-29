@@ -15,6 +15,7 @@ using NanoBot.Core.Subagents;
 using NanoBot.Core.Workspace;
 using NanoBot.Infrastructure.Bus;
 using NanoBot.Providers;
+using NanoBot.Tools.BuiltIn;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -232,6 +233,41 @@ public class ConfiguredAgentIntegrationTests : IDisposable
         return mock;
     }
 
+    private ChatClientAgent CreateAgent(IEnumerable<AITool>? tools = null)
+    {
+        var workspaceMock = CreateWorkspaceMock();
+        var skillsLoaderMock = CreateSkillsLoaderMock();
+
+        return NanoBotAgentFactory.Create(
+            _chatClient,
+            workspaceMock.Object,
+            skillsLoaderMock.Object,
+            tools: tools?.ToList(),
+            loggerFactory: _loggerFactory);
+    }
+
+    private static IReadOnlyList<FunctionCallContent> GetToolCalls(AgentResponse response)
+    {
+        return response.Messages
+            .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+            .ToList();
+    }
+
+    private static IReadOnlyList<FunctionCallContent> GetToolCallsFromStreaming(
+        IAsyncEnumerable<AgentResponseUpdate> streamingResponse,
+        CancellationToken cancellationToken = default)
+    {
+        var toolCalls = new List<FunctionCallContent>();
+        var enumrator = streamingResponse.GetAsyncEnumerator(cancellationToken);
+        while (enumrator.MoveNextAsync().AsTask().Result)
+        {
+            var update = enumrator.Current;
+            var calls = update.Contents.OfType<FunctionCallContent>();
+            toolCalls.AddRange(calls);
+        }
+        return toolCalls;
+    }
+
     [Description("Get the weather for a given location.")]
     static string GetWeather([Description("The location to get the weather for.")] string location)
         => $"The weather in {location} is cloudy with a high of 15°C.";
@@ -290,9 +326,9 @@ public class ConfiguredAgentIntegrationTests : IDisposable
     }
 
     [Fact]
-    public async Task AgentRuntime_WithConfiguredLlm_ShouldCallTool()
+    public async Task Agent_WithWeatherTool_ShouldCallWithCorrectLocation()
     {
-        _output.WriteLine("=== Test: AgentRuntime with configured LLM calls tool ===");
+        _output.WriteLine("=== Test: Agent calls weather tool with correct location ===");
 
         var tools = new List<AITool>
         {
@@ -303,39 +339,280 @@ public class ConfiguredAgentIntegrationTests : IDisposable
             })
         };
 
-        var workspaceMock = CreateWorkspaceMock();
-        var skillsLoaderMock = CreateSkillsLoaderMock();
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
 
-        var agent = NanoBotAgentFactory.Create(
-            _chatClient,
-            workspaceMock.Object,
-            skillsLoaderMock.Object,
-            tools: tools,
-            loggerFactory: _loggerFactory);
+        var response = await agent.RunAsync("What's the weather in Tokyo?", session);
 
-        var sessionManager = new SessionManager(agent, workspaceMock.Object, _loggerFactory.CreateLogger<SessionManager>());
-        var messageBus = new MessageBus();
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
 
-        var runtime = new AgentRuntime(
-            agent,
-            messageBus,
-            sessionManager,
-            workspaceMock.Object,
-            memoryStore: null,
-            subagentManager: null,
-            memoryWindow: 50,
-            logger: _loggerFactory.CreateLogger<AgentRuntime>());
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.NotEmpty(toolCalls);
 
-        var response = await runtime.ProcessDirectAsync(
-            "What's the weather in Beijing?",
-            sessionKey: "test_session",
-            channel: "test",
-            chatId: "test");
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "get_weather");
 
-        _output.WriteLine($"Response: {Truncate(response, 300)}");
-
-        Assert.False(string.IsNullOrWhiteSpace(response), "Response should not be empty");
+        // Verify correct argument
+        var weatherCall = toolCalls.First(tc => tc.Name == "get_weather");
+        var location = weatherCall.Arguments?["location"]?.ToString();
+        Assert.Equal("Tokyo", location);
     }
+
+    [Fact]
+    public async Task Agent_WithWeatherTool_ShouldCallForShanghai()
+    {
+        _output.WriteLine("=== Test: Agent calls weather tool for Shanghai ===");
+
+        var tools = new List<AITool>
+        {
+            AIFunctionFactory.Create(GetWeather, new AIFunctionFactoryOptions
+            {
+                Name = "get_weather",
+                Description = "Get the weather for a given location."
+            })
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        var response = await agent.RunAsync("Tell me the weather in Shanghai, China", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.NotEmpty(toolCalls);
+
+        // Verify tool name
+        var weatherCall = toolCalls.FirstOrDefault(tc => tc.Name == "get_weather");
+        Assert.NotNull(weatherCall);
+
+        // Verify argument contains Shanghai
+        var location = weatherCall.Arguments?["location"]?.ToString();
+        Assert.NotNull(location);
+        Assert.Contains("Shanghai", location, StringComparison.OrdinalIgnoreCase);
+    }
+
+    #region FileTools Tests
+
+    [Fact]
+    public async Task Agent_WithReadFileTool_ShouldCallReadFileWithPath()
+    {
+        _output.WriteLine("=== Test: Agent calls read_file tool with correct path ===");
+
+        // Arrange: create a test file
+        var testFile = Path.Combine(_testWorkspace, "test_read.txt");
+        await File.WriteAllTextAsync(testFile, "Hello, World!");
+
+        var tools = new List<AITool>
+        {
+            FileTools.CreateReadFileTool(_testWorkspace)
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync($"Read the file at {testFile}", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "read_file");
+
+        // Verify path argument
+        var readCall = toolCalls.First(tc => tc.Name == "read_file");
+        var path = readCall.Arguments?["path"]?.ToString();
+        Assert.NotNull(path);
+        Assert.Equal(testFile, path);
+    }
+
+    [Fact]
+    public async Task Agent_WithWriteFileTool_ShouldCallWriteFileWithContent()
+    {
+        _output.WriteLine("=== Test: Agent calls write_file tool with content ===");
+
+        var tools = new List<AITool>
+        {
+            FileTools.CreateWriteFileTool(_testWorkspace)
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync($"Write 'Test content' to a file named output.txt in {_testWorkspace}", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "write_file");
+
+        // Verify write_file was called
+        var writeCall = toolCalls.First(tc => tc.Name == "write_file");
+        Assert.NotNull(writeCall.Arguments);
+
+        // Verify arguments contain path and content
+        var hasPath = writeCall.Arguments?.ContainsKey("path") == true;
+        var hasContent = writeCall.Arguments?.ContainsKey("content") == true;
+        Assert.True(hasPath || hasContent, "write_file should have path or content argument");
+    }
+
+    [Fact]
+    public async Task Agent_WithListDirTool_ShouldCallListDir()
+    {
+        _output.WriteLine("=== Test: Agent calls list_dir tool ===");
+
+        // Arrange: create some files
+        Directory.CreateDirectory(Path.Combine(_testWorkspace, "subdir"));
+        await File.WriteAllTextAsync(Path.Combine(_testWorkspace, "file1.txt"), "content1");
+        await File.WriteAllTextAsync(Path.Combine(_testWorkspace, "file2.txt"), "content2");
+
+        var tools = new List<AITool>
+        {
+            FileTools.CreateListDirTool(_testWorkspace)
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync($"List the files in {_testWorkspace}", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "list_dir");
+
+        // Verify list_dir was called
+        var listCall = toolCalls.First(tc => tc.Name == "list_dir");
+        Assert.NotNull(listCall);
+    }
+
+    #endregion
+
+    #region ShellTools Tests
+
+    [Fact]
+    public async Task Agent_WithExecTool_ShouldCallExecWithCommand()
+    {
+        _output.WriteLine("=== Test: Agent calls exec tool with command ===");
+
+        var tools = new List<AITool>
+        {
+            ShellTools.CreateExecTool(new ShellToolOptions())
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync("Execute the command 'echo hello'", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "exec");
+
+        // Verify exec was called
+        var execCall = toolCalls.First(tc => tc.Name == "exec");
+        Assert.NotNull(execCall.Arguments);
+
+        // Verify command argument exists
+        var hasCommand = execCall.Arguments?.ContainsKey("command") == true;
+        Assert.True(hasCommand, "exec should have command argument");
+    }
+
+    #endregion
+
+    #region BrowserTools Tests
+
+    [Fact]
+    public async Task Agent_WithBrowserOpenTool_ShouldCallBrowserOpenWithUrl()
+    {
+        _output.WriteLine("=== Test: Agent calls browser_open tool with URL ===");
+
+        var tools = new List<AITool>
+        {
+            BrowserTools.CreateBrowserOpenTool(null)
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync("Open https://example.com in browser", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "browser_open");
+
+        // Verify URL argument
+        var browserCall = toolCalls.First(tc => tc.Name == "browser_open");
+        var url = browserCall.Arguments?["url"]?.ToString();
+        Assert.NotNull(url);
+        Assert.Contains("example.com", url, StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
+
+    #region WebTools Tests
+
+    [Fact]
+    public async Task Agent_WithWebPageTool_ShouldCallWebPageWithUrl()
+    {
+        _output.WriteLine("=== Test: Agent calls web_page tool with URL ===");
+
+        var tools = new List<AITool>
+        {
+            WebTools.CreateWebPageTool(null, null)
+        };
+
+        var agent = CreateAgent(tools);
+        var session = await agent.CreateSessionAsync();
+
+        // Act
+        var response = await agent.RunAsync("Fetch the content of https://example.com", session);
+
+        _output.WriteLine($"Response: {Truncate(response.Text ?? "", 300)}");
+
+        // Strict assertion: verify tool was called
+        var toolCalls = GetToolCalls(response);
+        Assert.True(toolCalls.Count > 0, "At least one tool should be called");
+
+        // Verify correct tool name
+        Assert.Contains(toolCalls, tc => tc.Name == "web_page");
+
+        // Verify URL argument
+        var webCall = toolCalls.First(tc => tc.Name == "web_page");
+        var url = webCall.Arguments?["url"]?.ToString();
+        Assert.NotNull(url);
+        Assert.Contains("example.com", url, StringComparison.OrdinalIgnoreCase);
+    }
+
+    #endregion
 
     [Fact]
     public async Task AgentRuntime_Streaming_WithConfiguredLlm_ShouldWork()
