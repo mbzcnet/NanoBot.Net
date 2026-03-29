@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using NanoBot.Core.Bus;
 using NanoBot.Core.Configuration;
 using NanoBot.Core.Workspace;
 using NanoBot.Cli.Services;
@@ -644,7 +645,8 @@ public class OnboardCommand : ICliCommand
             Console.WriteLine($"  [5] Slack       {(config.Channels.Slack?.Enabled == true ? "[enabled]" : "[disabled]")}");
             Console.WriteLine($"  [6] Email       {(config.Channels.Email?.Enabled == true ? "[enabled]" : "[disabled]")}");
             Console.WriteLine($"  [7] Matrix      {(config.Channels.Matrix?.Enabled == true ? "[enabled]" : "[disabled]")}");
-            Console.WriteLine("  [8] Back to Main Menu");
+            Console.WriteLine($"  [8] WeiXin      {(config.Channels.WeiXin?.Enabled == true ? "[enabled]" : "[disabled]")}");
+            Console.WriteLine("  [9] Back to Main Menu");
 
             Console.Write("\nSelect channel to configure: ");
             var key = Console.ReadKey(true);
@@ -676,6 +678,9 @@ public class OnboardCommand : ICliCommand
                     ConfigureMatrix(config);
                     break;
                 case '8':
+                    ConfigureWeiXin(config);
+                    break;
+                case '9':
                     await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
                     return;
                 default:
@@ -1046,6 +1051,74 @@ public class OnboardCommand : ICliCommand
         }
 
         Console.WriteLine("✓ Matrix configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure WeiXin channel
+    /// </summary>
+    private void ConfigureWeiXin(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WeiXin (微信) Configuration ===\n");
+
+        if (config.Channels.WeiXin == null)
+        {
+            config.Channels.WeiXin = new WeiXinConfig();
+        }
+
+        var weixin = config.Channels.WeiXin;
+
+        Console.Write($"Enable WeiXin? [{(weixin.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        weixin.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && weixin.Enabled);
+
+        if (!weixin.Enabled)
+        {
+            Console.WriteLine("WeiXin disabled.");
+            return;
+        }
+
+        Console.Write($"Base URL [{weixin.BaseUrl}]: ");
+        var baseUrl = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
+            weixin.BaseUrl = baseUrl;
+        }
+
+        Console.Write($"CDN Base URL [{weixin.CdnBaseUrl}]: ");
+        var cdnBaseUrl = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(cdnBaseUrl))
+        {
+            weixin.CdnBaseUrl = cdnBaseUrl;
+        }
+
+        Console.Write($"Poll Timeout (seconds) [{weixin.PollTimeout}]: ");
+        var pollTimeout = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(pollTimeout) && int.TryParse(pollTimeout, out var timeout))
+        {
+            weixin.PollTimeout = timeout;
+        }
+
+        Console.Write($"Allowed Users (comma-separated) [{string.Join(",", weixin.AllowFrom)}]: ");
+        var users = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(users))
+        {
+            weixin.AllowFrom = users.Split(',').Select(u => u.Trim()).ToArray();
+        }
+
+        var stateDir = string.IsNullOrEmpty(weixin.StateDir)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nanobot", "weixin")
+            : weixin.StateDir;
+        Console.Write($"State Directory [{stateDir}]: ");
+        var sd = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(sd))
+        {
+            weixin.StateDir = sd;
+        }
+
+        Console.WriteLine("\n WeiXin requires QR code authentication.");
+        Console.WriteLine("  After enabling, run: nbot channels login weixin");
+        Console.WriteLine("  The token will be saved automatically after login.\n");
+        Console.WriteLine("✓ WeiXin configuration saved.");
     }
 
     /// <summary>

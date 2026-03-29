@@ -44,10 +44,7 @@ public class ToolCallingIntegrationTests : IDisposable
         var apiBase = Environment.GetEnvironmentVariable($"{provider.ToUpperInvariant()}_API_BASE");
 
         if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            _output.WriteLine($"Warning: {provider.ToUpperInvariant()}_API_KEY not set. Skipping test.");
-            throw new SkipTestException($"API key for {provider} not configured");
-        }
+            throw new InvalidOperationException($"{provider.ToUpperInvariant()}_API_KEY environment variable is required");
 
         var logger = _loggerFactory.CreateLogger<ChatClientFactory>();
         var factory = new ChatClientFactory(logger);
@@ -150,7 +147,7 @@ public class ToolCallingIntegrationTests : IDisposable
         return (responseText, hasToolCall);
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldLoadBenchmarkCases()
     {
         // Act
@@ -169,7 +166,7 @@ public class ToolCallingIntegrationTests : IDisposable
         }
     }
 
-    [Theory(Skip = "Requires real API key - enable for integration testing")]
+    [Theory]
     [InlineData("tool_file_read")]
     [InlineData("tool_file_write")]
     [InlineData("tool_shell")]
@@ -199,7 +196,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Tool call triggered: {hasToolCall}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldCallFileReadTool()
     {
         // Arrange
@@ -234,7 +231,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldCallWebSearchTool()
     {
         // Arrange
@@ -261,7 +258,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldHandleMultiToolScenario()
     {
         // Arrange
@@ -304,7 +301,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldCallBrowserNavigateTool()
     {
         // Arrange
@@ -331,7 +328,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldCallBrowserClickTool()
     {
         // Arrange
@@ -366,7 +363,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldCallBrowserTypeTool()
     {
         // Arrange
@@ -401,7 +398,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response}");
     }
 
-    [Theory(Skip = "Requires real API key - enable for integration testing")]
+    [Theory]
     [InlineData("openai", "gpt-4o-mini")]
     [InlineData("anthropic", "claude-3-haiku-20240307")]
     public async Task ToolCalling_DifferentModels_ShouldWork(string provider, string model)
@@ -430,7 +427,7 @@ public class ToolCallingIntegrationTests : IDisposable
         _output.WriteLine($"{provider}/{model} response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task ToolCalling_ShouldPreserveContextAcrossMultipleCalls()
     {
         // Arrange

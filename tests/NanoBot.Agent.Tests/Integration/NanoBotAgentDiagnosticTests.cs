@@ -75,8 +75,6 @@ public class NanoBotAgentDiagnosticTests : IDisposable
     [Fact]
     public async Task Test_NanoBotAgentFactory_SimpleTool_ShouldCallTool()
     {
-        if (!EnsureEnabled()) return;
-
         _output.WriteLine("=== Test: NanoBotAgentFactory with simple tool ===");
 
         var tools = new List<AITool>
@@ -128,8 +126,6 @@ public class NanoBotAgentDiagnosticTests : IDisposable
     [Fact]
     public async Task Test_NanoBotAgentFactory_BrowserTool_ShouldCallTool()
     {
-        if (!EnsureEnabled()) return;
-
         _output.WriteLine("=== Test: NanoBotAgentFactory with browser tool ===");
 
         var browserTool = NanoBot.Tools.BuiltIn.BrowserTools.CreateBrowserOpenTool(browserService: null);

@@ -34,7 +34,7 @@ public abstract class ChannelBase : IChannel
     public abstract Task StopAsync(CancellationToken cancellationToken = default);
     public abstract Task SendMessageAsync(OutboundMessage message, CancellationToken cancellationToken = default);
 
-    protected bool IsAllowed(string senderId, IReadOnlyList<string>? allowList)
+    protected virtual bool IsAllowed(string senderId, IReadOnlyList<string>? allowList)
     {
         if (allowList == null || allowList.Count == 0)
             return true;

@@ -18,125 +18,6 @@ public class ProviderTests
         return mock.Object;
     }
 
-    [Fact(Skip = "FileBackedChatHistoryProvider API has changed")]
-    public async Task FileBackedChatHistoryProvider_InvokingCoreAsync_ReturnsEmptyWhenNoHistory()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"nanobot_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-
-        try
-        {
-            var historyPath = Path.Combine(tempDir, "HISTORY.md");
-            var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
-
-            var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
-
-            var agentMock = new Mock<AIAgent>();
-            var session = CreateSession();
-            var invokingContext = new ChatHistoryProvider.InvokingContext(
-                agentMock.Object,
-                session,
-                [new ChatMessage(ChatRole.User, "Hello")]);
-
-            var result = await provider.InvokingAsync(invokingContext);
-
-            Assert.NotNull(result);
-            var messages = result.ToList();
-            Assert.Empty(messages);
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, true);
-            }
-        }
-    }
-
-    [Fact(Skip = "FileBackedChatHistoryProvider API has changed")]
-    public async Task FileBackedChatHistoryProvider_InvokedCoreAsync_WritesToFile()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"nanobot_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-
-        try
-        {
-            var historyPath = Path.Combine(tempDir, "HISTORY.md");
-            var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
-
-            var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
-
-            var agentMock = new Mock<AIAgent>();
-            var session = CreateSession();
-            var invokedContext = new ChatHistoryProvider.InvokedContext(
-                agentMock.Object,
-                session,
-                [new ChatMessage(ChatRole.User, "Hello")],
-                [new ChatMessage(ChatRole.Assistant, "Hi there!")]);
-
-            await provider.InvokedAsync(invokedContext);
-
-            Assert.True(File.Exists(historyPath));
-            var content = await File.ReadAllTextAsync(historyPath);
-            Assert.Contains("user: Hello", content);
-            Assert.Contains("assistant: Hi there!", content);
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, true);
-            }
-        }
-    }
-
-    [Fact(Skip = "FileBackedChatHistoryProvider API has changed")]
-    public async Task FileBackedChatHistoryProvider_InvokingCoreAsync_ParsesHistoryCorrectly()
-    {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"nanobot_test_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-
-        try
-        {
-            var historyPath = Path.Combine(tempDir, "HISTORY.md");
-            var historyContent = new StringBuilder();
-            historyContent.AppendLine("[2024-01-15 10:30:00] user: What is the weather?");
-            historyContent.AppendLine("[2024-01-15 10:30:05] assistant: I don't have access to real-time weather data.");
-            historyContent.AppendLine();
-            await File.WriteAllTextAsync(historyPath, historyContent.ToString());
-
-            var workspaceMock = new Mock<IWorkspaceManager>();
-            workspaceMock.Setup(w => w.GetMemoryFile()).Returns(historyPath);
-
-            var provider = new FileBackedChatHistoryProvider(workspaceMock.Object);
-
-            var agentMock = new Mock<AIAgent>();
-            var session = CreateSession();
-            var invokingContext = new ChatHistoryProvider.InvokingContext(
-                agentMock.Object,
-                session,
-                [new ChatMessage(ChatRole.User, "How about tomorrow?")]);
-
-            var result = await provider.InvokingAsync(invokingContext);
-
-            var messages = result.ToList();
-            Assert.Equal(2, messages.Count);
-            Assert.Equal(ChatRole.User, messages[0].Role);
-            Assert.Equal("What is the weather?", messages[0].Text);
-            Assert.Equal(ChatRole.Assistant, messages[1].Role);
-            Assert.Equal("I don't have access to real-time weather data.", messages[1].Text);
-        }
-        finally
-        {
-            if (Directory.Exists(tempDir))
-            {
-                Directory.Delete(tempDir, true);
-            }
-        }
-    }
-
     [Fact]
     public async Task BootstrapContextProvider_InvokingCoreAsync_LoadsBootstrapFiles()
     {
@@ -218,7 +99,7 @@ public class ProviderTests
 
             Assert.NotNull(result);
             Assert.NotNull(result.Instructions);
-            Assert.Contains("## Memory", result.Instructions);
+            Assert.Contains("## Long-term Memory", result.Instructions);
             Assert.Contains("User prefers concise responses", result.Instructions);
         }
         finally

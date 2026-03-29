@@ -38,7 +38,6 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     private readonly IMessageBus _bus;
     private readonly ISessionManager _sessionManager;
     private readonly ILogger<AgentRuntime>? _logger;
-    private readonly string _sessionsDirectory;
     private CancellationTokenSource? _runningCts;
     private bool _disposed;
     private bool _stopped;
@@ -52,7 +51,6 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
     // Service instances
     private readonly MessageProcessor _messageProcessor;
     private readonly StreamingProcessor _streamingProcessor;
-    private readonly ISessionManager _innerSessionManager;
 
     // Command registry
     private readonly Dictionary<string, CommandDefinition> _commands = new(StringComparer.OrdinalIgnoreCase);
@@ -91,11 +89,12 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
         _chatClientFactory = chatClientFactory;
         _llmConfig = llmConfig;
         _serviceProvider = serviceProvider;
-        _sessionsDirectory = workspace.GetSessionsPath();
 
-        if (!Directory.Exists(_sessionsDirectory))
+        // Ensure sessions directory exists
+        var sessionsDir = workspace.GetSessionsPath();
+        if (!Directory.Exists(sessionsDir))
         {
-            Directory.CreateDirectory(_sessionsDirectory);
+            Directory.CreateDirectory(sessionsDir);
         }
 
         // Helper function to get ChatClient from agent
@@ -157,7 +156,6 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             titleManager,
             imageProcessor,
             GetAgent,
-            GetChatClient,
             SetSessionToken,
 #if DEBUG
             debugState != null ? new Debug.DebugLogger(
@@ -168,9 +166,6 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
                 null) : null,
 #endif
             null);
-
-        // Store reference for command handlers
-        _innerSessionManager = sessionManager;
 
         // Register built-in commands
         RegisterCommand(new CommandDefinition(
@@ -353,7 +348,7 @@ public sealed class AgentRuntime : IAgentRuntime, IDisposable
             yield break;
         }
 
-        await foreach (var update in _streamingProcessor.ProcessDirectStreamingAsync(content, sessionKey, channel, chatId, cancellationToken))
+        await foreach (var update in _streamingProcessor.ProcessDirectStreamingAsync(content, sessionKey, channel, cancellationToken))
         {
             yield return update;
         }

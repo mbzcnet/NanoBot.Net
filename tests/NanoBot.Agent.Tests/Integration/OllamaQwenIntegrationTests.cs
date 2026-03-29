@@ -40,9 +40,13 @@ public class OllamaQwenIntegrationTests : IDisposable
         _benchmarkPath = Path.GetFullPath(_benchmarkPath);
 
         // Ollama Qwen3.5 4B configuration
-        _ollamaApiKey = "ollama";
-        _ollamaApiBase = "http://172.16.3.220:11435/v1";
-        _ollamaModel = "qwen3.5:4b";
+        // Can be overridden via environment variables:
+        // - OLLAMA_API_BASE: defaults to http://172.16.3.220:11435/v1
+        // - OLLAMA_API_KEY: defaults to "ollama"
+        // - OLLAMA_MODEL: defaults to qwen3.5:4b
+        _ollamaApiKey = Environment.GetEnvironmentVariable("OLLAMA_API_KEY") ?? "ollama";
+        _ollamaApiBase = Environment.GetEnvironmentVariable("OLLAMA_API_BASE") ?? "http://172.16.3.220:11435/v1";
+        _ollamaModel = Environment.GetEnvironmentVariable("OLLAMA_MODEL") ?? "qwen3.5:4b";
 
         _output.WriteLine($"Benchmark path: {_benchmarkPath}");
         _output.WriteLine($"Ollama API Base: {_ollamaApiBase}");

@@ -1,3 +1,17 @@
+# 2026-03-29
+
+- **修复 IDE0060 未使用参数警告**：
+  - **StreamingProcessor.cs**：移除 `ProcessDirectStreamingAsync` 中未使用的 `chatId` 参数
+  - **AgentRuntime.cs**：更新调用点，移除 `chatId` 参数传递
+  - **MemoryContextProvider.cs**：`StoreAIContextAsync` 方法体为空，将 `context` 和 `cancellationToken` 参数前缀设为 `_` 表示有意不使用
+  - **MemoryConsolidationContextProvider.cs**：`InvokingCoreAsync` 中未使用 `context` 参数，前缀设为 `_`
+  - **SessionManager.cs**：经审查，`sessionJson` 参数在 `BuildMetadataLineAsync` 中被使用（line 475），无需修改
+
+- **修复 IDE0052 未读取私有成员警告**：
+  - **StreamingProcessor.cs**：移除未使用的 `_getChatClient` 字段和构造函数参数
+  - **AgentRuntime.cs**：移除未使用的 `_sessionsDirectory` 和 `_innerSessionManager` 字段
+  - **MemoryConsolidationContextProvider.cs**：为保留字段添加注释标记，表示为未来实现预留
+
 # 2026-03-28
 
 - **修复 WebUI Markdown 显示为源码**：

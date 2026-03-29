@@ -9,11 +9,11 @@ namespace NanoBot.Agent.Context;
 
 public class MemoryConsolidationContextProvider : AIContextProvider
 {
-    private readonly IChatClient _chatClient;
-    private readonly IMemoryStore _memoryStore;
-    private readonly IWorkspaceManager _workspace;
-    private readonly int _memoryWindow;
-    private readonly ILogger<MemoryConsolidationContextProvider>? _logger;
+    private readonly IChatClient _chatClient;  // Reserved for future memory consolidation implementation
+    private readonly IMemoryStore _memoryStore;  // Reserved for future memory consolidation implementation
+    private readonly IWorkspaceManager _workspace;  // Reserved for future memory consolidation implementation
+    private readonly int _memoryWindow;  // Reserved for future memory consolidation implementation
+    private readonly ILogger<MemoryConsolidationContextProvider>? _logger;  // Reserved for future memory consolidation implementation
 
     public MemoryConsolidationContextProvider(
         IChatClient chatClient,
@@ -29,7 +29,7 @@ public class MemoryConsolidationContextProvider : AIContextProvider
         _logger = logger;
     }
 
-    protected override ValueTask<AIContext> InvokingCoreAsync(InvokingContext context, CancellationToken cancellationToken = default)
+    protected override ValueTask<AIContext> InvokingCoreAsync(InvokingContext _context, CancellationToken _cancellationToken = default)
     {
         return ValueTask.FromResult<AIContext>(new AIContext());
     }

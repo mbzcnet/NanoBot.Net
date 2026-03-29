@@ -43,10 +43,7 @@ public class VisionRecognitionTests : IDisposable
         var apiBase = Environment.GetEnvironmentVariable($"{provider.ToUpperInvariant()}_API_BASE");
 
         if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            _output.WriteLine($"Warning: {provider.ToUpperInvariant()}_API_KEY not set. Skipping test.");
-            throw new SkipTestException($"API key for {provider} not configured");
-        }
+            throw new InvalidOperationException($"{provider.ToUpperInvariant()}_API_KEY environment variable is required");
 
         var logger = _loggerFactory.CreateLogger<ChatClientFactory>();
         var factory = new ChatClientFactory(logger);
@@ -109,7 +106,7 @@ public class VisionRecognitionTests : IDisposable
         };
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldDescribeSimpleShapesAndColors()
     {
         // Arrange
@@ -139,7 +136,7 @@ public class VisionRecognitionTests : IDisposable
             $"Expected at least {expectedItems.Length / 2} items to be mentioned, but only found {matchedCount}");
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldExtractTextFromImage()
     {
         // Arrange
@@ -169,7 +166,7 @@ public class VisionRecognitionTests : IDisposable
             $"Expected at least 2 text elements to be extracted, but only found {matchedCount}");
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldCountObjectsInImage()
     {
         // Arrange
@@ -193,7 +190,7 @@ public class VisionRecognitionTests : IDisposable
         _output.WriteLine($"Object counting response: {response}");
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldIdentifySpatialRelationships()
     {
         // Arrange
@@ -218,7 +215,7 @@ public class VisionRecognitionTests : IDisposable
         _output.WriteLine($"Spatial description: {response}");
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldRecognizeChartTypes()
     {
         // Arrange
@@ -243,7 +240,7 @@ public class VisionRecognitionTests : IDisposable
         _output.WriteLine($"Chart recognition response: {response}");
     }
 
-    [Theory(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Theory]
     [InlineData("openai", "gpt-4o-mini")]
     [InlineData("anthropic", "claude-3-haiku-20240307")]
     public async Task Vision_DifferentModels_ShouldDescribeImage(string provider, string model)
@@ -270,7 +267,7 @@ public class VisionRecognitionTests : IDisposable
             $"Response should be 10-100 words, got {wordCount}");
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldHandleMultipleImagesSequentially()
     {
         // Arrange
@@ -295,7 +292,7 @@ public class VisionRecognitionTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Requires real API key with vision support - enable for integration testing")]
+    [Fact]
     public async Task Vision_ShouldAnswerQuestionsAboutImage()
     {
         // Arrange

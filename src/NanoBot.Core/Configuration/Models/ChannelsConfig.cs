@@ -19,6 +19,7 @@ public class ChannelsConfig
     public SlackConfig? Slack { get; set; }
     public QQConfig? QQ { get; set; }
     public MochatConfig? Mochat { get; set; }
+    public WeiXinConfig? WeiXin { get; set; }
     public MatrixConfig? Matrix { get; set; }
 }
 

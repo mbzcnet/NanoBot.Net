@@ -88,3 +88,7 @@ logs/
 
 ## Distribution
 dist/
+
+## ai
+.windsurf/
+.cursor/

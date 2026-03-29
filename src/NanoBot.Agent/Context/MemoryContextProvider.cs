@@ -128,8 +128,8 @@ public class MemoryContextProvider : AIContextProvider
     }
 
     protected override async ValueTask StoreAIContextAsync(
-        InvokedContext context,
-        CancellationToken cancellationToken)
+        InvokedContext _context,
+        CancellationToken _cancellationToken)
     {
     }
 }

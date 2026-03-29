@@ -1,7 +1,6 @@
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-using NanoBot.Core.Configuration;
 using NanoBot.Providers;
 using Xunit;
 using Xunit.Abstractions;
@@ -18,6 +17,10 @@ public class RealModelIntegrationTests : IDisposable
     private readonly ITestOutputHelper _output;
     private readonly ILoggerFactory _loggerFactory;
     private readonly string _benchmarkPath;
+    private readonly string _apiKey;
+    private readonly string _apiBase;
+    private readonly string _provider;
+    private readonly string _model;
 
     public RealModelIntegrationTests(ITestOutputHelper output)
     {
@@ -30,6 +33,15 @@ public class RealModelIntegrationTests : IDisposable
             AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..",
             "src", "benchmark");
         _benchmarkPath = Path.GetFullPath(_benchmarkPath);
+
+        // Load configuration from environment variables
+        _provider = Environment.GetEnvironmentVariable("REAL_MODEL_PROVIDER") ?? "openai";
+        _model = Environment.GetEnvironmentVariable("REAL_MODEL_NAME") ?? "gpt-4o-mini";
+        _apiKey = Environment.GetEnvironmentVariable($"{_provider.ToUpperInvariant()}_API_KEY") 
+            ?? throw new InvalidOperationException($"{_provider.ToUpperInvariant()}_API_KEY environment variable is required");
+        _apiBase = Environment.GetEnvironmentVariable($"{_provider.ToUpperInvariant()}_API_BASE");
+
+        _output.WriteLine($"Testing with provider: {_provider}, model: {_model}");
     }
 
     public void Dispose()
@@ -37,16 +49,13 @@ public class RealModelIntegrationTests : IDisposable
         _loggerFactory.Dispose();
     }
 
-    private IChatClient CreateChatClient(string provider = "openai", string model = "gpt-4o-mini")
+    private IChatClient CreateChatClient(string provider, string model)
     {
         var apiKey = Environment.GetEnvironmentVariable($"{provider.ToUpperInvariant()}_API_KEY");
         var apiBase = Environment.GetEnvironmentVariable($"{provider.ToUpperInvariant()}_API_BASE");
 
         if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            _output.WriteLine($"Warning: {provider.ToUpperInvariant()}_API_KEY not set. Skipping test.");
-            throw new SkipTestException($"API key for {provider} not configured");
-        }
+            throw new InvalidOperationException($"{provider.ToUpperInvariant()}_API_KEY environment variable is required");
 
         var logger = _loggerFactory.CreateLogger<ChatClientFactory>();
         var factory = new ChatClientFactory(logger);
@@ -54,11 +63,11 @@ public class RealModelIntegrationTests : IDisposable
         return factory.CreateChatClient(provider, model, apiKey, apiBase);
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task Agent_WithRealModel_ShouldRespondToSimplePrompt()
     {
         // Arrange
-        using var chatClient = CreateChatClient();
+        using var chatClient = CreateChatClient(_provider, _model);
         var agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "TestAgent",
@@ -75,11 +84,11 @@ public class RealModelIntegrationTests : IDisposable
         _output.WriteLine($"Response: {response.Text}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task Agent_WithRealModel_ShouldHandleMultipleTurns()
     {
         // Arrange
-        using var chatClient = CreateChatClient();
+        using var chatClient = CreateChatClient(_provider, _model);
         var agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "TestAgent",
@@ -102,14 +111,12 @@ public class RealModelIntegrationTests : IDisposable
         _output.WriteLine($"Response 2: {response2.Text}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task Agent_WithRealModel_ShouldFollowSystemInstructions()
     {
         // Arrange
-        using var chatClient = CreateChatClient();
+        using var chatClient = CreateChatClient(_provider, _model);
         
-        // Note: ChatClientAgentOptions doesn't have Instructions property
-        // Instructions are typically passed via system message or agent configuration
         var agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "TestAgent",
@@ -125,11 +132,10 @@ public class RealModelIntegrationTests : IDisposable
         Assert.NotNull(response);
         var wordCount = response.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
         _output.WriteLine($"Response: {response.Text} (Word count: {wordCount})");
-        // Note: This is a soft assertion as models may not perfectly follow constraints
         Assert.True(wordCount <= 10, $"Response should be concise, got {wordCount} words");
     }
 
-    [Theory(Skip = "Requires real API key - enable for integration testing")]
+    [Theory]
     [InlineData("openai", "gpt-4o-mini")]
     [InlineData("anthropic", "claude-3-haiku-20240307")]
     [InlineData("deepseek", "deepseek-chat")]
@@ -153,11 +159,11 @@ public class RealModelIntegrationTests : IDisposable
         _output.WriteLine($"{provider}/{model} response: {response.Text}");
     }
 
-    [Fact(Skip = "Requires real API key - enable for integration testing")]
+    [Fact]
     public async Task Agent_WithRealModel_ShouldHandleLongConversation()
     {
         // Arrange
-        using var chatClient = CreateChatClient();
+        using var chatClient = CreateChatClient(_provider, _model);
         var agent = new ChatClientAgent(chatClient, new ChatClientAgentOptions
         {
             Name = "TestAgent",
@@ -183,12 +189,4 @@ public class RealModelIntegrationTests : IDisposable
             _output.WriteLine($"Agent: {response.Text}");
         }
     }
-}
-
-/// <summary>
-/// Exception to skip tests when required configuration is missing
-/// </summary>
-public class SkipTestException : Exception
-{
-    public SkipTestException(string message) : base(message) { }
 }

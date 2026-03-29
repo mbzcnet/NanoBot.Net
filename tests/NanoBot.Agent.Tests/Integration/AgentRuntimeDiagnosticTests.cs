@@ -88,8 +88,6 @@ public class AgentRuntimeDiagnosticTests : IDisposable
     [Fact]
     public async Task Test_AgentRuntime_ProcessDirectAsync_SimpleTool_ShouldCallTool()
     {
-        if (!EnsureEnabled()) return;
-
         _output.WriteLine("=== Test: AgentRuntime.ProcessDirectAsync with simple tool ===");
 
         var tools = new List<AITool>
@@ -151,8 +149,6 @@ public class AgentRuntimeDiagnosticTests : IDisposable
     [Fact]
     public async Task Test_AgentRuntime_ProcessDirectAsync_BrowserTool_ShouldCallTool()
     {
-        if (!EnsureEnabled()) return;
-
         _output.WriteLine("=== Test: AgentRuntime.ProcessDirectAsync with browser tool ===");
 
         var tools = new List<AITool>
@@ -198,8 +194,6 @@ public class AgentRuntimeDiagnosticTests : IDisposable
     [Fact]
     public async Task Test_AgentRuntime_ProcessDirectStreamingAsync_SimpleTool_ShouldCallTool()
     {
-        if (!EnsureEnabled()) return;
-
         _output.WriteLine("=== Test: AgentRuntime.ProcessDirectStreamingAsync with simple tool ===");
 
         var tools = new List<AITool>

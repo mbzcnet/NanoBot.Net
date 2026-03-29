@@ -22,7 +22,6 @@ public sealed class StreamingProcessor
     private readonly ImageContentProcessor _imageProcessor;
     private readonly ILogger<StreamingProcessor>? _logger;
     private readonly Func<string, ChatClientAgent> _getAgentForSession;
-    private readonly Func<string, IChatClient?> _getChatClient;
     private readonly Action<string>? _setSessionToken;
 
 #if DEBUG
@@ -36,7 +35,6 @@ public sealed class StreamingProcessor
         SessionTitleManager sessionTitleManager,
         ImageContentProcessor imageProcessor,
         Func<string, ChatClientAgent> getAgentForSession,
-        Func<string, IChatClient?> getChatClient,
         Action<string>? setSessionToken = null,
 #if DEBUG
         Debug.DebugLogger? debugLogger = null,
@@ -49,7 +47,6 @@ public sealed class StreamingProcessor
         _sessionTitleManager = sessionTitleManager;
         _imageProcessor = imageProcessor;
         _getAgentForSession = getAgentForSession;
-        _getChatClient = getChatClient;
         _setSessionToken = setSessionToken;
 #if DEBUG
         _debugLogger = debugLogger;
@@ -64,7 +61,6 @@ public sealed class StreamingProcessor
         string content,
         string sessionKey = "chat_direct",
         string channel = "cli",
-        string chatId = "direct",
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var swTotal = Stopwatch.StartNew();

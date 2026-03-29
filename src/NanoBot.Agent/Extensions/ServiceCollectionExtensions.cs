@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NanoBot.Agent.Context;
+using NanoBot.Agent.Services;
 using NanoBot.Channels;
 using NanoBot.Core.Bus;
 using NanoBot.Core.Channels;
@@ -227,6 +228,9 @@ public static class ServiceCollectionExtensions
             var cfg = sp.GetRequiredService<ChannelsConfig>();
             return new ChannelManager(bus, logger, cfg);
         });
+
+        services.AddSingleton<IChannelFactory, ChannelFactory>();
+        services.AddHostedService<ChannelStartupService>();
 
         return services;
     }

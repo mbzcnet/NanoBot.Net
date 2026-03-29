@@ -1,4 +1,8 @@
 using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using NanoBot.Channels.Implementations.WeiXin;
+using NanoBot.Core.Bus;
 using NanoBot.Core.Configuration;
 
 namespace NanoBot.Cli.Commands;
@@ -66,6 +70,9 @@ public class ChannelsCommand : ICliCommand
         PrintChannelRow("QQ", config.Channels.QQ?.Enabled ?? false,
             !string.IsNullOrEmpty(config.Channels.QQ?.AppId) ? "configured" : "not configured");
 
+        PrintChannelRow("WeiXin", config.Channels.WeiXin?.Enabled ?? false,
+            !string.IsNullOrEmpty(config.Channels.WeiXin?.Token) ? "authenticated" : "not configured");
+
         PrintChannelRow("Email", config.Channels.Email?.Enabled ?? false,
             config.Channels.Email?.SmtpHost ?? "not configured");
     }
@@ -76,14 +83,93 @@ public class ChannelsCommand : ICliCommand
         Console.WriteLine($"{name,-15} {enabledStr,-10} {config}");
     }
 
-    private static Task LoginAsync(CancellationToken cancellationToken)
+    private static async Task LoginAsync(CancellationToken cancellationToken)
     {
-        Console.WriteLine("🐈 Starting bridge...");
-        Console.WriteLine("Scan the QR code to connect.\n");
-        Console.WriteLine("Note: This feature requires Node.js and the WhatsApp bridge.");
-        Console.WriteLine("Please refer to: https://github.com/HKUDS/nanobot#-chat-apps");
-        Console.WriteLine("\nFor now, manually configure WhatsApp bridge or use other channels.");
+        Console.WriteLine("Select channel to link via QR code:");
+        Console.WriteLine("  1. WhatsApp");
+        Console.WriteLine("  2. WeiXin (微信)");
+        Console.Write("\nEnter choice (1-2): ");
 
-        return Task.CompletedTask;
+        var choice = Console.ReadLine()?.Trim();
+        if (choice == "1")
+        {
+            Console.WriteLine("\n🐈 Starting WhatsApp bridge...");
+            Console.WriteLine("Scan the QR code to connect.\n");
+            Console.WriteLine("Note: This feature requires Node.js and the WhatsApp bridge.");
+            Console.WriteLine("Please refer to: https://github.com/HKUDS/nanobot#-chat-apps");
+            Console.WriteLine("\nFor now, manually configure WhatsApp bridge or use other channels.");
+        }
+        else if (choice == "2")
+        {
+            await WeiXinLoginAsync(cancellationToken);
+        }
+        else
+        {
+            Console.WriteLine("Invalid choice.");
+        }
+    }
+
+    private static async Task WeiXinLoginAsync(CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== WeiXin QR Login ===");
+        Console.WriteLine("This will open a web-based QR code for you to scan with WeChat.\n");
+
+        var configPath = Environment.GetEnvironmentVariable("NBOT_CONFIG_PATH")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nanobot", "config.json");
+
+        var config = await ConfigurationLoader.LoadWithDefaultsAsync(configPath, cancellationToken);
+
+        var weixinConfig = config.Channels.WeiXin ?? new WeiXinConfig();
+        var stateDir = string.IsNullOrEmpty(weixinConfig.StateDir)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nanobot", "weixin")
+            : weixinConfig.StateDir;
+        var tokenPath = Path.Combine(stateDir, "account.json");
+
+        if (File.Exists(tokenPath))
+        {
+            Console.WriteLine("WeiXin account already authenticated.");
+            Console.WriteLine($"  State: {tokenPath}");
+            Console.Write("\nRe-authenticate? (y/N): ");
+            if (!Console.ReadLine()?.Trim().Equals("y", StringComparison.OrdinalIgnoreCase) ?? true)
+                return;
+        }
+
+        Console.WriteLine("\nStarting WeiXin QR login...");
+        Console.WriteLine("(Make sure WeChat is logged in on this device before scanning)\n");
+
+        // Create a minimal DI container for the channel
+        var services = new ServiceCollection();
+        services.AddSingleton(config);
+        NanoBot.Agent.ServiceCollectionExtensions.AddNanoBotChannels(services, config.Channels);
+        var provider = services.BuildServiceProvider();
+
+        // Resolve the channel directly and call QRLoginAsync
+        // We can't resolve WeiXinChannel directly since it's not registered as a service.
+        // Instead, we use the ChannelFactory approach.
+        var bus = provider.GetRequiredService<NanoBot.Core.Bus.IMessageBus>();
+        var loggerFactory = provider.GetRequiredService<Microsoft.Extensions.Logging.ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger<NanoBot.Channels.Implementations.WeiXin.WeiXinChannel>();
+        var channel = new NanoBot.Channels.Implementations.WeiXin.WeiXinChannel(weixinConfig, bus, logger);
+
+        try
+        {
+            var success = await channel.QRLoginAsync(cancellationToken);
+            if (success)
+            {
+                weixinConfig.Token = ""; // Token is stored in state file, not config
+                config.Channels.WeiXin = weixinConfig;
+                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+                Console.WriteLine("\n WeiXin login successful!");
+                Console.WriteLine($"  Token stored at: {tokenPath}");
+            }
+            else
+            {
+                Console.WriteLine("\n WeiXin login failed or cancelled.");
+            }
+        }
+        finally
+        {
+            await provider.DisposeAsync();
+        }
     }
 }
