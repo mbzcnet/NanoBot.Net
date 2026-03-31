@@ -1,3 +1,35 @@
+# 2026-03-31
+
+- **增强 OnboardCommand 交互式配置流程**：
+  - **重构工作流**：将依赖安装（Playwright/OmniParser）从非交互模式移到配置菜单之前
+    - 非交互模式：先安装依赖，再应用选项
+    - 交互模式：先显示依赖安装提示，再进入完整配置菜单
+  - **增强主配置菜单**：新增以下菜单项：
+    - Memory Configuration（内存配置）
+    - Security Configuration（安全配置）
+    - MCP Configuration（MCP 服务器管理）
+    - Heartbeat Configuration（心跳配置）
+    - WebUI Configuration（WebUI 配置）
+    - Agent Settings（智能体名称、时区）
+  - **增强 Tools 配置**：
+    - `ConfigureToolsAsync` 新增 OmniParser 子菜单入口
+    - 新增 `ConfigureOmniParserAsync` - OmniParser 完整子菜单（安装/重装/配置/启用）
+    - 新增 `ConfigurePlaywrightAsync` - Playwright 完整子菜单（安装/重装/启用）
+    - 新增 `ConfigureRpaSettings` - RPA 设置（端口、自动启动、截图路径、优化参数）
+    - 新增 `ConfigureRpaEnabled` - RPA 启用/禁用状态
+    - 新增 `ConfigureBrowserEnabled` - 浏览器工具启用/禁用状态
+    - 新增 skill 可用性辅助方法：`IsBrowserSkillAvailableAsync`、`IsRpaSkillAvailableAsync`、`IsOmniParserInstalledAsync`
+    - 移除已废弃的 `ConfigureRap` 和 `GetToolStatus` 方法
+  - **新增配置方法**：
+    - `ConfigureMemoryAsync` - 内存开关、窗口、历史条目、指令字符限制
+    - `ConfigureSecurity` - 工作区限制、Shell 超时、允许/拒绝目录
+    - `ConfigureMcpAsync` - MCP 服务器增删改查
+    - `ConfigureHeartbeatAsync` - 心跳开关、间隔、消息
+    - `ConfigureWebUiAsync` - WebUI 多级子菜单（服务器/认证/CORS/安全/功能）
+    - `ConfigureAgentSettingsAsync` - 智能体名称和时区
+  - **移除 Start Web UI Mode 菜单项**：WebUI 通过 `nbot webui` 命令启动
+  - 所有 OnboardCommandTests 通过
+
 # 2026-03-29
 
 - **修复 IDE0060 未使用参数警告**：

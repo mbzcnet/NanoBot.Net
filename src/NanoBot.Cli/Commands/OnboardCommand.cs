@@ -142,40 +142,51 @@ public class OnboardCommand : ICliCommand
 
         await InitializeWorkspaceAsync(configPath, resolvedWorkspacePath, cancellationToken);
 
-        // Step 3: Non-interactive mode - apply options and exit
+        // Step 3: Dependency installation phase (Playwright/OmniParser)
         if (nonInteractive)
         {
-            ApplyNonInteractiveOptions(config, provider, model, apiKey, apiBase, workspace);
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-
             if (!skipBrowserInstall)
             {
                 await InstallPlaywrightBrowsersAsync(config, configPath, true, cancellationToken);
             }
-
-            // Offer RPA tools (OmniParser) installation
             if (!skipOmniParser)
             {
-                Console.WriteLine();
-                await InstallOmniParserAsync(config, configPath, nonInteractive, cancellationToken);
+                await InstallOmniParserAsync(config, configPath, true, cancellationToken);
             }
-
+            ApplyNonInteractiveOptions(config, provider, model, apiKey, apiBase, workspace);
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
             PrintNextSteps(config, configPath);
             return;
         }
 
-        // Step 4: Interactive mode - ask if user wants to configure
-        Console.Write("\nConfigure LLM and workspace now? [Y/n]: ");
-        var configureResponse = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (configureResponse == "n" || configureResponse == "no")
+        // Step 4: Interactive dependency install prompts
+        var browserInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+        var omniInstalled = await IsOmniParserInstalledAsync(configPath);
+
+        if (!browserInstalled)
         {
-            Console.WriteLine("\n🐈 nbot is ready!");
-            PrintNextSteps(config, configPath);
-            return;
+            Console.WriteLine("\n=== Browser Tools (Playwright) ===");
+            Console.WriteLine("Playwright is not installed. Install now for browser automation? [Y/n]: ");
+            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+            if (response != "n" && response != "no")
+            {
+                await InstallPlaywrightBrowsersAsync(config, configPath, false, cancellationToken);
+            }
+        }
+
+        if (!omniInstalled)
+        {
+            Console.WriteLine("\n=== RPA Vision (OmniParser) ===");
+            Console.WriteLine("OmniParser is not installed. Install now for RPA vision? [y/N]: ");
+            var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+            if (response == "y" || response == "yes")
+            {
+                await InstallOmniParserAsync(config, configPath, false, cancellationToken);
+            }
         }
 
         // Step 5: Interactive configuration menu
-        await RunConfigurationMenuAsync(config, configPath, envInfo, skipBrowserInstall, cancellationToken);
+        await RunConfigurationMenuAsync(config, configPath, envInfo, cancellationToken);
     }
 
     /// <summary>
@@ -263,26 +274,11 @@ public class OnboardCommand : ICliCommand
         if (File.Exists(configPath))
         {
             Console.WriteLine($"Config already exists at {configPath}");
-            Console.WriteLine("  [y] = overwrite with defaults (existing values will be lost)");
-            Console.WriteLine("  [N] = refresh config, keeping existing values and adding new fields");
-            Console.Write("Overwrite? [y/N]: ");
-            var response = nonInteractive ? "n" : (Console.ReadLine()?.Trim().ToLowerInvariant());
-
-            if (response == "y")
-            {
-                config = CreateDefaultAgentConfig(name, workspacePath, envInfo);
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                Console.WriteLine($"✓ Config reset to defaults at {configPath}");
-            }
-            else
-            {
-                config = await ConfigurationLoader.LoadAsync(configPath, cancellationToken);
-                config.Name = name;
-                // Update environment-specific settings
-                ApplyEnvironmentSettings(config, envInfo);
-                await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-                Console.WriteLine($"✓ Config refreshed at {configPath} (existing values preserved)");
-            }
+            config = await ConfigurationLoader.LoadAsync(configPath, cancellationToken);
+            config.Name = name;
+            ApplyEnvironmentSettings(config, envInfo);
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            Console.WriteLine($"✓ Config loaded from {configPath}");
         }
         else
         {
@@ -319,18 +315,22 @@ public class OnboardCommand : ICliCommand
         AgentConfig config,
         string configPath,
         EnvironmentInfo envInfo,
-        bool skipBrowserInstall,
         CancellationToken cancellationToken)
     {
         var menuItems = new List<MenuItem>
         {
             new("LLM Configuration", async () => await ConfigureLlmAsync(config, configPath, cancellationToken)),
             new("Channels Configuration", async () => await ConfigureChannelsAsync(config, configPath, cancellationToken)),
-            new("Tools Configuration", async () => await ConfigureToolsAsync(config, configPath, envInfo, skipBrowserInstall, cancellationToken)),
+            new("Tools Configuration", async () => await ConfigureToolsAsync(config, configPath, envInfo, cancellationToken)),
+            new("Memory Configuration", async () => await ConfigureMemoryAsync(config, configPath, cancellationToken)),
+            new("Security Configuration", async () => ConfigureSecurity(config)),
+            new("MCP Configuration", async () => await ConfigureMcpAsync(config, configPath, cancellationToken)),
+            new("Heartbeat Configuration", async () => await ConfigureHeartbeatAsync(config, configPath, cancellationToken)),
+            new("WebUI Configuration", async () => await ConfigureWebUiAsync(config, configPath, cancellationToken)),
+            new("Agent Settings", async () => await ConfigureAgentSettingsAsync(config, configPath, cancellationToken)),
             new("Workspace Configuration", async () => ConfigureWorkspace(config)),
-            new("Start Agent Mode", null), // Special item
-            new("Start Web UI Mode", null), // Special item
-            new("Save & Exit", null) // Special item
+            new("Start Agent Mode", null),
+            new("Save & Exit", null)
         };
 
         var currentIndex = 0;
@@ -347,7 +347,7 @@ public class OnboardCommand : ICliCommand
                 Console.WriteLine($"  {marker} [{number}] {menuItems[i].Name}");
             }
 
-            Console.WriteLine("\nNavigation: [↑/↓] or [1-7], [Enter] to select, [Q] to quit");
+            Console.WriteLine($"\nNavigation: [↑/↓] or [1-{menuItems.Count}], [Enter] to select, [Q] to quit");
 
             var key = Console.ReadKey(true);
 
@@ -374,7 +374,6 @@ public class OnboardCommand : ICliCommand
             }
             else if (key.Key == ConsoleKey.Enter)
             {
-                // Handle special menu items
                 if (currentIndex == menuItems.Count - 1) // Save & Exit
                 {
                     await SaveConfigAsync(config, configPath, cancellationToken);
@@ -382,13 +381,7 @@ public class OnboardCommand : ICliCommand
                     PrintNextSteps(config, configPath);
                     return;
                 }
-                else if (currentIndex == menuItems.Count - 2) // Start Web UI Mode
-                {
-                    await SaveConfigAsync(config, configPath, cancellationToken);
-                    await StartWebUIModeAsync(config, configPath, cancellationToken);
-                    return;
-                }
-                else if (currentIndex == menuItems.Count - 3) // Start Agent Mode
+                else if (currentIndex == menuItems.Count - 2) // Start Agent Mode
                 {
                     await SaveConfigAsync(config, configPath, cancellationToken);
                     await StartAgentModeAsync(config, configPath, cancellationToken);
@@ -406,7 +399,6 @@ public class OnboardCommand : ICliCommand
                 {
                     currentIndex = index;
 
-                    // Handle special menu items
                     if (currentIndex == menuItems.Count - 1) // Save & Exit
                     {
                         await SaveConfigAsync(config, configPath, cancellationToken);
@@ -414,13 +406,7 @@ public class OnboardCommand : ICliCommand
                         PrintNextSteps(config, configPath);
                         return;
                     }
-                    else if (currentIndex == menuItems.Count - 2) // Start Web UI Mode
-                    {
-                        await SaveConfigAsync(config, configPath, cancellationToken);
-                        await StartWebUIModeAsync(config, configPath, cancellationToken);
-                        return;
-                    }
-                    else if (currentIndex == menuItems.Count - 3) // Start Agent Mode
+                    else if (currentIndex == menuItems.Count - 2) // Start Agent Mode
                     {
                         await SaveConfigAsync(config, configPath, cancellationToken);
                         await StartAgentModeAsync(config, configPath, cancellationToken);
@@ -1122,36 +1108,28 @@ public class OnboardCommand : ICliCommand
     }
 
     /// <summary>
-    /// Configure Tools (Playwright, PowerShell, rap)
+    /// Configure Tools (Playwright, OmniParser, PowerShell)
     /// </summary>
     private async Task ConfigureToolsAsync(
         AgentConfig config,
         string configPath,
         EnvironmentInfo envInfo,
-        bool skipBrowserInstall,
         CancellationToken cancellationToken)
     {
         while (true)
         {
             Console.WriteLine("\n=== Tools Configuration ===\n");
 
-            // Check current status
             var playwrightInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+            var omniInstalled = await IsOmniParserInstalledAsync(configPath);
             var powerShellInstalled = await IsPowerShellInstalledAsync(cancellationToken);
+            var browserSkillAvailable = await IsBrowserSkillAvailableAsync(config, cancellationToken);
+            var rpaSkillAvailable = await IsRpaSkillAvailableAsync(config, configPath, cancellationToken);
 
             Console.WriteLine("Available Tools:");
-            Console.WriteLine($"  [1] Playwright (Browser Automation)  [{GetToolStatus(config.Browser?.Enabled == true, playwrightInstalled)}]");
-            Console.WriteLine($"  [2] PowerShell Core                  [{GetToolStatus(null, powerShellInstalled)}]");
-
-            if (!envInfo.HasGui)
-            {
-                Console.WriteLine($"  [3] Rap (GUI Tool)                   [unavailable - no GUI detected]");
-            }
-            else
-            {
-                Console.WriteLine($"  [3] Rap (GUI Tool)                   [available]");
-            }
-
+            Console.WriteLine($"  [1] Playwright (Browser)       [{(playwrightInstalled ? "installed" : "not installed")}]  browser skill: {(browserSkillAvailable ? "available" : "unavailable")}");
+            Console.WriteLine($"  [2] OmniParser (RPA)           [{(omniInstalled ? "installed" : "not installed")}]  rpa skill: {(rpaSkillAvailable ? "available" : "unavailable")}");
+            Console.WriteLine($"  [3] PowerShell Core            [{(powerShellInstalled ? "installed" : "not installed")}]");
             Console.WriteLine("  [4] Back to Main Menu");
 
             Console.Write("\nSelect tool to configure: ");
@@ -1163,19 +1141,245 @@ public class OnboardCommand : ICliCommand
             switch (option)
             {
                 case '1':
-                    await ConfigurePlaywrightAsync(config, configPath, skipBrowserInstall, cancellationToken);
+                    await ConfigurePlaywrightAsync(config, configPath, cancellationToken);
                     break;
                 case '2':
-                    await ConfigurePowerShellAsync(cancellationToken);
+                    await ConfigureOmniParserAsync(config, configPath, cancellationToken);
                     break;
                 case '3':
-                    if (!envInfo.HasGui)
+                    await ConfigurePowerShellAsync(cancellationToken);
+                    break;
+                case '4':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Configure OmniParser with full sub-menu
+    /// </summary>
+    private async Task ConfigureOmniParserAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var isInstalled = await IsOmniParserInstalledAsync(configPath);
+            var rpaSkillAvailable = await IsRpaSkillAvailableAsync(config, configPath, cancellationToken);
+
+            Console.WriteLine("\n=== OmniParser Setup ===\n");
+            Console.WriteLine($"Status: {(isInstalled ? "Installed" : "Not Installed")}");
+            if (isInstalled && config.Rpa != null)
+            {
+                Console.WriteLine($"  Install Path: {config.Rpa.InstallPath}");
+                Console.WriteLine($"  Service Port: {config.Rpa.ServicePort}");
+                Console.WriteLine($"  RPA Skill: {(rpaSkillAvailable ? "available" : "disabled")}");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("  [1] Install OmniParser");
+            Console.WriteLine("  [2] Reinstall OmniParser");
+            if (isInstalled)
+            {
+                Console.WriteLine("  [3] Configure RPA settings");
+                Console.WriteLine("  [4] Enable/Disable RPA tools");
+                Console.WriteLine("  [5] Back");
+            }
+            else
+            {
+                Console.WriteLine("  [3] Back");
+            }
+
+            Console.Write("\nSelect option: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            if (!isInstalled && option == '3')
+                return;
+
+            switch (option)
+            {
+                case '1':
+                    if (!isInstalled)
                     {
-                        Console.WriteLine("\n⚠ Rap tool requires GUI environment. Not available in headless mode.");
+                        await InstallOmniParserAsync(config, configPath, false, cancellationToken);
                     }
-                    else
+                    break;
+                case '2':
+                    await InstallOmniParserAsync(config, configPath, false, cancellationToken);
+                    break;
+                case '3':
+                    if (isInstalled)
                     {
-                        ConfigureRap(config);
+                        ConfigureRpaSettings(config, configPath, cancellationToken);
+                    }
+                    break;
+                case '4':
+                    if (isInstalled)
+                    {
+                        ConfigureRpaEnabled(config, configPath, cancellationToken);
+                    }
+                    break;
+                case '5':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Configure RPA enabled/disabled state
+    /// </summary>
+    private void ConfigureRpaEnabled(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== RPA Tools Enable/Disable ===\n");
+
+        if (config.Rpa == null)
+        {
+            config.Rpa = new RpaToolsConfig { Enabled = true };
+        }
+
+        Console.Write($"Enable RPA tools? [{(config.Rpa.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Rpa.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Rpa.Enabled);
+
+        Console.WriteLine($"✓ RPA tools {(config.Rpa.Enabled ? "enabled" : "disabled")}.");
+    }
+
+    /// <summary>
+    /// Configure RPA settings
+    /// </summary>
+    private void ConfigureRpaSettings(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== RPA Settings ===\n");
+
+        if (config.Rpa == null)
+        {
+            var omniparserPath = Path.Combine(GetConfigDir(configPath), "omniparser");
+            config.Rpa = new RpaToolsConfig
+            {
+                Enabled = true,
+                InstallPath = omniparserPath,
+                ServicePort = 18999,
+                AutoStartService = true
+            };
+        }
+
+        Console.Write($"Service Port [{config.Rpa.ServicePort}]: ");
+        var port = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(port) && int.TryParse(port, out var portNum))
+        {
+            config.Rpa.ServicePort = portNum;
+        }
+
+        Console.Write($"Auto-start service? [{(config.Rpa.AutoStartService ? "Y/n" : "y/N")}]: ");
+        var autoStart = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Rpa.AutoStartService = autoStart == "y" || autoStart == "yes" || (string.IsNullOrEmpty(autoStart) && config.Rpa.AutoStartService);
+
+        Console.Write($"Screenshot Save Path (press Enter to skip) [{config.Rpa.ScreenshotPath ?? "(null)"}]: ");
+        var screenshotPath = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(screenshotPath))
+        {
+            config.Rpa.ScreenshotPath = screenshotPath;
+        }
+        else if (string.IsNullOrEmpty(screenshotPath) && !string.IsNullOrEmpty(config.Rpa.ScreenshotPath))
+        {
+            // Keep existing
+        }
+        else
+        {
+            config.Rpa.ScreenshotPath = null;
+        }
+
+        Console.WriteLine("\nScreenshot Optimization:");
+        if (config.Rpa.ScreenshotOptimization == null)
+        {
+            config.Rpa.ScreenshotOptimization = new ScreenshotOptimizationConfig();
+        }
+
+        Console.Write($"  Max Dimension (pixels) [{config.Rpa.ScreenshotOptimization.MaxDimension}]: ");
+        var maxDim = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(maxDim) && int.TryParse(maxDim, out var maxDimNum))
+        {
+            config.Rpa.ScreenshotOptimization.MaxDimension = maxDimNum;
+        }
+
+        Console.Write($"  JPEG Quality (0-100) [{config.Rpa.ScreenshotOptimization.JpegQuality}]: ");
+        var quality = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(quality) && int.TryParse(quality, out var qualityNum))
+        {
+            config.Rpa.ScreenshotOptimization.JpegQuality = Math.Clamp(qualityNum, 0, 100);
+        }
+
+        Console.WriteLine("✓ RPA settings saved.");
+    }
+
+    /// <summary>
+    /// Configure Playwright with enhanced sub-menu
+    /// </summary>
+    private async Task ConfigurePlaywrightAsync(
+        AgentConfig config,
+        string configPath,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var isInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+            var browserSkillAvailable = await IsBrowserSkillAvailableAsync(config, cancellationToken);
+
+            Console.WriteLine("\n=== Playwright Setup ===\n");
+            Console.WriteLine($"Status: {(isInstalled ? "Installed" : "Not Installed")}");
+            if (isInstalled)
+            {
+                Console.WriteLine($"  Browser Tools: {(config.Browser?.Enabled == true ? "enabled" : "disabled")}");
+                Console.WriteLine($"  browser skill: {(browserSkillAvailable ? "available" : "unavailable")}");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("  [1] Install Playwright browsers");
+            if (isInstalled)
+            {
+                Console.WriteLine("  [2] Reinstall Playwright browsers");
+                Console.WriteLine("  [3] Enable/Disable browser tools");
+                Console.WriteLine("  [4] Back");
+            }
+            else
+            {
+                Console.WriteLine("  [2] Back");
+            }
+
+            Console.Write("\nSelect option: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            if (!isInstalled && option == '2')
+                return;
+
+            switch (option)
+            {
+                case '1':
+                    if (!isInstalled)
+                    {
+                        await InstallPlaywrightBrowsersAsync(config, configPath, false, cancellationToken);
+                    }
+                    break;
+                case '2':
+                    if (isInstalled)
+                    {
+                        await InstallPlaywrightBrowsersAsync(config, configPath, false, cancellationToken);
+                    }
+                    break;
+                case '3':
+                    if (isInstalled)
+                    {
+                        ConfigureBrowserEnabled(config, configPath, cancellationToken);
                     }
                     break;
                 case '4':
@@ -1188,50 +1392,52 @@ public class OnboardCommand : ICliCommand
     }
 
     /// <summary>
-    /// Get tool status string
+    /// Configure browser enabled/disabled state
     /// </summary>
-    private string GetToolStatus(bool? enabled, bool installed)
+    private void ConfigureBrowserEnabled(AgentConfig config, string configPath, CancellationToken cancellationToken)
     {
-        if (!installed)
-            return "not installed";
-        if (enabled == null)
-            return "installed";
-        return enabled == true ? "enabled" : "disabled";
+        Console.WriteLine("\n=== Browser Tools Enable/Disable ===\n");
+
+        if (config.Browser == null)
+        {
+            config.Browser = new BrowserToolsConfig { Enabled = true };
+        }
+
+        Console.Write($"Enable browser tools? [{(config.Browser.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Browser.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Browser.Enabled);
+
+        Console.WriteLine($"✓ Browser tools {(config.Browser.Enabled ? "enabled" : "disabled")}.");
     }
 
     /// <summary>
-    /// Configure Playwright
+    /// Check if browser skill is available
     /// </summary>
-    private async Task ConfigurePlaywrightAsync(
-        AgentConfig config,
-        string configPath,
-        bool skipBrowserInstall,
-        CancellationToken cancellationToken)
+    private async Task<bool> IsBrowserSkillAvailableAsync(AgentConfig config, CancellationToken cancellationToken)
     {
-        Console.WriteLine("\n=== Playwright Configuration ===\n");
+        if (config.Browser?.Enabled != true)
+            return false;
+        return await IsPlaywrightInstalledAsync(cancellationToken);
+    }
 
-        var isInstalled = await IsPlaywrightInstalledAsync(cancellationToken);
+    /// <summary>
+    /// Check if RPA skill is available
+    /// </summary>
+    private async Task<bool> IsRpaSkillAvailableAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        if (config.Rpa == null || !config.Rpa.Enabled)
+            return false;
+        return await IsOmniParserInstalledAsync(configPath);
+    }
 
-        if (isInstalled)
-        {
-            Console.WriteLine("✓ Playwright browsers are already installed.");
-
-            if (config.Browser == null)
-            {
-                config.Browser = new BrowserToolsConfig { Enabled = true };
-            }
-
-            Console.Write($"Enable browser tools? [{(config.Browser.Enabled ? "Y/n" : "y/N")}]: ");
-            var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
-            config.Browser.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Browser.Enabled);
-            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
-        }
-        else if (!skipBrowserInstall)
-        {
-            Console.WriteLine("Playwright browsers are not installed.");
-            Console.WriteLine("Starting installation...\n");
-            await InstallPlaywrightBrowsersAsync(config, configPath, false, cancellationToken);
-        }
+    /// <summary>
+    /// Check if OmniParser is installed
+    /// </summary>
+    private async Task<bool> IsOmniParserInstalledAsync(string configPath)
+    {
+        var omniparserPath = Path.Combine(GetConfigDir(configPath), "omniparser");
+        var venvPath = Path.Combine(omniparserPath, "venv");
+        return await Task.FromResult(Directory.Exists(venvPath));
     }
 
     /// <summary>
@@ -1304,19 +1510,6 @@ public class OnboardCommand : ICliCommand
     }
 
     /// <summary>
-    /// Configure Rap tool
-    /// </summary>
-    private void ConfigureRap(AgentConfig config)
-    {
-        Console.WriteLine("\n=== Rap Configuration ===\n");
-        Console.WriteLine("Rap is a GUI tool for enhanced interaction.");
-        Console.WriteLine("Note: Rap requires a GUI environment to run.");
-
-        // Rap configuration would go here if it exists in the config
-        Console.WriteLine("✓ Rap configuration placeholder (to be implemented based on actual Rap tool requirements)");
-    }
-
-    /// <summary>
     /// Configure Workspace
     /// </summary>
     private void ConfigureWorkspace(AgentConfig config)
@@ -1336,6 +1529,561 @@ public class OnboardCommand : ICliCommand
 
         var resolvedPath = ResolvePath(config.Workspace.Path);
         Console.WriteLine($"\n✓ Workspace: {resolvedPath}");
+    }
+
+    /// <summary>
+    /// Configure Memory settings
+    /// </summary>
+    private async Task ConfigureMemoryAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Memory Configuration ===\n");
+
+        if (config.Memory == null)
+        {
+            config.Memory = new MemoryConfig();
+        }
+
+        Console.Write($"Enable memory? [{(config.Memory.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Memory.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Memory.Enabled);
+
+        Console.Write($"Memory Window (messages) [{config.Memory.MemoryWindow}]: ");
+        var window = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(window) && int.TryParse(window, out var windowNum))
+        {
+            config.Memory.MemoryWindow = Math.Max(1, windowNum);
+        }
+
+        Console.Write($"Max History Entries [{config.Memory.MaxHistoryEntries}]: ");
+        var maxHistory = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(maxHistory) && int.TryParse(maxHistory, out var maxHistoryNum))
+        {
+            config.Memory.MaxHistoryEntries = Math.Max(0, maxHistoryNum);
+        }
+
+        Console.Write($"Enable HISTORY.md (grep-searchable archive)? [{(config.Memory.EnableHistory ? "Y/n" : "y/N")}]: ");
+        var enableHistory = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Memory.EnableHistory = enableHistory == "y" || enableHistory == "yes" || (string.IsNullOrEmpty(enableHistory) && config.Memory.EnableHistory);
+
+        Console.Write($"Max Instruction Chars (0=unlimited) [{config.Memory.MaxInstructionChars}]: ");
+        var maxChars = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(maxChars) && int.TryParse(maxChars, out var maxCharsNum))
+        {
+            config.Memory.MaxInstructionChars = Math.Max(0, maxCharsNum);
+        }
+
+        Console.WriteLine("✓ Memory configuration saved.");
+        await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+    }
+
+    /// <summary>
+    /// Configure Security settings
+    /// </summary>
+    private void ConfigureSecurity(AgentConfig config)
+    {
+        Console.WriteLine("\n=== Security Configuration ===\n");
+
+        Console.Write($"Restrict to workspace? [{(config.Security.RestrictToWorkspace ? "Y/n" : "y/N")}]: ");
+        var restrict = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Security.RestrictToWorkspace = restrict == "y" || restrict == "yes" || (string.IsNullOrEmpty(restrict) && config.Security.RestrictToWorkspace);
+
+        Console.Write($"Shell Timeout (seconds) [{config.Security.ShellTimeout}]: ");
+        var timeout = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(timeout) && int.TryParse(timeout, out var timeoutNum))
+        {
+            config.Security.ShellTimeout = Math.Max(1, timeoutNum);
+        }
+
+        Console.WriteLine("\nAllowed Directories (comma-separated, empty = all):");
+        var currentDirs = config.Security.AllowedDirs != null && config.Security.AllowedDirs.Count > 0
+            ? string.Join(", ", config.Security.AllowedDirs)
+            : "(all allowed)";
+        Console.Write($"  [{currentDirs}]: ");
+        var dirs = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(dirs))
+        {
+            config.Security.AllowedDirs = dirs.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToList();
+        }
+
+        Console.WriteLine("\nDeny Command Patterns (comma-separated, empty = none):");
+        var currentDeny = config.Security.DenyCommandPatterns != null && config.Security.DenyCommandPatterns.Count > 0
+            ? string.Join(", ", config.Security.DenyCommandPatterns)
+            : "(none)";
+        Console.Write($"  [{currentDeny}]: ");
+        var deny = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(deny))
+        {
+            config.Security.DenyCommandPatterns = deny.Split(',').Select(d => d.Trim()).Where(d => !string.IsNullOrEmpty(d)).ToList();
+        }
+
+        Console.WriteLine("✓ Security configuration saved.");
+    }
+
+    /// <summary>
+    /// Configure MCP servers
+    /// </summary>
+    private async Task ConfigureMcpAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== MCP Configuration ===\n");
+
+            if (config.Mcp == null)
+            {
+                config.Mcp = new McpConfig();
+            }
+
+            var servers = config.Mcp.Servers;
+            if (servers.Count == 0)
+            {
+                Console.WriteLine("No MCP servers configured.\n");
+            }
+            else
+            {
+                Console.WriteLine("Configured Servers:");
+                foreach (var (name, server) in servers)
+                {
+                    Console.WriteLine($"  • {name}: {server.Command} {string.Join(" ", server.Args)}");
+                }
+                Console.WriteLine();
+            }
+
+            Console.WriteLine("  [1] Add MCP server");
+            Console.WriteLine("  [2] Edit MCP server");
+            Console.WriteLine("  [3] Delete MCP server");
+            Console.WriteLine("  [4] Back to Main Menu");
+
+            Console.Write("\nSelect option: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            switch (option)
+            {
+                case '1':
+                    AddMcpServer(config, configPath, cancellationToken);
+                    break;
+                case '2':
+                    EditMcpServer(config, configPath, cancellationToken);
+                    break;
+                case '3':
+                    DeleteMcpServer(config, configPath, cancellationToken);
+                    break;
+                case '4':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+        }
+    }
+
+    private void AddMcpServer(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Add MCP Server ===\n");
+
+        Console.Write("Server name: ");
+        var name = Console.ReadLine()?.Trim();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Console.WriteLine("Invalid server name.");
+            return;
+        }
+
+        if (config.Mcp!.Servers.ContainsKey(name))
+        {
+            Console.WriteLine($"Server '{name}' already exists.");
+            return;
+        }
+
+        Console.Write("Command (e.g., npx, python): ");
+        var command = Console.ReadLine()?.Trim();
+
+        Console.Write("Arguments (comma-separated, e.g., -m, mcp_server): ");
+        var argsInput = Console.ReadLine()?.Trim();
+        var args = string.IsNullOrWhiteSpace(argsInput)
+            ? new List<string>()
+            : argsInput.Split(',').Select(a => a.Trim()).ToList();
+
+        var server = new McpServerConfig
+        {
+            Command = command ?? "",
+            Args = args
+        };
+
+        config.Mcp.Servers[name] = server;
+        Console.WriteLine($"✓ MCP server '{name}' added.");
+        _ = ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+    }
+
+    private void EditMcpServer(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        if (config.Mcp!.Servers.Count == 0)
+        {
+            Console.WriteLine("No MCP servers to edit.");
+            return;
+        }
+
+        var serverNames = config.Mcp.Servers.Keys.ToList();
+        Console.WriteLine("Select server to edit:");
+        for (var i = 0; i < serverNames.Count; i++)
+        {
+            Console.WriteLine($"  [{i + 1}] {serverNames[i]}");
+        }
+        Console.Write("\nEnter number or name: ");
+        var input = Console.ReadLine()?.Trim();
+
+        string? selectedName = null;
+        if (int.TryParse(input, out var index) && index > 0 && index <= serverNames.Count)
+        {
+            selectedName = serverNames[index - 1];
+        }
+        else if (!string.IsNullOrWhiteSpace(input) && config.Mcp.Servers.ContainsKey(input))
+        {
+            selectedName = input;
+        }
+
+        if (selectedName == null)
+        {
+            Console.WriteLine("Invalid selection.");
+            return;
+        }
+
+        var server = config.Mcp.Servers[selectedName];
+
+        Console.Write($"\nCommand [{server.Command}]: ");
+        var command = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(command))
+        {
+            server.Command = command;
+        }
+
+        Console.Write($"Arguments (comma-separated) [{string.Join(", ", server.Args)}]: ");
+        var argsInput = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(argsInput))
+        {
+            server.Args = argsInput.Split(',').Select(a => a.Trim()).ToList();
+        }
+
+        Console.Write($"Tool Timeout (seconds) [{server.ToolTimeout}]: ");
+        var timeout = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(timeout) && int.TryParse(timeout, out var timeoutNum))
+        {
+            server.ToolTimeout = Math.Max(1, timeoutNum);
+        }
+
+        Console.WriteLine($"✓ MCP server '{selectedName}' updated.");
+        _ = ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+    }
+
+    private void DeleteMcpServer(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        if (config.Mcp!.Servers.Count == 0)
+        {
+            Console.WriteLine("No MCP servers to delete.");
+            return;
+        }
+
+        var serverNames = config.Mcp.Servers.Keys.ToList();
+        Console.WriteLine("Select server to delete:");
+        for (var i = 0; i < serverNames.Count; i++)
+        {
+            Console.WriteLine($"  [{i + 1}] {serverNames[i]}");
+        }
+        Console.Write("\nEnter number or name: ");
+        var input = Console.ReadLine()?.Trim();
+
+        string? selectedName = null;
+        if (int.TryParse(input, out var index) && index > 0 && index <= serverNames.Count)
+        {
+            selectedName = serverNames[index - 1];
+        }
+        else if (!string.IsNullOrWhiteSpace(input) && config.Mcp.Servers.ContainsKey(input))
+        {
+            selectedName = input;
+        }
+
+        if (selectedName == null)
+        {
+            Console.WriteLine("Invalid selection.");
+            return;
+        }
+
+        Console.Write($"Delete MCP server '{selectedName}'? [y/N]: ");
+        var confirm = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (confirm == "y" || confirm == "yes")
+        {
+            config.Mcp.Servers.Remove(selectedName);
+            Console.WriteLine($"✓ MCP server '{selectedName}' deleted.");
+            _ = ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        }
+        else
+        {
+            Console.WriteLine("Cancelled.");
+        }
+    }
+
+    /// <summary>
+    /// Configure Heartbeat settings
+    /// </summary>
+    private async Task ConfigureHeartbeatAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Heartbeat Configuration ===\n");
+
+        if (config.Heartbeat == null)
+        {
+            config.Heartbeat = new HeartbeatConfig();
+        }
+
+        Console.Write($"Enable heartbeat? [{(config.Heartbeat.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.Heartbeat.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.Heartbeat.Enabled);
+
+        if (!config.Heartbeat.Enabled)
+        {
+            Console.WriteLine("✓ Heartbeat disabled.");
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+            return;
+        }
+
+        Console.Write($"Interval (seconds) [{config.Heartbeat.IntervalSeconds}]: ");
+        var interval = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(interval) && int.TryParse(interval, out var intervalNum))
+        {
+            config.Heartbeat.IntervalSeconds = Math.Max(10, intervalNum);
+        }
+
+        Console.Write($"Heartbeat Message [{config.Heartbeat.Message ?? "(null)"}]: ");
+        var message = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            config.Heartbeat.Message = message;
+        }
+
+        Console.WriteLine("✓ Heartbeat configuration saved.");
+        await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+    }
+
+    /// <summary>
+    /// Configure WebUI settings
+    /// </summary>
+    private async Task ConfigureWebUiAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== WebUI Configuration ===\n");
+
+            Console.WriteLine($"  Enabled: {(config.WebUI.Enabled ? "yes" : "no")}");
+            Console.WriteLine($"  Host: {config.WebUI.Server.Host}");
+            Console.WriteLine($"  Port: {config.WebUI.Server.Port}");
+            Console.WriteLine($"  Auth Mode: {config.WebUI.Auth.Mode}");
+            Console.WriteLine($"  CORS Allowed Origins: {config.WebUI.Cors.AllowedOrigins.Count}");
+            Console.WriteLine($"  HTTPS: {(config.WebUI.Security.EnableHttps ? "enabled" : "disabled")}");
+            Console.WriteLine($"  File Upload: {(config.WebUI.Features.FileUpload ? "enabled" : "disabled")}");
+            Console.WriteLine();
+
+            Console.WriteLine("  [1] Enable/Disable WebUI");
+            Console.WriteLine("  [2] Server settings (host/port)");
+            Console.WriteLine("  [3] Auth settings");
+            Console.WriteLine("  [4] CORS settings");
+            Console.WriteLine("  [5] Security settings");
+            Console.WriteLine("  [6] Features settings");
+            Console.WriteLine("  [7] Back to Main Menu");
+
+            Console.Write("\nSelect option: ");
+            var key = Console.ReadKey(true);
+            Console.WriteLine(key.KeyChar);
+
+            var option = NormalizeInputChar(key.KeyChar);
+
+            switch (option)
+            {
+                case '1':
+                    ToggleWebUiEnabled(config);
+                    break;
+                case '2':
+                    ConfigureWebUiServer(config);
+                    break;
+                case '3':
+                    ConfigureWebUiAuth(config);
+                    break;
+                case '4':
+                    ConfigureWebUiCors(config);
+                    break;
+                case '5':
+                    ConfigureWebUiSecurity(config);
+                    break;
+                case '6':
+                    ConfigureWebUiFeatures(config);
+                    break;
+                case '7':
+                    return;
+                default:
+                    Console.WriteLine("Invalid option.");
+                    break;
+            }
+
+            await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
+        }
+    }
+
+    private void ToggleWebUiEnabled(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI Enable/Disable ===\n");
+        Console.Write($"Enable WebUI? [{(config.WebUI.Enabled ? "Y/n" : "y/N")}]: ");
+        var enable = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Enabled = enable == "y" || enable == "yes" || (string.IsNullOrEmpty(enable) && config.WebUI.Enabled);
+        Console.WriteLine($"✓ WebUI {(config.WebUI.Enabled ? "enabled" : "disabled")}.");
+    }
+
+    private void ConfigureWebUiServer(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI Server Settings ===\n");
+
+        Console.Write($"Host [{config.WebUI.Server.Host}]: ");
+        var host = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(host))
+        {
+            config.WebUI.Server.Host = host;
+        }
+
+        Console.Write($"Port [{config.WebUI.Server.Port}]: ");
+        var port = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(port) && int.TryParse(port, out var portNum))
+        {
+            config.WebUI.Server.Port = portNum;
+        }
+
+        Console.WriteLine("✓ Server settings saved.");
+    }
+
+    private void ConfigureWebUiAuth(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI Auth Settings ===\n");
+
+        Console.Write($"Auth Mode (token/password) [{config.WebUI.Auth.Mode}]: ");
+        var mode = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(mode))
+        {
+            config.WebUI.Auth.Mode = mode;
+        }
+
+        Console.Write("New Token (press Enter to keep current): ");
+        var token = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            config.WebUI.Auth.Token = token;
+        }
+
+        Console.Write($"Allow Localhost? [{(config.WebUI.Auth.AllowLocalhost ? "Y/n" : "y/N")}]: ");
+        var allowLocal = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Auth.AllowLocalhost = allowLocal == "y" || allowLocal == "yes" || (string.IsNullOrEmpty(allowLocal) && config.WebUI.Auth.AllowLocalhost);
+
+        Console.WriteLine("✓ Auth settings saved.");
+    }
+
+    private void ConfigureWebUiCors(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI CORS Settings ===\n");
+
+        Console.Write($"Allow Any Origin? [{(config.WebUI.Cors.AllowAnyOrigin ? "Y/n" : "y/N")}]: ");
+        var anyOrigin = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Cors.AllowAnyOrigin = anyOrigin == "y" || anyOrigin == "yes" || (string.IsNullOrEmpty(anyOrigin) && config.WebUI.Cors.AllowAnyOrigin);
+
+        if (!config.WebUI.Cors.AllowAnyOrigin)
+        {
+            var currentOrigins = config.WebUI.Cors.AllowedOrigins.Count > 0
+                ? string.Join(", ", config.WebUI.Cors.AllowedOrigins)
+                : "(none)";
+            Console.Write($"Allowed Origins (comma-separated) [{currentOrigins}]: ");
+            var origins = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(origins))
+            {
+                config.WebUI.Cors.AllowedOrigins = origins.Split(',').Select(o => o.Trim()).Where(o => !string.IsNullOrEmpty(o)).ToList();
+            }
+        }
+
+        Console.WriteLine("✓ CORS settings saved.");
+    }
+
+    private void ConfigureWebUiSecurity(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI Security Settings ===\n");
+
+        Console.Write($"Enable HTTPS? [{(config.WebUI.Security.EnableHttps ? "Y/n" : "y/N")}]: ");
+        var https = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Security.EnableHttps = https == "y" || https == "yes" || (string.IsNullOrEmpty(https) && config.WebUI.Security.EnableHttps);
+
+        Console.Write($"Enable Rate Limit? [{(config.WebUI.Security.EnableRateLimit ? "Y/n" : "y/N")}]: ");
+        var rateLimit = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Security.EnableRateLimit = rateLimit == "y" || rateLimit == "yes" || (string.IsNullOrEmpty(rateLimit) && config.WebUI.Security.EnableRateLimit);
+
+        if (config.WebUI.Security.EnableRateLimit)
+        {
+            Console.Write($"Max Requests Per Minute [{config.WebUI.Security.MaxRequestsPerMinute}]: ");
+            var maxReq = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(maxReq) && int.TryParse(maxReq, out var maxReqNum))
+            {
+                config.WebUI.Security.MaxRequestsPerMinute = Math.Max(1, maxReqNum);
+            }
+        }
+
+        Console.WriteLine("✓ Security settings saved.");
+    }
+
+    private void ConfigureWebUiFeatures(AgentConfig config)
+    {
+        Console.WriteLine("\n=== WebUI Features Settings ===\n");
+
+        Console.Write($"Enable File Upload? [{(config.WebUI.Features.FileUpload ? "Y/n" : "y/N")}]: ");
+        var fileUpload = Console.ReadLine()?.Trim().ToLowerInvariant();
+        config.WebUI.Features.FileUpload = fileUpload == "y" || fileUpload == "yes" || (string.IsNullOrEmpty(fileUpload) && config.WebUI.Features.FileUpload);
+
+        Console.Write($"Max File Size [{config.WebUI.Features.MaxFileSize}]: ");
+        var maxSize = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(maxSize))
+        {
+            config.WebUI.Features.MaxFileSize = maxSize;
+        }
+
+        var currentTypes = config.WebUI.Features.AllowedFileTypes.Count > 0
+            ? string.Join(", ", config.WebUI.Features.AllowedFileTypes)
+            : "(all)";
+        Console.Write($"Allowed File Types (comma-separated) [{currentTypes}]: ");
+        var types = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(types))
+        {
+            config.WebUI.Features.AllowedFileTypes = types.Split(',').Select(t => t.Trim()).Where(t => !string.IsNullOrEmpty(t)).ToList();
+        }
+
+        Console.WriteLine("✓ Features settings saved.");
+    }
+
+    /// <summary>
+    /// Configure Agent Settings (name, timezone)
+    /// </summary>
+    private async Task ConfigureAgentSettingsAsync(AgentConfig config, string configPath, CancellationToken cancellationToken)
+    {
+        Console.WriteLine("\n=== Agent Settings ===\n");
+
+        Console.Write($"Agent Name [{config.Name}]: ");
+        var name = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            config.Name = name;
+        }
+
+        Console.Write($"Timezone (IANA format, e.g., Asia/Shanghai, UTC) [{config.Timezone ?? "(not set)"}]: ");
+        var timezone = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(timezone))
+        {
+            config.Timezone = timezone;
+        }
+
+        Console.WriteLine("✓ Agent settings saved.");
+        await ConfigurationLoader.SaveAsync(configPath, config, cancellationToken);
     }
 
     /// <summary>
