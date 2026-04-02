@@ -207,324 +207,46 @@ nanobot --version
 
 ### 3.1 Unix 安装脚本 (macOS / Linux / WSL)
 
-**文件位置**: `install/install.sh`
+**文件位置**: `install/install.sh`（已实现）
+
+一行命令安装：
 
 ```bash
-#!/bin/bash
-#
-# NanoBot.Net Installation Script
-# Supports: macOS, Linux, WSL
-#
-# Usage:
-#   curl -fsSL https://get.nanobot.ai | bash
-#   or
-#   curl -fsSL https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.sh | bash
-#
-
-set -e
-
-REPO="NanoBot/NanoBot.Net"
-BINARY_NAME="nanobot"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-VERSION="${VERSION:-latest}"
-
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
-info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-    exit 1
-}
-
-# Detect OS and Architecture
-detect_platform() {
-    OS="$(uname -s)"
-    ARCH="$(uname -m)"
-
-    case "$OS" in
-        Darwin*)
-            OS="osx"
-            ;;
-        Linux*)
-            OS="linux"
-            ;;
-        MINGW*|MSYS*|CYGWIN*)
-            error "Please use install.ps1 for Windows. For WSL, run this script in WSL environment."
-            ;;
-        *)
-            error "Unsupported OS: $OS"
-            ;;
-    esac
-
-    case "$ARCH" in
-        x86_64|amd64)
-            ARCH="x64"
-            ;;
-        aarch64|arm64)
-            ARCH="arm64"
-            ;;
-        *)
-            error "Unsupported architecture: $ARCH"
-            ;;
-    esac
-
-    PLATFORM="${OS}-${ARCH}"
-    info "Detected platform: $PLATFORM"
-}
-
-# Get latest version from GitHub
-get_latest_version() {
-    if [ "$VERSION" = "latest" ]; then
-        VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/')
-        if [ -z "$VERSION" ]; then
-            error "Failed to get latest version"
-        fi
-    fi
-    info "Installing version: $VERSION"
-}
-
-# Download and install
-install_nanobot() {
-    DOWNLOAD_URL="https://github.com/$REPO/releases/download/v$VERSION/${BINARY_NAME}-${PLATFORM}.tar.gz"
-    TEMP_DIR=$(mktemp -d)
-    ARCHIVE_FILE="$TEMP_DIR/${BINARY_NAME}.tar.gz"
-
-    info "Downloading from $DOWNLOAD_URL..."
-
-    if ! curl -fsSL "$DOWNLOAD_URL" -o "$ARCHIVE_FILE"; then
-        error "Failed to download NanoBot"
-    fi
-
-    info "Extracting..."
-    tar -xzf "$ARCHIVE_FILE" -C "$TEMP_DIR"
-
-    # Create install directory if not exists
-    mkdir -p "$INSTALL_DIR"
-
-    # Move binary
-    mv "$TEMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME"
-    chmod +x "$INSTALL_DIR/$BINARY_NAME"
-
-    # Cleanup
-    rm -rf "$TEMP_DIR"
-
-    info "Installed to $INSTALL_DIR/$BINARY_NAME"
-}
-
-# Add to PATH if needed
-add_to_path() {
-    if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-        warn "$INSTALL_DIR is not in PATH"
-        echo ""
-        echo "Add the following to your shell profile (~/.bashrc, ~/.zshrc, etc.):"
-        echo ""
-        echo "    export PATH=\"\$PATH:$INSTALL_DIR\""
-        echo ""
-        echo "Then run: source ~/.bashrc  (or ~/.zshrc)"
-    fi
-}
-
-# Verify installation
-verify_installation() {
-    if [ -x "$INSTALL_DIR/$BINARY_NAME" ]; then
-        info "Installation successful!"
-        "$INSTALL_DIR/$BINARY_NAME" --version
-    else
-        error "Installation failed"
-    fi
-}
-
-main() {
-    echo ""
-    echo "=========================================="
-    echo "     NanoBot.Net Installer"
-    echo "=========================================="
-    echo ""
-
-    detect_platform
-    get_latest_version
-    install_nanobot
-    add_to_path
-    verify_installation
-
-    echo ""
-    echo "Run 'nanobot onboard' to get started!"
-}
-
-main "$@"
+curl -sSL https://raw.githubusercontent.com/mbzcnet/NanoBot.Net/main/install/install.sh | bash
 ```
+
+**功能**：
+
+- 自动检测 OS + CPU 架构，下载对应平台的 `nbot-<rid>.tar.gz`
+- SHA256 校验（自动下载 `.sha256` 文件）
+- 安装到 `~/.local/bin`（可通过 `--dir` 覆盖）
+- 自动追加 PATH 配置到 `~/.bashrc` / `~/.zshrc`
+- 安装后自动运行 `nbot configure` 配置向导
+- 支持 `--version X.Y.Z` / `--skip-config` / `--no-verify` 等选项
+
+> 详见仓库中的 `install/install.sh`。
 
 ### 3.2 Windows PowerShell 安装脚本
 
-**文件位置**: `scripts/install.ps1`
+**文件位置**: `install/install.ps1`（已实现）
+
+一行命令安装：
 
 ```powershell
-<#
-.SYNOPSIS
-    NanoBot.Net Installation Script for Windows
-
-.DESCRIPTION
-    Installs NanoBot.Net on Windows systems.
-    Supports both x64 and ARM64 architectures.
-
-.PARAMETER InstallDir
-    Installation directory. Default: $env:USERPROFILE\.local\bin
-
-.PARAMETER Version
-    Version to install. Default: latest
-
-.EXAMPLE
-    irm get.nanobot.ai | iex
-    irm https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.ps1 | iex
-#>
-
-param(
-    [string]$InstallDir = "$env:USERPROFILE\.local\bin",
-    [string]$Version = "latest"
-)
-
-$ErrorActionPreference = "Stop"
-$Repo = "NanoBot/NanoBot.Net"
-$BinaryName = "nanobot"
-
-function Write-Info {
-    param([string]$Message)
-    Write-Host "[INFO] " -ForegroundColor Green -NoNewline
-    Write-Host $Message
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host "[WARN] " -ForegroundColor Yellow -NoNewline
-    Write-Host $Message
-}
-
-function Write-Error {
-    param([string]$Message)
-    Write-Host "[ERROR] " -ForegroundColor Red -NoNewline
-    Write-Host $Message
-    exit 1
-}
-
-function Get-Platform {
-    $Arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-    
-    switch ($Arch) {
-        "X64" { $ArchStr = "x64" }
-        "Arm64" { $ArchStr = "arm64" }
-        default { Write-Error "Unsupported architecture: $Arch" }
-    }
-    
-    $Platform = "win-$ArchStr"
-    Write-Info "Detected platform: $Platform"
-    return $Platform
-}
-
-function Get-LatestVersion {
-    if ($Version -eq "latest") {
-        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
-        $Version = $Release.tag_name -replace "^v", ""
-        if (-not $Version) {
-            Write-Error "Failed to get latest version"
-        }
-    }
-    Write-Info "Installing version: $Version"
-    return $Version
-}
-
-function Install-NanoBot {
-    param([string]$Platform, [string]$Version)
-    
-    $DownloadUrl = "https://github.com/$Repo/releases/download/v$Version/$BinaryName-$Platform.zip"
-    $TempDir = New-TempDirectory
-    $ZipFile = Join-Path $TempDir "$BinaryName.zip"
-    
-    Write-Info "Downloading from $DownloadUrl..."
-    
-    try {
-        Invoke-WebRequest -Uri $DownloadUrl -OutFile $ZipFile -UseBasicParsing
-    }
-    catch {
-        Write-Error "Failed to download NanoBot: $_"
-    }
-    
-    Write-Info "Extracting..."
-    Expand-Archive -Path $ZipFile -DestinationPath $TempDir -Force
-    
-    # Create install directory if not exists
-    if (-not (Test-Path $InstallDir)) {
-        New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-    }
-    
-    # Move binary
-    $ExePath = Join-Path $TempDir "$BinaryName.exe"
-    $DestPath = Join-Path $InstallDir "$BinaryName.exe"
-    Move-Item -Path $ExePath -Destination $DestPath -Force
-    
-    # Cleanup
-    Remove-Item -Path $TempDir -Recurse -Force
-    
-    Write-Info "Installed to $DestPath"
-    return $DestPath
-}
-
-function New-TempDirectory {
-    $TempPath = Join-Path $env:TEMP "nanobot-install-$(Get-Random)"
-    New-Item -ItemType Directory -Path $TempPath | Out-Null
-    return $TempPath
-}
-
-function Add-ToPath {
-    $PathEnv = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($PathEnv -notlike "*$InstallDir*") {
-        Write-Warn "$InstallDir is not in PATH"
-        Write-Host ""
-        Write-Host "Adding to PATH..."
-        [Environment]::SetEnvironmentVariable("Path", "$PathEnv;$InstallDir", "User")
-        $env:Path += ";$InstallDir"
-        Write-Info "Added to user PATH"
-    }
-}
-
-function Verify-Installation {
-    param([string]$ExePath)
-    
-    if (Test-Path $ExePath) {
-        Write-Info "Installation successful!"
-        & $ExePath --version
-    }
-    else {
-        Write-Error "Installation failed"
-    }
-}
-
-# Main
-Write-Host ""
-Write-Host "=========================================="
-Write-Host "     NanoBot.Net Installer"
-Write-Host "=========================================="
-Write-Host ""
-
-$Platform = Get-Platform
-$Version = Get-LatestVersion
-$ExePath = Install-NanoBot -Platform $Platform -Version $Version
-Add-ToPath
-Verify-Installation -ExePath $ExePath
-
-Write-Host ""
-Write-Host "Run 'nanobot onboard' to get started!"
+irm https://raw.githubusercontent.com/mbzcnet/NanoBot.Net/main/install/install.ps1 | iex
 ```
+
+**功能**：
+
+- 自动检测 `win-x64` / `win-arm64`
+- 下载并解压 `nbot-<rid>.zip`
+- SHA256 校验
+- 安装到 `%LOCALAPPDATA%\nanobot\bin`（可通过 `-InstallDir` 覆盖）
+- 自动追加到用户 PATH（修改注册表，对当前会话立即生效）
+- 安装后自动运行 `nbot configure` 配置向导
+- 支持 `-Version X.Y.Z` / `-SkipConfig` / `-NoVerify` 等参数
+
+> 详见仓库中的 `install/install.ps1`。
 
 ### 3.3 Windows CMD 批处理脚本 (可选)
 
@@ -682,183 +404,50 @@ dotnet tool uninstall --global NanoBot.Cli
 
 ### 5.1 发布脚本
 
-**文件位置**: `scripts/publish.sh`
+**文件位置**: `scripts/publish.sh`（已实现）
+
+完整脚本请参考仓库中的 `scripts/publish.sh`，主要功能：
+
+- **版本更新**：自动修改 `Directory.Build.props` 中的所有版本号
+- **多平台构建**：支持 6 个平台组合 (`osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64`, `win-x64`, `win-arm64`)
+- **NativeAOT 支持**：通过 `--aot` 标志优先使用 NativeAOT 编译，失败时自动 fallback 到 self-contained
+- **WebUI 打包**：同时构建并打包 NanoBot.WebUI
+- **归档**：Unix 平台输出 `.tar.gz`，Windows 平台输出 `.zip`
+- **Homebrew Formula**：自动下载 SHA256 并更新 Formula
+- **NuGet**：打包并推送到 nuget.org
+- **Git Tag**：创建并推送 `v*.*.*` 标签，触发 GitHub Actions CI
+
+**使用示例**：
 
 ```bash
-#!/bin/bash
-#
-# Build and publish NanoBot.Net for all platforms
-#
-
-set -e
-
-VERSION="${1:-0.1.0}"
-PROJECT="src/NanoBot.Cli/NanoBot.Cli.csproj"
-OUTPUT_DIR="dist"
-
-PLATFORMS=(
-    "osx-x64"
-    "osx-arm64"
-    "linux-x64"
-    "linux-arm64"
-    "win-x64"
-    "win-arm64"
-)
-
-echo "Building NanoBot.Net v$VERSION..."
-
-rm -rf "$OUTPUT_DIR"
-mkdir -p "$OUTPUT_DIR"
-
-for PLATFORM in "${PLATFORMS[@]}"; do
-    echo "Building for $PLATFORM..."
-    
-    dotnet publish "$PROJECT" \
-        -c Release \
-        -r "$PLATFORM" \
-        --self-contained true \
-        -p:PublishSingleFile=true \
-        -p:PublishTrimmed=true \
-        -p:Version="$VERSION" \
-        -o "$OUTPUT_DIR/$PLATFORM"
-    
-    # Create archive
-    cd "$OUTPUT_DIR"
-    if [[ "$PLATFORM" == win-* ]]; then
-        zip -r "nanobot-$PLATFORM.zip" "$PLATFORM"
-    else
-        tar -czvf "nanobot-$PLATFORM.tar.gz" "$PLATFORM"
-    fi
-    cd ..
-done
-
-echo "Build complete. Artifacts in $OUTPUT_DIR/"
-ls -la "$OUTPUT_DIR"/*.{tar.gz,zip} 2>/dev/null || true
+./scripts/publish.sh 0.1.4              # 仅构建 6 平台 self-contained
+./scripts/publish.sh 0.1.4 --aot        # 优先 NativeAOT
+./scripts/publish.sh 0.1.4 --tag         # 构建 + 推送 tag
+./scripts/publish.sh 0.1.4 --nuget       # 构建 + 推送 NuGet
+./scripts/publish.sh 0.1.4 --all         # 完整发布流程
+NUGET_API_KEY=xxx ./scripts/publish.sh 0.1.4 --nuget
 ```
+
+> **注意**：脚本会修改 `Directory.Build.props` 中的版本号，请确保在干净的工作目录下运行。
 
 ### 5.2 GitHub Actions 工作流
 
-**文件位置**: `.github/workflows/release.yml`
+**文件位置**: `.github/workflows/release.yml`（已实现）
 
-```yaml
-name: Release
+CI/CD 由标签触发（`v*`），包含三个并行 Job：
 
-on:
-  push:
-    tags:
-      - 'v*'
+1. **`build`** — 在 6 个平台上并行构建，构建 CLI + WebUI，输出归档文件（`nbot-<rid>.tar.gz` / `.zip`）
+2. **`release`** — 合并所有平台归档，通过 `softprops/action-gh-release` 发布到 GitHub Releases
+3. **`nuget`** — 打包并推送到 nuget.org + GitHub Packages
 
-env:
-  DOTNET_VERSION: '8.0.x'
+**环境变量**：
 
-jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            rid: linux-x64
-            archive: tar.gz
-          - os: ubuntu-latest
-            rid: linux-arm64
-            archive: tar.gz
-          - os: macos-latest
-            rid: osx-x64
-            archive: tar.gz
-          - os: macos-latest
-            rid: osx-arm64
-            archive: tar.gz
-          - os: windows-latest
-            rid: win-x64
-            archive: zip
-          - os: windows-latest
-            rid: win-arm64
-            archive: zip
+| 变量 | 值 | 说明 |
+|------|----|------|
+| `DOTNET_VERSION` | `10.0.x` | .NET SDK 版本 |
+| `BINARY_NAME` | `nbot` | 产物文件名 |
 
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Build
-        run: |
-          dotnet publish src/NanoBot.Cli/NanoBot.Cli.csproj \
-            -c Release \
-            -r ${{ matrix.rid }} \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:PublishTrimmed=true \
-            -o dist
-
-      - name: Create archive (Unix)
-        if: matrix.archive == 'tar.gz'
-        run: |
-          cd dist
-          tar -czvf nanobot-${{ matrix.rid }}.tar.gz *
-
-      - name: Create archive (Windows)
-        if: matrix.archive == 'zip'
-        run: |
-          Compress-Archive -Path dist/* -DestinationPath dist/nanobot-${{ matrix.rid }}.zip
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nanobot-${{ matrix.rid }}
-          path: dist/nanobot-${{ matrix.rid }}.*
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
-
-  nuget:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Pack
-        run: |
-          dotnet pack src/NanoBot.Cli/NanoBot.Cli.csproj \
-            -c Release \
-            -p:PackageVersion=${{ github.ref_name }} \
-            -o nupkg
-
-      - name: Push to NuGet
-        run: dotnet nuget push nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }}
-
-      - name: Push to GitHub Packages
-        run: dotnet nuget push nupkg/*.nupkg --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }}
-```
+> 详见仓库中的 `.github/workflows/release.yml`。
 
 ---
 
@@ -1024,14 +613,31 @@ dotnet publish src/NanoBot.Cli/NanoBot.Cli.csproj \
 
 ## 十、实施计划
 
-| 阶段 | 任务 | 优先级 |
-|------|------|--------|
-| 1 | 实现安装脚本 (install.sh, install.ps1, install.cmd) | 高 |
-| 2 | 配置 GitHub Actions 发布流程 | 高 |
-| 3 | 创建 Homebrew Tap 和 Formula | 中 |
-| 4 | 提交 Winget manifest 到 microsoft/winget-pkgs | 中 |
-| 5 | 发布到 NuGet (dotnet tool) | 中 |
-| 6 | 文档更新 (README 安装说明) | 低 |
+| 阶段 | 任务 | 状态 | 说明 |
+|------|------|------|------|
+| 1 | 实现安装脚本 (`install.sh`, `install.ps1`) | ✅ 已完成 | `install/` 目录下已实现。`install.cmd` 可选（PowerShell 脚本已覆盖 Windows）。 |
+| 2 | 配置 GitHub Actions 发布流程 | ✅ 已完成 | `.github/workflows/release.yml` 已实现 6 平台 + release + nuget job。升级到 .NET 10。 |
+| 3 | 创建 Homebrew Formula | ✅ 已完成 | `install/homebrew-nanobot/Formula/nbot.rb` 已创建。需创建 Tap 仓库（`mbzcnet/homebrew-tap`）并推送 formula。 |
+| 4 | 提交 Winget manifest | ⏳ 待处理 | 需创建 manifest 文件并提交到 `microsoft/winget-pkgs`。 |
+| 5 | 发布到 NuGet (dotnet tool) | ✅ 已完成 | `dotnet pack` + `dotnet nuget push` 已集成到 CI 和 `publish.sh`。 |
+| 6 | 文档更新 (README 安装说明) | ⏳ 待处理 | README 需添加一行安装命令。 |
+| 7 | NativeAOT 正式启用 | ⏳ 待处理 | 需收敛 JSON AOT 警告后，`publish.sh --aot` 可正式启用。 |
+
+### 下一步：创建 Homebrew Tap
+
+Homebrew Tap 仓库需独立创建（不能与主仓库同一目录）：
+
+```bash
+# 1. 在 GitHub 创建 mbzcnet/homebrew-tap 仓库
+# 2. Clone 并推送初始 formula
+git clone https://github.com/mbzcnet/homebrew-tap.git
+cp NanoBot.Net/install/homebrew-nanobot/Formula/nbot.rb homebrew-tap/Formula/
+cd homebrew-tap
+git add Formula/nbot.rb
+git commit -m "Add nbot formula"
+git push origin main
+# 3. 之后 release 时由 publish.sh 自动更新 sha256 并推送
+```
 
 ---
 

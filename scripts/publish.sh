@@ -39,6 +39,10 @@ WEBUI_DIR_NAME="webui"
 FORMULA_FILE="install/homebrew-nanobot/Formula/nbot.rb"
 BINARY_NAME="nbot"
 
+# Default to Self-contained + SingleFile + Trimmed
+# Set USE_AOT=true to prefer NativeAOT (requires successful AOT compilation)
+USE_AOT="${USE_AOT:-false}"
+
 HOMEBREW_TAP_REPO="${HOMEBREW_TAP_REPO:-mbzcnet/homebrew-tap}"
 HOMEBREW_TAP_BRANCH="${HOMEBREW_TAP_BRANCH:-main}"
 
@@ -70,6 +74,7 @@ usage() {
     echo "  --update-formula   Update Homebrew Formula sha256"
     echo "  --push-tap         Push formula to homebrew-tap repository"
     echo "  --nuget            Push package to NuGet.org"
+    echo "  --aot              Prefer NativeAOT (falls back to self-contained if AOT fails)"
     echo "  --all              Full release workflow"
     echo ""
     echo "Environment Variables:"
@@ -77,14 +82,15 @@ usage() {
     echo "  NUGET_API_KEY        NuGet API key (required for --nuget)"
     echo "  HOMEBREW_TAP_REPO    Tap repository (default: mbzcnet/homebrew-tap)"
     echo "  HOMEBREW_TAP_BRANCH  Tap branch (default: main)"
+    echo "  USE_AOT              Set to 'true' to prefer NativeAOT builds"
     echo ""
     echo "Examples:"
-    echo "  $0 0.1.0                              # Build only"
-    echo "  $0 0.1.0 --tag                        # Build and push tag"
-    echo "  $0 0.1.0 --update-formula             # Update formula (release must exist)"
-    echo "  $0 0.1.0 --push-tap                   # Update formula and push to tap"
-    echo "  $0 0.1.0 --nuget                      # Build and push to NuGet"
-    echo "  $0 0.1.0 --all                        # Full release workflow"
+    echo "  $0 0.1.0                              # Build only (self-contained)"
+    echo "  $0 0.1.0 --aot                       # Build with NativeAOT"
+    echo "  $0 0.1.0 --tag                       # Build and push tag"
+    echo "  $0 0.1.0 --push-tap                  # Update formula and push to tap"
+    echo "  $0 0.1.0 --nuget                     # Build and push to NuGet"
+    echo "  $0 0.1.0 --all                       # Full release workflow"
     exit 1
 }
 
@@ -100,6 +106,7 @@ parse_args() {
     DO_UPDATE_FORMULA=false
     DO_PUSH_TAP=false
     DO_NUGET=false
+    DO_AOT=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -118,6 +125,10 @@ parse_args() {
                 ;;
             --nuget)
                 DO_NUGET=true
+                shift
+                ;;
+            --aot)
+                DO_AOT=true
                 shift
                 ;;
             --all)
@@ -141,20 +152,27 @@ parse_args() {
 
 update_version_in_props() {
     step "Updating version in Directory.Build.props..."
-    
+
     local props_file="Directory.Build.props"
-    
+
     if [[ ! -f "$props_file" ]]; then
         error "Directory.Build.props not found at project root"
     fi
-    
-    sed -i.bak "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" "$props_file"
-    sed -i.bak "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION<\/AssemblyVersion>/" "$props_file"
-    sed -i.bak "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION<\/FileVersion>/" "$props_file"
-    sed -i.bak "s/<InformationalVersion>.*<\/InformationalVersion>/<InformationalVersion>$VERSION<\/InformationalVersion>/" "$props_file"
-    
-    rm -f "${props_file}.bak"
-    
+
+    # macOS-compatible: use -i '' (empty suffix) to edit in place without backup
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        sed -i '' "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" "$props_file"
+        sed -i '' "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION<\/AssemblyVersion>/" "$props_file"
+        sed -i '' "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION<\/FileVersion>/" "$props_file"
+        sed -i '' "s/<InformationalVersion>.*<\/InformationalVersion>/<InformationalVersion>$VERSION<\/InformationalVersion>/" "$props_file"
+    else
+        sed -i.bak "s/<Version>.*<\/Version>/<Version>$VERSION<\/Version>/" "$props_file"
+        sed -i '' "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>$VERSION<\/AssemblyVersion>/" "$props_file"
+        sed -i '' "s/<FileVersion>.*<\/FileVersion>/<FileVersion>$VERSION<\/FileVersion>/" "$props_file"
+        sed -i '' "s/<InformationalVersion>.*<\/InformationalVersion>/<InformationalVersion>$VERSION<\/InformationalVersion>/" "$props_file"
+        rm -f "${props_file}.bak"
+    fi
+
     info "Updated Directory.Build.props with version $VERSION"
     echo ""
     step "Directory.Build.props content:"
@@ -227,36 +245,69 @@ build_all_platforms() {
         echo ""
         info "Building for $PLATFORM..."
 
-        dotnet publish "$PROJECT" \
-            -c Release \
-            -r "$PLATFORM" \
-            --self-contained true \
-            -p:PublishSingleFile=true \
-            -p:PublishTrimmed=true \
-            -o "$OUTPUT_DIR/$PLATFORM"
+        local cli_out="$OUTPUT_DIR/$PLATFORM/cli"
+        local webui_out="$OUTPUT_DIR/$PLATFORM/webui"
 
-        local webui_output="$OUTPUT_DIR/$PLATFORM/$WEBUI_DIR_NAME"
-        info "Publishing WebUI for $PLATFORM into $webui_output..."
-        rm -rf "$webui_output"
+        # Choose publish profile
+        local aot_suffix=""
+        if [[ "$DO_AOT" == "true" || "$USE_AOT" == "true" ]]; then
+            if dotnet publish "$PROJECT" \
+                -c Release \
+                -r "$PLATFORM" \
+                --self-contained true \
+                -p:PublishAot=true \
+                -p:InvariantGlobalization=true \
+                -p:StripSymbols=true \
+                -o "$cli_out" 2>&1 | grep -qiE "error|warning.*error"; then
+                warn "NativeAOT build failed for $PLATFORM — falling back to self-contained."
+                rm -rf "$cli_out"
+                dotnet publish "$PROJECT" \
+                    -c Release \
+                    -r "$PLATFORM" \
+                    --self-contained true \
+                    -p:PublishSingleFile=true \
+                    -p:PublishTrimmed=true \
+                    -o "$cli_out"
+                aot_suffix="-sc"
+            else
+                aot_suffix="-aot"
+                info "NativeAOT build succeeded for $PLATFORM"
+            fi
+        else
+            dotnet publish "$PROJECT" \
+                -c Release \
+                -r "$PLATFORM" \
+                --self-contained true \
+                -p:PublishSingleFile=true \
+                -p:PublishTrimmed=true \
+                -o "$cli_out"
+        fi
+
+        info "Publishing WebUI for $PLATFORM..."
         dotnet publish "$WEBUI_PROJECT" \
             -c Release \
             -r "$PLATFORM" \
             --self-contained true \
-            -o "$webui_output"
-        
+            -o "$webui_out"
+
+        # Copy webui assets into cli dir so the final archive contains both
+        mkdir -p "$cli_out/webui"
+        cp -r "$webui_out/"* "$cli_out/webui/" 2>/dev/null || true
+
         cd "$OUTPUT_DIR"
+        local archive_name="${BINARY_NAME}-${PLATFORM}${aot_suffix}"
         if [[ "$PLATFORM" == win-* ]]; then
-            rm -f "$BINARY_NAME-$PLATFORM.zip"
-            zip -rq "$BINARY_NAME-$PLATFORM.zip" "$PLATFORM"
-            info "Created: $BINARY_NAME-$PLATFORM.zip"
+            rm -f "$archive_name.zip"
+            zip -rq "$archive_name.zip" "$PLATFORM"
+            info "Created: $archive_name.zip"
         else
-            rm -f "$BINARY_NAME-$PLATFORM.tar.gz"
-            tar -czvf "$BINARY_NAME-$PLATFORM.tar.gz" "$PLATFORM" 2>/dev/null
-            info "Created: $BINARY_NAME-$PLATFORM.tar.gz"
+            rm -f "$archive_name.tar.gz"
+            tar -czvf "$archive_name.tar.gz" "$PLATFORM" 2>/dev/null
+            info "Created: $archive_name.tar.gz"
         fi
         cd - > /dev/null
     done
-    
+
     echo ""
     step "Build artifacts:"
     ls -lh "$OUTPUT_DIR"/*.{tar.gz,zip} 2>/dev/null || true
@@ -327,70 +378,57 @@ calculate_sha256() {
 
 update_homebrew_formula() {
     step "Updating Homebrew Formula sha256..."
-    
+
     local base_url="https://github.com/$REPO/releases/download/v$VERSION"
     local formula_path="$FORMULA_FILE"
-    
+
     if [[ ! -f "$formula_path" ]]; then
         error "Formula file not found: $formula_path"
     fi
-    
+
     info "Downloading artifacts and calculating sha256..."
     echo ""
-    
+
     declare -A sha256_hashes
-    
-    sha256_hashes["osx-x64"]=$(calculate_sha256 "$base_url/$BINARY_NAME-osx-x64.tar.gz")
+
+    sha256_hashes["osx-x64"]=$(calculate_sha256 "$base_url/${BINARY_NAME}-osx-x64.tar.gz")
     info "  osx-x64:   ${sha256_hashes[osx-x64]}"
-    
-    sha256_hashes["osx-arm64"]=$(calculate_sha256 "$base_url/$BINARY_NAME-osx-arm64.tar.gz")
+
+    sha256_hashes["osx-arm64"]=$(calculate_sha256 "$base_url/${BINARY_NAME}-osx-arm64.tar.gz")
     info "  osx-arm64: ${sha256_hashes[osx-arm64]}"
-    
-    sha256_hashes["linux-x64"]=$(calculate_sha256 "$base_url/$BINARY_NAME-linux-x64.tar.gz")
+
+    sha256_hashes["linux-x64"]=$(calculate_sha256 "$base_url/${BINARY_NAME}-linux-x64.tar.gz")
     info "  linux-x64: ${sha256_hashes[linux-x64]}"
-    
-    sha256_hashes["linux-arm64"]=$(calculate_sha256 "$base_url/$BINARY_NAME-linux-arm64.tar.gz")
+
+    sha256_hashes["linux-arm64"]=$(calculate_sha256 "$base_url/${BINARY_NAME}-linux-arm64.tar.gz")
     info "  linux-arm64: ${sha256_hashes[linux-arm64]}"
-    
+
     echo ""
     step "Updating $formula_path..."
-    
-    sed -i.bak "s/^  version \".*\"/  version \"$VERSION\"/" "$formula_path"
-    
-    sed -i.bak "s/sha256 \"TODO:.*\"/sha256 \"${sha256_hashes[osx-x64]}\"/" "$formula_path"
-    
-    local temp_file=$(mktemp)
-    local current_section=""
-    local current_arch=""
-    
-    while IFS= read -r line; do
-        if [[ "$line" == *"on_macos do" ]]; then
-            current_section="macos"
-        elif [[ "$line" == *"on_linux do" ]]; then
-            current_section="linux"
-        elif [[ "$line" == *"on_intel do" ]]; then
-            current_arch="intel"
-        elif [[ "$line" == *"on_arm do" ]]; then
-            current_arch="arm"
-        elif [[ "$line" == *"sha256"* ]]; then
-            if [[ "$current_section" == "macos" && "$current_arch" == "intel" ]]; then
-                line="      sha256 \"${sha256_hashes[osx-x64]}\""
-            elif [[ "$current_section" == "macos" && "$current_arch" == "arm" ]]; then
-                line="      sha256 \"${sha256_hashes[osx-arm64]}\""
-            elif [[ "$current_section" == "linux" && "$current_arch" == "intel" ]]; then
-                line="      sha256 \"${sha256_hashes[linux-x64]}\""
-            elif [[ "$current_section" == "linux" && "$current_arch" == "arm" ]]; then
-                line="      sha256 \"${sha256_hashes[linux-arm64]}\""
-            fi
-        fi
-        echo "$line" >> "$temp_file"
-    done < "$formula_path"
-    
-    mv "$temp_file" "$formula_path"
-    rm -f "${formula_path}.bak"
-    
+
+    # Replace version line
+    sed -i '' "s/^  version \".*\"/  version \"$VERSION\"/" "$formula_path"
+
+    # Replace each sha256 line in order of appearance:
+    # 1st  sha256  → osx-x64
+    # 2nd  sha256  → osx-arm64
+    # 3rd  sha256  → linux-x64
+    # 4th  sha256  → linux-arm64
+    local sha_lines=(
+        "${sha256_hashes[osx-x64]}"
+        "${sha256_hashes[osx-arm64]}"
+        "${sha256_hashes[linux-x64]}"
+        "${sha256_hashes[linux-arm64]}"
+    )
+
+    local idx=1
+    for hash in "${sha_lines[@]}"; do
+        sed -i '' "${idx}s/sha256 \".*\"/sha256 \"$hash\"/" "$formula_path"
+        idx=$((idx + 1))
+    done
+
     info "Formula updated successfully!"
-    
+
     echo ""
     step "Updated formula content:"
     cat "$formula_path"
@@ -512,7 +550,11 @@ main() {
 
     update_version_in_props
 
-    build_all_platforms
+    if [[ "$DO_AOT" == "true" ]]; then
+        USE_AOT=true build_all_platforms
+    else
+        build_all_platforms
+    fi
     
     if [[ "$DO_TAG" == true ]]; then
         echo ""

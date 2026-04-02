@@ -6,7 +6,8 @@ on:
       - 'v*'
 
 env:
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '10.0.x'
+  BINARY_NAME: 'nbot'
 
 jobs:
   build:
@@ -49,24 +50,37 @@ jobs:
             --self-contained true `
             -p:PublishSingleFile=true `
             -p:PublishTrimmed=true `
-            -o dist
+            -o dist/cli
+
+      - name: Build WebUI
+        run: |
+          dotnet publish src/NanoBot.WebUI/NanoBot.WebUI.csproj `
+            -c Release `
+            -r ${{ matrix.rid }} `
+            --self-contained true `
+            -o dist/webui
+
+      - name: Merge WebUI into CLI dist
+        run: |
+          mkdir -p dist/cli/webui
+          cp -r dist/webui/* dist/cli/webui/
 
       - name: Create archive (Unix)
         if: matrix.archive == 'tar.gz'
         run: |
-          cd dist
-          tar -czvf nanobot-${{ matrix.rid }}.tar.gz *
+          cd dist/cli
+          tar -czvf ${{ env.BINARY_NAME }}-${{ matrix.rid }}.tar.gz *
 
       - name: Create archive (Windows)
         if: matrix.archive == 'zip'
         run: |
-          Compress-Archive -Path dist/* -DestinationPath dist/nanobot-${{ matrix.rid }}.zip
+          Compress-Archive -Path dist/cli/* -DestinationPath dist/${{ env.BINARY_NAME }}-${{ matrix.rid }}.zip
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nanobot-${{ matrix.rid }}
-          path: dist/nanobot-${{ matrix.rid }}.*
+          name: ${{ env.BINARY_NAME }}-${{ matrix.rid }}
+          path: dist/${{ env.BINARY_NAME }}-${{ matrix.rid }}.*
 
   release:
     needs: build

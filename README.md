@@ -3,7 +3,7 @@
 <div align="center">
   <h1>NanoBot.Net: Ultra-Lightweight Personal AI Assistant for .NET</h1>
   <p>
-    <img src="https://img.shields.io/badge/.NET-8.0+-512BD4" alt=".NET">
+    <img src="https://img.shields.io/badge/.NET-10.0-512BD4" alt=".NET">
     <img src="https://img.shields.io/badge/C%23-12.0-239120" alt="C#">
     <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
     <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue" alt="Platforms">
@@ -55,14 +55,14 @@ nbot --version
 ### Windows (PowerShell)
 
 ```powershell
-irm https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/mbzcnet/NanoBot.Net/main/install/install.ps1 | iex
 nbot --version
 ```
 
 ### curl (macOS / Linux / WSL)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NanoBot/NanoBot.Net/main/install/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mbzcnet/NanoBot.Net/main/install/install.sh | bash
 nbot --version
 ```
 
@@ -76,7 +76,7 @@ nbot --version
 ### Build from Source
 
 ```bash
-git clone https://github.com/NanoBot/NanoBot.Net.git
+git clone https://github.com/mbzcnet/NanoBot.Net.git
 cd NanoBot.Net
 dotnet build -c Release
 dotnet run --project src/NanoBot.Cli -- --version
